@@ -6,13 +6,12 @@ namespace Emby.Plugins.WatchTogether.Tests
     public class PluginPagesTests
     {
         [Fact]
-        public void PluginAssembly_EmbedsWatchTogetherPage()
+        public void PluginAssembly_EmbedsWatchTogetherPageAndController()
         {
-            var resource = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html";
-
             var names = typeof(Plugin).Assembly.GetManifestResourceNames();
 
-            Assert.Contains(resource, names);
+            Assert.Contains("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", names);
+            Assert.Contains("Emby.Plugins.WatchTogether.Configuration.WatchTogether.js", names);
         }
     }
 }

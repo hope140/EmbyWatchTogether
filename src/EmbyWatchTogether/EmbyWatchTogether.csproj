@@ -19,5 +19,8 @@
     <EmbeddedResource Include="Web\Configuration\watchtogether.html">
       <LogicalName>Emby.Plugins.WatchTogether.Configuration.watchtogether.html</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Web\Configuration\watchtogether.js">
+      <LogicalName>Emby.Plugins.WatchTogether.Configuration.WatchTogether.js</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 </Project>
