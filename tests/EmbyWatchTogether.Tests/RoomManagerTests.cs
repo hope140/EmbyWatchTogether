@@ -182,6 +182,30 @@ namespace Emby.Plugins.WatchTogether.Tests
                 "missing", "pause", new Dictionary<string, SessionSnapshot>(), null, DateTimeOffset.UtcNow));
         }
 
+        [Fact]
+        public void SetParticipantJoined_TogglesMembershipAndResetsRuntime()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            manager.GetRuntime(room.Id).State = RoomState.Watching;
+
+            Assert.True(manager.SetParticipantJoined(room.Id, "u2", false));
+            Assert.False(room.IsJoined("u2"));
+            Assert.Equal(RoomState.Waiting, manager.GetRuntime(room.Id).State);
+            Assert.False(manager.SetParticipantJoined(room.Id, "u2", false));
+            Assert.True(manager.SetParticipantJoined(room.Id, "u2", true));
+            Assert.True(room.IsJoined("u2"));
+        }
+
+        [Fact]
+        public void SetParticipantJoined_RejectsNonMember()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+
+            Assert.Throws<KeyNotFoundException>(() => manager.SetParticipantJoined(room.Id, "u3", false));
+        }
+
         private sealed class FakeIssuer : ICommandIssuer
         {
             public bool AcceptAll { get; set; } = true;

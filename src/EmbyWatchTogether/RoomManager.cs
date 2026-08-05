@@ -87,7 +87,7 @@ namespace Emby.Plugins.WatchTogether
                     }
                 }
 
-                var room = new Room(
+                    var room = new Room(
                     id: Guid.NewGuid().ToString("N"),
                     serverId: serverId,
                     serverUrl: serverUrl ?? string.Empty,
@@ -95,6 +95,7 @@ namespace Emby.Plugins.WatchTogether
                     adminUserId: adminUserId,
                     primaryUserId: primaryUserId,
                     participantUserIds: members,
+                    joinedParticipantUserIds: members,
                     createdAtUtc: now ?? DateTimeOffset.UtcNow);
 
                 _rooms[room.Id] = room;
@@ -157,6 +158,22 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 return runtime;
+            }
+        }
+
+        public bool SetParticipantJoined(string roomId, string userId, bool joined)
+        {
+            lock (_lock)
+            {
+                if (!_rooms.TryGetValue(roomId ?? string.Empty, out var room) || !room.HasParticipant(userId))
+                {
+                    throw new KeyNotFoundException("room participant not found");
+                }
+
+                if (!room.SetJoined(userId, joined)) return false;
+                GetRuntime(roomId).ResetToWaiting();
+                _store?.Update(room);
+                return true;
             }
         }
 

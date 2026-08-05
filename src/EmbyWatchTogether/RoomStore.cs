@@ -102,6 +102,17 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        public void Update(Room room)
+        {
+            if (room == null) throw new ArgumentNullException(nameof(room));
+            lock (_lock)
+            {
+                if (!_rooms.ContainsKey(room.Id)) throw new RoomStoreException($"room not found: {room.Id}");
+                _rooms[room.Id] = room;
+                Write();
+            }
+        }
+
         private void Reload()
         {
             if (!File.Exists(_filePath))
@@ -195,6 +206,8 @@ namespace Emby.Plugins.WatchTogether
 
         public List<string> ParticipantUserIds { get; set; }
 
+        public List<string> JoinedParticipantUserIds { get; set; }
+
         public string CreatedAtUtc { get; set; }
 
         public static RoomDto From(Room room)
@@ -208,6 +221,7 @@ namespace Emby.Plugins.WatchTogether
                 AdminUserId = room.AdminUserId,
                 PrimaryUserId = room.PrimaryUserId,
                 ParticipantUserIds = room.ParticipantUserIds.ToList(),
+                JoinedParticipantUserIds = room.JoinedParticipantUserIds.ToList(),
                 CreatedAtUtc = room.CreatedAtUtc.ToString("o"),
             };
         }
@@ -222,6 +236,7 @@ namespace Emby.Plugins.WatchTogether
                 AdminUserId,
                 PrimaryUserId,
                 ParticipantUserIds ?? new List<string>(),
+                JoinedParticipantUserIds ?? ParticipantUserIds,
                 DateTimeOffset.Parse(CreatedAtUtc));
         }
     }

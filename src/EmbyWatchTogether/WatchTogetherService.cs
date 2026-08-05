@@ -47,6 +47,12 @@ namespace Emby.Plugins.WatchTogether
         public string Id { get; set; }
     }
 
+    [Route("/WatchTogether/Rooms/{Id}/Leave", "POST")]
+    public class LeaveRoomRequest
+    {
+        public string Id { get; set; }
+    }
+
     [Route("/WatchTogether/Rooms/{Id}/Message", "POST")]
     public class SendRoomMessageRequest
     {
@@ -67,10 +73,12 @@ namespace Emby.Plugins.WatchTogether
     {
         public object Get(GetRoomsRequest request)
         {
-            RequireAdmin();
             var plugin = RequirePlugin();
+            string currentUserId = CurrentUserId();
+            bool admin = IsAdmin();
             return plugin.Rooms.ListRooms().Select(r =>
             {
+                if (!admin && !r.HasParticipant(currentUserId)) return null;
                 var runtime = plugin.Rooms.GetRuntime(r.Id);
                 return new
                 {
@@ -80,9 +88,12 @@ namespace Emby.Plugins.WatchTogether
                     Error = runtime.Error,
                     PrimaryUserId = r.PrimaryUserId,
                     ParticipantUserIds = r.ParticipantUserIds,
+                    JoinedParticipantUserIds = r.JoinedParticipantUserIds,
+                    CurrentUserJoined = r.IsJoined(currentUserId),
+                    IsAdmin = admin,
                     CreatedAtUtc = r.CreatedAtUtc,
                 };
-            }).ToList();
+            }).Where(x => x != null).ToList();
         }
 
         public object Post(CreateRoomRequest request)
@@ -168,8 +179,11 @@ namespace Emby.Plugins.WatchTogether
                 State = runtime.State.ToString(),
                 Error = runtime.Error,
                 Eligible = RoomEligibility.IsPairEligible(snapshots),
+                SyncItemId = runtime.SyncItemId,
                 PrimaryUserId = room.PrimaryUserId,
                 ParticipantUserIds = room.ParticipantUserIds,
+                JoinedParticipantUserIds = room.JoinedParticipantUserIds,
+                CurrentUserJoined = room.IsJoined(CurrentUserId()),
                 Sessions = snapshots.Values.Select(s => new
                 {
                     UserId = s.UserId,
@@ -185,7 +199,34 @@ namespace Emby.Plugins.WatchTogether
 
         public object Post(JoinRoomRequest request)
         {
+            var plugin = RequirePlugin();
+            string userId = CurrentUserId();
+            var room = plugin.Rooms.GetRoom(request.Id);
+            if (room == null || !room.HasParticipant(userId)) throw new UnauthorizedAccessException("not a room participant");
+            plugin.Rooms.SetParticipantJoined(request.Id, userId, true);
             return Get(new GetRoomStateRequest { Id = request.Id });
+        }
+
+        public object Post(LeaveRoomRequest request)
+        {
+            var plugin = RequirePlugin();
+            string userId = CurrentUserId();
+            var room = plugin.Rooms.GetRoom(request.Id);
+            if (room == null || !room.HasParticipant(userId)) throw new UnauthorizedAccessException("not a room participant");
+
+            plugin.Rooms.SetParticipantJoined(request.Id, userId, false);
+            var snapshots = BuildSnapshots(plugin, room);
+            if (string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                PauseOnlineParticipants(plugin, room, snapshots);
+            }
+            else if (snapshots.TryGetValue(room.PrimaryUserId, out var primary) && primary != null && primary.Online)
+            {
+                plugin.Issuer?.TryIssue(room.Id, room.AdminUserId, room.PrimaryUserId, primary,
+                    RemoteCommands.Pause, null, DateTimeOffset.UtcNow, out _);
+            }
+
+            return new { RoomId = request.Id, Joined = false };
         }
 
         public object Post(SendRoomMessageRequest request)
@@ -241,7 +282,19 @@ namespace Emby.Plugins.WatchTogether
             var candidates = plugin.Bridge == null
                 ? new List<SessionSnapshot>()
                 : new SessionBridgeSnapshotProvider(plugin.Bridge).GetSessionSnapshots();
-            return SessionSelector.Select(candidates, room.ParticipantUserIds);
+            return SessionSelector.Select(candidates, room.JoinedParticipantUserIds);
+        }
+
+        private static void PauseOnlineParticipants(Plugin plugin, Room room, Dictionary<string, SessionSnapshot> snapshots)
+        {
+            foreach (var snapshot in snapshots.Values)
+            {
+                if (snapshot != null && snapshot.Online)
+                {
+                    plugin.Issuer?.TryIssue(room.Id, room.AdminUserId, snapshot.UserId, snapshot,
+                        RemoteCommands.Pause, null, DateTimeOffset.UtcNow, out _);
+                }
+            }
         }
 
         private static Plugin RequirePlugin()

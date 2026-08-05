@@ -23,6 +23,8 @@ namespace Emby.Plugins.WatchTogether
     /// </summary>
     public sealed class SyncEngine : IDisposable
     {
+        private const string StoppedPlaybackError = "播放已停止，等待双方重新打开同一视频";
+
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
         private readonly ICommandIssuer _issuer;
@@ -133,9 +135,54 @@ namespace Emby.Plugins.WatchTogether
                         runtime.Error = null;
                     }
 
-                    var snapshots = SessionSelector.Select(candidates, room.ParticipantUserIds);
-                    bool pendingFailed = ObservePending(runtime, room, snapshots, now);
+                    var snapshots = SessionSelector.Select(candidates, room.JoinedParticipantUserIds);
                     bool eligible = RoomEligibility.IsPairEligible(snapshots);
+                    bool sameItem = snapshots.Count == 2 &&
+                        snapshots.Values.All(s => s != null) &&
+                        snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
+
+                    // Emby may briefly retain the old ItemId after a player is closed
+                    // while reporting PositionTicks = 0. Treat that transition as a
+                    // stop, not as a user-issued seek, before observing pending commands.
+                    if (LooksLikePlaybackStopped(runtime, room, snapshots))
+                    {
+                        runtime.ResetToWaiting();
+                        runtime.Error = StoppedPlaybackError;
+                        results.Add(Result(room, runtime, eligible));
+                        continue;
+                    }
+
+                    // Do not immediately restart a stale old-item snapshot after the
+                    // stop transition. Once both sides are back near the same position,
+                    // the next poll is allowed to start a fresh barrier.
+                    if (runtime.State == RoomState.Waiting &&
+                        runtime.Error == StoppedPlaybackError)
+                    {
+                        if (sameItem && !HasLargePositionGap(snapshots))
+                        {
+                            runtime.Error = null;
+                        }
+                        else if (sameItem)
+                        {
+                            results.Add(Result(room, runtime, eligible));
+                            continue;
+                        }
+                    }
+
+                    bool pendingFailed = ObservePending(runtime, room, snapshots, now);
+                    if (!sameItem && runtime.State != RoomState.Waiting)
+                    {
+                        runtime.ResetToWaiting();
+                    }
+
+                    if (!sameItem && snapshots.Count == 2)
+                    {
+                        runtime.Error = "两位参与者打开了不同视频，暂不发送同步指令";
+                    }
+                    else if (sameItem && runtime.Error == "两位参与者打开了不同视频，暂不发送同步指令")
+                    {
+                        runtime.Error = null;
+                    }
 
                     if (pendingFailed)
                     {
@@ -155,7 +202,7 @@ namespace Emby.Plugins.WatchTogether
                         }
                         else
                         {
-                            PauseOtherWhenWaiting(runtime, room, snapshots, now);
+                            if (sameItem) PauseOtherWhenWaiting(runtime, room, snapshots, now);
                             runtime.State = RoomState.Waiting;
                             runtime.Barrier = null;
                             runtime.Previous.Clear();
@@ -182,7 +229,7 @@ namespace Emby.Plugins.WatchTogether
                     }
                     else
                     {
-                        PauseOtherWhenWaiting(runtime, room, snapshots, now);
+                        if (sameItem) PauseOtherWhenWaiting(runtime, room, snapshots, now);
                         runtime.State = RoomState.Waiting;
                         runtime.Barrier = null;
                         runtime.Previous.Clear();
@@ -233,6 +280,70 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        private static bool LooksLikePlaybackStopped(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots)
+        {
+            if (runtime == null || room == null || snapshots == null ||
+                runtime.State == RoomState.Waiting ||
+                runtime.State == RoomState.Unavailable ||
+                room.JoinedParticipantUserIds.Count != 2)
+            {
+                return false;
+            }
+
+            var members = room.JoinedParticipantUserIds;
+            if (snapshots.Count != members.Count ||
+                snapshots.Values.Any(s => s == null || !s.Online || s.Stopped))
+            {
+                return true;
+            }
+
+            if (runtime.State == RoomState.Barrier && runtime.Barrier != null &&
+                snapshots.TryGetValue(room.PrimaryUserId, out var primary) &&
+                primary != null &&
+                string.Equals(primary.ItemId, runtime.Barrier.ItemId, StringComparison.OrdinalIgnoreCase) &&
+                IsPositionReset(runtime.Barrier.PrimaryPositionTicks, primary.PositionTicks))
+            {
+                return true;
+            }
+
+            foreach (var userId in members)
+            {
+                if (!snapshots.TryGetValue(userId, out var current) || current == null ||
+                    !runtime.Previous.TryGetValue(userId, out var previous) || previous == null ||
+                    !string.Equals(previous.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (IsPositionReset(previous.PositionTicks, current.PositionTicks))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsPositionReset(long previousPositionTicks, long currentPositionTicks)
+        {
+            return previousPositionTicks > 2 * SyncConstants.TicksPerSecond &&
+                currentPositionTicks <= SyncConstants.TicksPerSecond &&
+                previousPositionTicks - currentPositionTicks >= SyncConstants.DriftThresholdTicks;
+        }
+
+        private static bool HasLargePositionGap(IReadOnlyDictionary<string, SessionSnapshot> snapshots)
+        {
+            if (snapshots == null || snapshots.Count != 2 || snapshots.Values.Any(s => s == null))
+            {
+                return false;
+            }
+
+            var positions = snapshots.Values.Select(s => s.PositionTicks).ToList();
+            return Math.Abs(positions[0] - positions[1]) > SyncConstants.DriftThresholdTicks;
+        }
         private static RoomPollResult Result(Room room, RoomRuntime runtime, bool eligible)
         {
             return new RoomPollResult
@@ -371,6 +482,7 @@ namespace Emby.Plugins.WatchTogether
                 SeekSent = false,
                 RestoreSent = false,
             };
+            runtime.SyncItemId = primary.ItemId;
             runtime.Pending.Clear();
             runtime.Suppressed.Clear();
         }
@@ -387,7 +499,14 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var barrier = runtime.Barrier;
-            var members = room.ParticipantUserIds;
+            var members = room.JoinedParticipantUserIds;
+
+            if (!snapshots.Values.All(s => s != null) ||
+                snapshots.Values.Any(s => !string.Equals(s.ItemId, barrier.ItemId, StringComparison.OrdinalIgnoreCase)))
+            {
+                runtime.ResetToWaiting();
+                return;
+            }
 
             switch (barrier.Stage)
             {
@@ -473,6 +592,7 @@ namespace Emby.Plugins.WatchTogether
 
                         runtime.PreviousAtUtc = now;
                         runtime.DriftRounds = 0;
+                        runtime.SyncItemId = barrier.ItemId;
                     }
                     else if ((now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
@@ -542,7 +662,14 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
-            var members = room.ParticipantUserIds;
+            var members = room.JoinedParticipantUserIds;
+            if (runtime.SyncItemId == null ||
+                snapshots.Count != members.Count ||
+                snapshots.Values.Any(s => s == null || !string.Equals(s.ItemId, runtime.SyncItemId, StringComparison.OrdinalIgnoreCase)))
+            {
+                runtime.ResetToWaiting();
+                return;
+            }
             var previous = runtime.Previous;
             if (runtime.PreviousAtUtc == null || previous.Count == 0)
             {

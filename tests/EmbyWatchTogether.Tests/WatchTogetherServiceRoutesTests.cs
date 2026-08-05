@@ -14,6 +14,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData(typeof(ControlRoomRequest), "/WatchTogether/Rooms/{Id}/Action", "POST")]
         [InlineData(typeof(GetRoomStateRequest), "/WatchTogether/Rooms/{Id}/State", "GET")]
         [InlineData(typeof(JoinRoomRequest), "/WatchTogether/Rooms/{Id}/Join", "POST")]
+        [InlineData(typeof(LeaveRoomRequest), "/WatchTogether/Rooms/{Id}/Leave", "POST")]
         [InlineData(typeof(SendRoomMessageRequest), "/WatchTogether/Rooms/{Id}/Message", "POST")]
         [InlineData(typeof(GetUsersRequest), "/WatchTogether/Users", "GET")]
         public void RequestDto_DeclaresExpectedRoute(Type dto, string path, string verbs)
