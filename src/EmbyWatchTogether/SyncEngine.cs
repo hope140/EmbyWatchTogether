@@ -196,14 +196,25 @@ namespace Emby.Plugins.WatchTogether
                     // stop, not as a user-issued seek, before observing pending commands.
                     if (TryGetStoppedUsers(runtime, room, snapshots, out var stoppedUsers))
                     {
-                        if (_pauseOtherOnPlaybackStop)
+                        // SessionSelector omits stopped/offline sessions, so the
+                        // same stop condition can be observed on every poll until
+                        // the participant starts again. Apply stop side effects
+                        // only on the transition into the stopped state.
+                        bool stopAlreadyHandled = string.Equals(
+                            runtime.Error,
+                            StoppedPlaybackError,
+                            StringComparison.Ordinal);
+                        if (!stopAlreadyHandled)
                         {
-                            PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
-                        }
+                            if (_pauseOtherOnPlaybackStop)
+                            {
+                                PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                            }
 
-                        if (_notifyOtherOnPlaybackStop)
-                        {
-                            NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                            if (_notifyOtherOnPlaybackStop)
+                            {
+                                NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                            }
                         }
 
                         runtime.ResetToWaiting();
