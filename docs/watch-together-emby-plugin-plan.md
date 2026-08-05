@@ -92,6 +92,15 @@ Python 版已在 `watch_together` 分支跑通并验证：
   插件页面可访问。
 - 修复服务端 ID 解析：`GetSystemInfo(null,...)` 在入口点抛异常，改为
   `GetPublicSystemInfo` + `Plugin.ResolveServerId()` 懒解析重试。
+- 修复插件页无法打开的问题（真实浏览器端到端验证通过）：
+  1. 页面必须使用 Emby Web 约定的 `.view` 根元素 + `data-controller`，不能是
+     独立 HTML 文档（Emby Web 只取 `.view`/`data-role="page"` 节点）；
+  2. 控制器 JS 必须以自己的 `PluginPageInfo`（`Name = "WatchTogether.js"`）声明，
+     Emby 按页面 Name 提供嵌入资源；
+  3. 控制器构造函数需调用 `BaseView.apply(this, arguments)`，否则
+     `this.view` 未初始化，onResume 抛错、页面停在“加载中”。
+  验证：设置抽屉“服务器”分区可见「Watch Together」菜单项；点击后页面渲染，
+  用户下拉加载 hope/qsm，房间列表正常刷新。
 - API 层验收已通过（2026-08-05，管理员 hope）：`/WatchTogether/Users` 返回 2 用户；
   建房 200 返回 RoomId；房间状态 Waiting 且参与者正确；resync 控制 200；
   消息接口 200（无在线会话时 Sent=0）；删除房间 200；最终房间数 0。

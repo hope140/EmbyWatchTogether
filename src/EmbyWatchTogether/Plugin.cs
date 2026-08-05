@@ -90,6 +90,14 @@ namespace Emby.Plugins.WatchTogether
                     MenuSection = "server",
                     MenuIcon = "videocam",
                 },
+                // Controller module for the page above. Emby serves embedded
+                // resources by page Name, so the .js resource must be declared
+                // as its own page entry (same convention as ChapterApi pages).
+                new PluginPageInfo
+                {
+                    Name = "WatchTogether.js",
+                    EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
+                },
             };
         }
     }

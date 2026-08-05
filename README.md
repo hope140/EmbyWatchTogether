@@ -54,8 +54,9 @@ etlp、mpv 代理、嵌入式 Python 或油猴脚本。
 
 - 构建与 93 个单元测试通过；已在目标服务器（`117.50.223.21:2334`，
   Emby 4.9.0.60）部署并验证：插件入口点正常启动、`/WatchTogether/*` 路由
-  注册（匿名返回 401）、插件页 `/web/configurationpage?name=WatchTogether`
-  正常返回。
+  注册（匿名返回 401）、插件页在浏览器中正常渲染（用户下拉与房间列表由
+  `/WatchTogether/Users`、`/WatchTogether/Rooms` 加载），设置抽屉「服务器」
+  分区可见菜单项。
 - 待完成：管理员登录后的 API 验收（建房/控制/消息）与双客户端实机同步测试，
   见 `docs/watch-together-emby-plugin-plan.md` 验收标准。
 

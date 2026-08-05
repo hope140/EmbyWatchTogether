@@ -1,246 +1,35 @@
-<!DOCTYPE html>
-<html lang="zh">
-<head>
-    <meta charset="utf-8">
-    <title>Watch Together</title>
-    <style>
-        body { font-family: sans-serif; padding: 1.5em; max-width: 960px; margin: 0 auto; }
-        h1 { margin-top: 0; }
-        .card { background: #1c1c1c; border: 1px solid #333; border-radius: 6px; padding: 1em; margin-bottom: 1.2em; }
-        label { display: inline-block; margin: 0.4em 0.2em 0.4em 0; }
-        select, input[type=text] { padding: 0.35em; margin-right: 0.6em; }
-        button { padding: 0.45em 0.9em; margin: 0.2em; cursor: pointer; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 0.5em; border-bottom: 1px solid #333; vertical-align: top; }
-        .state { font-weight: bold; }
-        .error { color: #e88585; }
-        .muted { color: #999; }
-        .msg { margin-top: 0.4em; }
-    </style>
-</head>
-<body>
-    <h1>Watch Together</h1>
-    <p class="muted" id="status">加载中…</p>
+<div is="emby-scroller" class="view flex flex-direction-column scrollFrameY flex-grow"
+     data-horizontal="false"
+     data-forcescrollbar="true"
+     data-centerfocus="true"
+     data-controller="__plugin/WatchTogether.js"
+     data-require="emby-input,emby-select,emby-button">
+    <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
+        <h1>Watch Together</h1>
+        <p class="sectionDescription" id="wtStatus">加载中…</p>
 
-    <div class="card">
-        <h2>创建房间</h2>
-        <div>
-            <label>房间名称 <input type="text" id="roomName" placeholder="例如：今晚的电影"></label>
+        <div class="verticalSection" style="margin-bottom:2em;">
+            <h2>创建房间</h2>
+            <div class="inputContainer">
+                <input is="emby-input" id="wtRoomName" label="房间名称" placeholder="例如：今晚的电影" />
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:1em; align-items:flex-end;">
+                <div class="selectContainer">
+                    <select is="emby-select" id="wtUserA" label="参与者 A"></select>
+                </div>
+                <div class="selectContainer">
+                    <select is="emby-select" id="wtUserB" label="参与者 B"></select>
+                </div>
+                <div class="selectContainer">
+                    <select is="emby-select" id="wtPrimary" label="主用户"></select>
+                </div>
+                <button is="emby-button" id="wtCreate" type="button" class="raised">创建房间</button>
+            </div>
         </div>
-        <div>
-            <label>参与者 A
-                <select id="userA"></select>
-            </label>
-            <label>参与者 B
-                <select id="userB"></select>
-            </label>
-            <label>主用户
-                <select id="primaryUser"></select>
-            </label>
-            <button id="createBtn">创建房间</button>
+
+        <div class="verticalSection">
+            <h2>房间列表</h2>
+            <div id="wtRooms" class="sectionDescription"></div>
         </div>
     </div>
-
-    <div class="card">
-        <h2>房间列表</h2>
-        <table>
-            <thead>
-            <tr>
-                <th>名称</th>
-                <th>状态</th>
-                <th>参与者</th>
-                <th>操作</th>
-            </tr>
-            </thead>
-            <tbody id="roomsBody"></tbody>
-        </table>
-    </div>
-
-    <script>
-        'use strict';
-
-        var ApiClient = window.ApiClient;
-        var baseUrl = '';
-
-        function authHeaders() {
-            if (!ApiClient) return {};
-            var token = typeof ApiClient.accessToken === 'function' ? ApiClient.accessToken() : '';
-            return { 'Authorization': 'MediaBrowser Token="' + token + '"' };
-        }
-
-        async function api(path, method) {
-            var options = { method: method || 'GET', headers: authHeaders() };
-            var res = await fetch(baseUrl + path, options);
-            if (!res.ok) {
-                var text = await res.text().catch(function () { return ''; });
-                throw new Error(res.status + ': ' + (text || res.statusText));
-            }
-            if (res.status === 204) return null;
-            return res.json();
-        }
-
-        async function apiPost(path, body) {
-            var options = {
-                method: 'POST',
-                headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
-                body: JSON.stringify(body || {})
-            };
-            var res = await fetch(baseUrl + path, options);
-            if (!res.ok) {
-                var text = await res.text().catch(function () { return ''; });
-                throw new Error(res.status + ': ' + (text || res.statusText));
-            }
-            return res.json();
-        }
-
-        function setStatus(text, isError) {
-            var el = document.getElementById('status');
-            el.textContent = text;
-            el.className = isError ? 'error' : 'muted';
-        }
-
-        function fillSelect(select, users, selected) {
-            select.innerHTML = '';
-            users.forEach(function (u) {
-                var opt = document.createElement('option');
-                opt.value = u.Id;
-                opt.textContent = u.Name;
-                if (u.Id === selected) opt.selected = true;
-                select.appendChild(opt);
-            });
-        }
-
-        function ensureDistinct() {
-            var a = document.getElementById('userA');
-            var b = document.getElementById('userB');
-            if (a.value === b.value && a.options.length > 1) {
-                var idx = (a.selectedIndex + 1) % a.options.length;
-                b.selectedIndex = idx;
-            }
-        }
-
-        var users = [];
-
-        async function loadUsers() {
-            try {
-                users = await api('/WatchTogether/Users');
-                fillSelect(document.getElementById('userA'), users);
-                fillSelect(document.getElementById('userB'), users);
-                fillSelect(document.getElementById('primaryUser'), users);
-                ensureDistinct();
-            } catch (e) {
-                setStatus('无法加载用户列表（需要管理员权限）：' + e.message, true);
-            }
-        }
-
-        async function loadRooms() {
-            try {
-                var rooms = await api('/WatchTogether/Rooms');
-                var body = document.getElementById('roomsBody');
-                body.innerHTML = '';
-                if (!rooms || rooms.length === 0) {
-                    body.innerHTML = '<tr><td colspan="4" class="muted">暂无房间</td></tr>';
-                    return;
-                }
-                rooms.forEach(function (room) {
-                    var tr = document.createElement('tr');
-                    var participants = (room.ParticipantUserIds || []).map(function (id) {
-                        var u = users.find(function (x) { return x.Id === id; });
-                        return u ? u.Name : id;
-                    }).join(' / ');
-
-                    tr.innerHTML =
-                        '<td>' + escapeHtml(room.Name || '(未命名)') + '</td>' +
-                        '<td class="state">' + escapeHtml(room.State || '') +
-                        (room.Error ? '<div class="error">' + escapeHtml(room.Error) + '</div>' : '') + '</td>' +
-                        '<td>' + escapeHtml(participants) + '</td>' +
-                        '<td>' +
-                        '<button data-act="pause">暂停</button>' +
-                        '<button data-act="resume">继续</button>' +
-                        '<button data-act="resync">重新同步</button>' +
-                        '<button data-act="delete">删除</button>' +
-                        '<div class="msg"><input type="text" placeholder="消息内容" style="width:55%">' +
-                        '<button data-act="message">发送消息</button></div>' +
-                        '</td>';
-
-                    tr.querySelector('[data-act="pause"]').addEventListener('click', function () {
-                        control(room.RoomId, 'pause');
-                    });
-                    tr.querySelector('[data-act="resume"]').addEventListener('click', function () {
-                        control(room.RoomId, 'resume');
-                    });
-                    tr.querySelector('[data-act="resync"]').addEventListener('click', function () {
-                        control(room.RoomId, 'resync');
-                    });
-                    tr.querySelector('[data-act="delete"]').addEventListener('click', function () {
-                        api('/WatchTogether/Rooms/' + encodeURIComponent(room.RoomId), 'DELETE')
-                            .then(loadRooms)
-                            .catch(function (e) { setStatus('删除失败：' + e.message, true); });
-                    });
-                    tr.querySelector('[data-act="message"]').addEventListener('click', function () {
-                        var text = tr.querySelector('.msg input').value;
-                        if (!text) return;
-                        apiPost('/WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/Message', { Text: text })
-                            .then(function () { setStatus('消息已发送'); })
-                            .catch(function (e) { setStatus('消息发送失败：' + e.message, true); });
-                    });
-                    body.appendChild(tr);
-                });
-                setStatus('已刷新 ' + rooms.length + ' 个房间');
-            } catch (e) {
-                setStatus('房间加载失败：' + e.message, true);
-            }
-        }
-
-        function control(roomId, action) {
-            apiPost('/WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Action', { Action: action })
-                .then(loadRooms)
-                .catch(function (e) { setStatus('操作失败：' + e.message, true); });
-        }
-
-        function escapeHtml(value) {
-            return String(value).replace(/[&<>"']/g, function (c) {
-                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-            });
-        }
-
-        document.getElementById('createBtn').addEventListener('click', function () {
-            var name = document.getElementById('roomName').value.trim();
-            ensureDistinct();
-            var a = document.getElementById('userA').value;
-            var b = document.getElementById('userB').value;
-            var primary = document.getElementById('primaryUser').value;
-            if (!name || !a || !b || a === b) {
-                setStatus('请填写房间名称并选择两名不同参与者', true);
-                return;
-            }
-            apiPost('/WatchTogether/Rooms', {
-                Name: name,
-                ParticipantUserIds: [a, b],
-                PrimaryUserId: primary
-            }).then(function () {
-                setStatus('房间已创建');
-                document.getElementById('roomName').value = '';
-                return loadRooms();
-            }).catch(function (e) {
-                setStatus('创建失败：' + e.message, true);
-            });
-        });
-
-        document.getElementById('userA').addEventListener('change', ensureDistinct);
-        document.getElementById('userB').addEventListener('change', ensureDistinct);
-
-        if (window.ApiClient) {
-            baseUrl = typeof window.ApiClient.serverAddress === 'function'
-                ? window.ApiClient.serverAddress()
-                : '';
-        } else {
-            setStatus('未检测到 Emby Web ApiClient，页面需在 Emby Dashboard 内打开', true);
-        }
-
-        loadUsers();
-        loadRooms();
-        setInterval(loadRooms, 5000);
-    </script>
-</body>
-</html>
+</div>
