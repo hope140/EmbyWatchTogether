@@ -1,0 +1,18 @@
+# .NET / C#
+bin/
+obj/
+*.user
+*.suo
+
+# Build output / packaging
+artifacts/
+dist/
+*.dll
+*.pdb
+
+# Reference implementation cache (read-only porting blueprint)
+reference/__pycache__/
+
+# Logs / temp
+*.log
+.tmp/
