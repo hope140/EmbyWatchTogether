@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.1.90" />
+    <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.0.52-beta" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 

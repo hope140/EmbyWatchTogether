@@ -75,3 +75,17 @@ Python 版已在 `watch_together` 分支跑通并验证：
 - 本分支 `codex/emby-plugin-watchtogether` 即插件开发分支
 - 参考实现：`watch_together` 分支的 `utils/watch_together_coordinator.py` 与 `utils/emby_session_api.py`
 - 流程规范：仓库 `AGENTS.md` 与 `docs/pr-stack-workflow.md` 的 PR Stack 工作流
+
+## 实施记录与偏差（2026-08-05）
+
+- 分支已重写为插件专用孤儿历史，参考实现收于 `reference/python-watch-together/`。
+- NuGet 无 `4.9.0.60` 包：实测目标服务器（`117.50.223.21:2334`）为 Emby
+  `4.9.0.60`，故插件采用同 4.9.0.x 线的最新可用包
+  `MediaBrowser.Server.Core 4.9.0.52-beta`（netstandard2.0），编译期 API 与
+  服务端小版本保持一致；运行时程序集按简单名绑定到服务端自带的 4.9.0.60。
+- C# 实现已完成 S1-S6（骨架/能力探测、SessionBridge、RoomManager+状态机、SyncEngine、
+  REST API+JSON 持久化、Dashboard 页面），S7 提供 `scripts/build.ps1` 打包。
+- 状态机采用参考实现的真实状态（waiting/barrier/watching/unavailable），与本文档
+  早期“waiting→syncing→paused→ended”命名不同，语义一致。
+- 实机验收（双客户端同步、DisplayMessage/Seek 行为、主菜单入口呈现）未在本机执行，
+  需在真实 Emby 4.9 服务器上按验收标准逐项确认。
