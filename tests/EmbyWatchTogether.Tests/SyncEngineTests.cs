@@ -303,6 +303,120 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void WatchingTick_PendingSeekDoesNotRepeatOrReverseUntilAcknowledged()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+            Assert.True(_rooms.GetRuntime(room.Id).Pending.TryGetValue("u2", out var pending));
+            Assert.Equal(RemoteCommands.Seek, pending.Command);
+
+            // Several rounds with an unchanged backend position must not repeat
+            // the pending seek before its timeout.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 54 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 55 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+            Assert.DoesNotContain(_issuer.Issued, i =>
+                i.userId == "u1" && i.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingTick_AcknowledgedSeekAllowsLaterCorrection()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+
+            // The target position acknowledges the pending seek.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 54 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.DoesNotContain(RemoteCommands.Seek, _rooms.GetRuntime(room.Id).Pending.Values.Select(p => p.Command));
+
+            // Once acknowledged, a later sustained drift can issue another seek.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 54 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(6);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+            Assert.Contains(_issuer.Issued, i =>
+                i.userId == "u2" && i.command == RemoteCommands.Seek &&
+                i.positionTicks == 54 * SessionSnapshot.TicksPerSecond);
+        }
+
+        [Fact]
+        public void WatchingTick_PendingSeekRetriesThenFailsToWaiting()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Waiting, runtime.State);
+            Assert.Equal("playback command was not acknowledged", runtime.Error);
+        }
+
+        [Fact]
         public void PendingCommand_NotAcknowledged_RetriesThenFailsToWaiting()
         {
             var room = CreateRoom();
