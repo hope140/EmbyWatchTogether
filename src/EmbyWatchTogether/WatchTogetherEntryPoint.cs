@@ -59,7 +59,9 @@ namespace Emby.Plugins.WatchTogether
                 issuer,
                 plugin.ResolveServerId,
                 pollIntervalSeconds: plugin.Configuration.PollIntervalSeconds,
-                pauseOtherOnPlaybackStop: plugin.Configuration.PauseOtherOnPlaybackStop);
+                pauseOtherOnPlaybackStop: plugin.Configuration.PauseOtherOnPlaybackStop,
+                notifyOtherOnPlaybackStop: plugin.Configuration.NotifyOtherOnPlaybackStop,
+                messageIssuer: issuer);
             SubscribeToSessionChanges(bridge);
             _syncEngine.Start();
         }

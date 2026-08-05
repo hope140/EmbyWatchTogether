@@ -14,6 +14,8 @@ namespace Emby.Plugins.WatchTogether
 
         public bool PauseOtherOnPlaybackStop { get; set; } = true;
 
+        public bool NotifyOtherOnPlaybackStop { get; set; } = true;
+
         public int MaxRuntimeDifferenceSeconds { get; set; } = 3;
 
         public int SeekToleranceSeconds { get; set; } = 2;
