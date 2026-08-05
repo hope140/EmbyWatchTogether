@@ -421,27 +421,6 @@
             <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite">正在加载…</p>
         </div>
 
-        <div class="verticalSection wt-section" id="wtConfigSection">
-            <div class="wt-sectionHeading">
-                <div>
-                    <h2>播放停止行为</h2>
-                    <p class="fieldDescription wt-sectionDescription">
-                        一位参与者停止播放时，是否自动暂停其他在线参与者的播放。
-                    </p>
-                </div>
-            </div>
-
-            <label class="checkboxContainer">
-                <input is="emby-checkbox" id="wtPauseOtherOnPlaybackStop" type="checkbox" />
-                <span>停止播放时暂停其他参与者</span>
-            </label>
-            <div class="fieldDescription">此设置由 Emby 服务器保存，仅管理员可以修改。</div>
-            <div class="wt-formActions">
-                <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
-                <p class="fieldDescription wt-formHint" id="wtConfigStatus" role="status" aria-live="polite">正在读取配置…</p>
-            </div>
-        </div>
-
         <div class="verticalSection wt-section" id="wtAdminSection">
             <div class="wt-sectionHeading">
                 <div>
@@ -484,6 +463,31 @@
                 <button is="emby-button" id="wtRefresh" type="button" class="button-flat wt-refresh">刷新</button>
             </div>
             <div id="wtRooms" class="wt-roomList" aria-live="polite" aria-busy="true"></div>
+        </div>
+
+        <div class="verticalSection wt-section" id="wtConfigSection">
+            <div class="wt-sectionHeading">
+                <div>
+                    <h2>播放停止行为</h2>
+                    <p class="fieldDescription wt-sectionDescription">
+                        停止或退出视频时，选择是否暂停另一方播放，以及是否向另一方发送文字提示。
+                    </p>
+                </div>
+            </div>
+
+            <label class="checkboxContainer">
+                <input is="emby-checkbox" id="wtPauseOtherOnPlaybackStop" type="checkbox" />
+                <span>停止或退出视频时暂停另一方</span>
+            </label>
+            <label class="checkboxContainer">
+                <input is="emby-checkbox" id="wtNotifyOtherOnPlaybackStop" type="checkbox" />
+                <span>停止或退出视频时发送文字提示</span>
+            </label>
+            <div class="fieldDescription">此设置由 Emby 服务器保存，仅管理员可以修改。</div>
+            <div class="wt-formActions">
+                <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
+                <p class="fieldDescription wt-formHint" id="wtConfigStatus" role="status" aria-live="polite">正在读取配置…</p>
+            </div>
         </div>
 
         <div class="verticalSection wt-section wt-help">
