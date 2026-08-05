@@ -2,6 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
+using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.Session;
+using Moq;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
@@ -10,6 +14,7 @@ namespace Emby.Plugins.WatchTogether.Tests
     {
         private readonly TestClock _clock = new TestClock();
         private readonly RecordingIssuer _issuer = new RecordingIssuer();
+        private readonly RecordingMessageIssuer _messageIssuer = new RecordingMessageIssuer();
         private readonly RoomManager _rooms = new RoomManager();
         private readonly FakeSnapshotProvider _provider = new FakeSnapshotProvider();
 
@@ -214,6 +219,96 @@ namespace Emby.Plugins.WatchTogether.Tests
                 i.userId == "u2" && i.command == RemoteCommands.Pause);
             Assert.DoesNotContain(_issuer.Issued, i =>
                 i.userId == "u1" && i.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void StoppedParticipant_NotifiesOnlyTheOnlineParticipant_WhenEnabled()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var message = Assert.Single(_messageIssuer.Issued);
+            Assert.Equal("u2", message.userId);
+            Assert.Contains("对方已停止播放", message.text);
+        }
+
+        [Fact]
+        public void SupportedDisplayMessage_IsForwardedToRemoteSession()
+        {
+            var manager = new Mock<ISessionManager>();
+            manager.Setup(m => m.SendMessageCommand(
+                    It.IsAny<string>(),
+                    "s2",
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(manager.Object);
+            var issuer = new SessionBridgeCommandIssuer(bridge);
+            var snapshot = new SessionSnapshot(
+                "s2", "u2", "i1", "m1", 10 * SessionSnapshot.TicksPerSecond,
+                100 * SessionSnapshot.TicksPerSecond, false, 1.0, stopped: false,
+                supportsRemoteControl: true,
+                new SessionCapabilityReport(true, new[] { RemoteCommands.DisplayMessage }),
+                new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+
+            var ok = issuer.TryIssueMessage(
+                "room-1", "admin-1", "u2", snapshot,
+                "一起观看", "对方已停止播放，请重新打开视频", 3000,
+                DateTimeOffset.UtcNow, out var error);
+
+            Assert.True(ok);
+            Assert.Null(error);
+            manager.Verify(m => m.SendMessageCommand(
+                It.IsAny<string>(),
+                "s2",
+                It.Is<MessageCommand>(c =>
+                    c.Header == "一起观看" &&
+                    c.Text == "对方已停止播放，请重新打开视频" &&
+                    c.TimeoutMs == 3000),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public void StoppedParticipant_DoesNotNotifyWhenDisabled()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine(notifyOtherOnPlaybackStop: false);
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Empty(_messageIssuer.Issued);
+        }
+
+        [Fact]
+        public void UnsupportedDisplayMessage_DoesNotBlockStopHandling()
+        {
+            var room = CreateRoom();
+            var manager = new Mock<ISessionManager>();
+            using var bridge = new SessionBridge(manager.Object);
+            var engine = CreateEngine(messageIssuer: new SessionBridgeCommandIssuer(bridge));
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Contains(_issuer.Issued, i =>
+                i.userId == "u2" && i.command == RemoteCommands.Pause);
         }
 
         [Fact]
@@ -477,12 +572,16 @@ namespace Emby.Plugins.WatchTogether.Tests
 
         private SyncEngine CreateEngine(
             string serverId = "server-1",
-            bool pauseOtherOnPlaybackStop = true)
+            bool pauseOtherOnPlaybackStop = true,
+            bool notifyOtherOnPlaybackStop = true,
+            IMessageIssuer messageIssuer = null)
         {
             return new SyncEngine(
                 _rooms, _provider, _issuer, () => serverId, () => _clock.Now,
                 pollIntervalSeconds: 1.0,
-                pauseOtherOnPlaybackStop: pauseOtherOnPlaybackStop);
+                pauseOtherOnPlaybackStop: pauseOtherOnPlaybackStop,
+                notifyOtherOnPlaybackStop: notifyOtherOnPlaybackStop,
+                messageIssuer: messageIssuer ?? _messageIssuer);
         }
 
         private Room CreateRoom()
@@ -582,6 +681,28 @@ namespace Emby.Plugins.WatchTogether.Tests
             public List<SessionSnapshot> Snapshots { get; set; } = new List<SessionSnapshot>();
 
             public IReadOnlyList<SessionSnapshot> GetSessionSnapshots() => Snapshots;
+        }
+
+        private sealed class RecordingMessageIssuer : IMessageIssuer
+        {
+            public List<(string userId, string header, string text)> Issued { get; } =
+                new List<(string, string, string)>();
+
+            public bool TryIssueMessage(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string header,
+                string text,
+                int? timeoutMs,
+                DateTimeOffset now,
+                out string error)
+            {
+                Issued.Add((userId, header, text));
+                error = null;
+                return true;
+            }
         }
 
         private sealed class RecordingIssuer : ICommandIssuer
