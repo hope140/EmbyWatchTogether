@@ -2,6 +2,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     'use strict';
 
     var users = [];
+    var pluginId = '0f8d1c2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f';
     var stateLabels = {
         Waiting: '等待参与者',
         Barrier: '正在对齐',
@@ -58,6 +59,100 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             el.textContent = text;
             el.classList.toggle('error', !!isError);
         }
+    }
+
+    function setConfigStatus(page, text, isError) {
+        var el = page.querySelector('#wtConfigStatus');
+        if (el) {
+            el.textContent = text;
+            el.classList.toggle('error', !!isError);
+        }
+    }
+
+    function isPermissionError(error) {
+        return !!(error && (error.status === 401 || error.status === 403 ||
+            error.statusCode === 401 || error.statusCode === 403));
+    }
+
+    function setConfigBusy(page, isBusy) {
+        var checkbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+        var saveButton = page.querySelector('#wtSaveConfig');
+        if (checkbox) {
+            checkbox.disabled = isBusy;
+        }
+        if (saveButton) {
+            saveButton.disabled = isBusy || !page._wtConfigReady;
+            saveButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+            saveButton.textContent = isBusy ? '保存中…' : '保存设置';
+        }
+    }
+
+    function applyPluginConfiguration(page, config) {
+        var checkbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+        page._wtPluginConfiguration = config || {};
+        page._wtConfigReady = true;
+        if (checkbox) {
+            checkbox.checked = page._wtPluginConfiguration.PauseOtherOnPlaybackStop !== false;
+            checkbox.disabled = false;
+        }
+        var saveButton = page.querySelector('#wtSaveConfig');
+        if (saveButton) {
+            saveButton.disabled = false;
+        }
+    }
+
+    function loadPluginConfiguration(page) {
+        setConfigStatus(page, '正在读取配置…');
+        setConfigBusy(page, true);
+        return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+            applyPluginConfiguration(page, config);
+            setConfigStatus(page, '配置已读取');
+            return config;
+        }).catch(function (error) {
+            page._wtConfigReady = false;
+            var checkbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+            var saveButton = page.querySelector('#wtSaveConfig');
+            if (checkbox) {
+                checkbox.disabled = true;
+            }
+            if (saveButton) {
+                saveButton.disabled = true;
+            }
+            setConfigStatus(page,
+                isPermissionError(error) ? '只有管理员可以查看和修改此设置。' : '配置读取失败：' + errorMessage(error),
+                true);
+            throw error;
+        }).finally(function () {
+            if (page._wtConfigReady) {
+                setConfigBusy(page, false);
+            }
+        });
+    }
+
+    function savePluginConfiguration(page) {
+        var checkbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+        if (!checkbox || !page._wtConfigReady) {
+            return Promise.resolve();
+        }
+
+        setConfigBusy(page, true);
+        setConfigStatus(page, '正在保存配置…');
+        return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+            config = config || {};
+            config.PauseOtherOnPlaybackStop = checkbox.checked;
+            return ApiClient.updatePluginConfiguration(pluginId, config);
+        }).then(function () {
+            return ApiClient.getPluginConfiguration(pluginId);
+        }).then(function (config) {
+            applyPluginConfiguration(page, config);
+            setConfigStatus(page, '配置已保存并重新读取');
+        }).catch(function (error) {
+            setConfigStatus(page,
+                isPermissionError(error) ? '保存被拒绝：只有管理员可以修改此设置。' : '配置保存失败：' + errorMessage(error),
+                true);
+        }).then(function () {
+            setConfigBusy(page, false);
+        });
     }
 
     function findUser(id) {
@@ -474,6 +569,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
+        dom.addEventListener(page.querySelector('#wtSaveConfig'), 'click', function () {
+            savePluginConfiguration(page);
+        });
         dom.addEventListener(page.querySelector('#wtCreate'), 'click', function () {
             createRoom(page);
         });
@@ -508,7 +606,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         syncForm(page);
         loading.show();
 
-        loadUsers(page).then(function () {
+        loadPluginConfiguration(page).catch(function () {
+            return null;
+        }).then(function () {
+            return loadUsers(page);
+        }).then(function () {
             return loadRooms(page, true);
         }).then(function () {
             loading.hide();
