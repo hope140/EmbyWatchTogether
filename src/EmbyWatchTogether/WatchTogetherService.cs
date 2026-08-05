@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using MediaBrowser.Controller.Api;
 using MediaBrowser.Controller.Net;
 using MediaBrowser.Model.Services;
@@ -44,6 +45,14 @@ namespace Emby.Plugins.WatchTogether
     public class JoinRoomRequest
     {
         public string Id { get; set; }
+    }
+
+    [Route("/WatchTogether/Rooms/{Id}/Message", "POST")]
+    public class SendRoomMessageRequest
+    {
+        public string Id { get; set; }
+
+        public string Text { get; set; }
     }
 
     [Route("/WatchTogether/Users", "GET")]
@@ -176,6 +185,43 @@ namespace Emby.Plugins.WatchTogether
         public object Post(JoinRoomRequest request)
         {
             return Get(new GetRoomStateRequest { Id = request.Id });
+        }
+
+        public object Post(SendRoomMessageRequest request)
+        {
+            RequireAdmin();
+            var plugin = RequirePlugin();
+            var room = plugin.Rooms.GetRoom(request.Id);
+            if (room == null)
+            {
+                throw new KeyNotFoundException("room not found");
+            }
+
+            if (plugin.Bridge == null)
+            {
+                throw new InvalidOperationException("session bridge is not initialized");
+            }
+
+            int sent = 0;
+            foreach (var snapshot in BuildSnapshots(plugin, room).Values)
+            {
+                if (!snapshot.Online || !snapshot.Capabilities.CanDisplayMessage)
+                {
+                    continue;
+                }
+
+                plugin.Bridge.SendDisplayMessageAsync(
+                        room.AdminUserId,
+                        snapshot.SessionId,
+                        "Watch Together",
+                        request.Text ?? string.Empty,
+                        timeoutMs: null,
+                        cancellationToken: CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                sent++;
+            }
+
+            return new { RoomId = room.Id, Sent = sent };
         }
 
         public object Get(GetUsersRequest request)
