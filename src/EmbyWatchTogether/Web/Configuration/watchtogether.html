@@ -3,7 +3,7 @@
      data-forcescrollbar="true"
      data-centerfocus="true"
      data-controller="__plugin/WatchTogether.js"
-     data-require="emby-input,emby-select,emby-button">
+     data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
             --wt-text: var(--theme-text-color, #26313a);
@@ -98,6 +98,28 @@
             color: var(--wt-text);
         }
 
+        #wtSaveConfig {
+            min-height: 2.45em;
+            padding: .5em 1.1em;
+            border: 1px solid #216a96 !important;
+            border-radius: .28em;
+            background: var(--wt-primary) !important;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, .16) !important;
+            color: #fff !important;
+            font-weight: 600;
+        }
+
+        #wtSaveConfig:hover:not(:disabled) {
+            background: #216f9f !important;
+        }
+
+        #wtSaveConfig:disabled {
+            border-color: #aeb8bf !important;
+            background: #aeb8bf !important;
+            color: #fff !important;
+            opacity: .72;
+        }
+
         #wtCreate {
             min-height: 2.55em;
             padding: .55em 1.35em;
@@ -135,6 +157,7 @@
             background: rgba(38, 49, 58, .08) !important;
         }
 
+        #wtSaveConfig:focus-visible,
         #wtCreate:focus-visible,
         .wt-refresh:focus-visible,
         .wt-roomActions button.wt-action:focus-visible {
@@ -396,6 +419,27 @@
                 创建房间后，两位参与者打开同一视频，播放、暂停和进度会自动同步。
             </p>
             <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite">正在加载…</p>
+        </div>
+
+        <div class="verticalSection wt-section" id="wtConfigSection">
+            <div class="wt-sectionHeading">
+                <div>
+                    <h2>播放停止行为</h2>
+                    <p class="fieldDescription wt-sectionDescription">
+                        一位参与者停止播放时，是否自动暂停其他在线参与者的播放。
+                    </p>
+                </div>
+            </div>
+
+            <label class="checkboxContainer">
+                <input is="emby-checkbox" id="wtPauseOtherOnPlaybackStop" type="checkbox" />
+                <span>停止播放时暂停其他参与者</span>
+            </label>
+            <div class="fieldDescription">此设置由 Emby 服务器保存，仅管理员可以修改。</div>
+            <div class="wt-formActions">
+                <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
+                <p class="fieldDescription wt-formHint" id="wtConfigStatus" role="status" aria-live="polite">正在读取配置…</p>
+            </div>
         </div>
 
         <div class="verticalSection wt-section" id="wtAdminSection">
