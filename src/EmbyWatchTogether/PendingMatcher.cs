@@ -15,19 +15,29 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
-            if (string.Equals(pending.Command, RemoteCommands.Pause, StringComparison.Ordinal))
+            return Matches(pending.Command, pending.PositionTicks, snapshot);
+        }
+
+        public static bool Matches(string command, long? positionTicks, SessionSnapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                return false;
+            }
+
+            if (string.Equals(command, RemoteCommands.Pause, StringComparison.Ordinal))
             {
                 return snapshot.IsPaused;
             }
 
-            if (string.Equals(pending.Command, RemoteCommands.Unpause, StringComparison.Ordinal))
+            if (string.Equals(command, RemoteCommands.Unpause, StringComparison.Ordinal))
             {
                 return !snapshot.IsPaused;
             }
 
-            if (string.Equals(pending.Command, RemoteCommands.Seek, StringComparison.Ordinal))
+            if (string.Equals(command, RemoteCommands.Seek, StringComparison.Ordinal))
             {
-                long target = pending.PositionTicks ?? 0;
+                long target = positionTicks ?? 0;
                 return Math.Abs(snapshot.PositionTicks - target) <= SyncConstants.SeekToleranceTicks;
             }
 
