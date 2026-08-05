@@ -31,6 +31,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly Func<string> _serverIdProvider;
         private readonly Func<DateTimeOffset> _clock;
         private readonly double _pollIntervalSeconds;
+        private readonly bool _pauseOtherOnPlaybackStop;
         private readonly object _lock = new object();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private Thread _thread;
@@ -42,7 +43,8 @@ namespace Emby.Plugins.WatchTogether
             ICommandIssuer issuer,
             Func<string> serverIdProvider,
             Func<DateTimeOffset> clock = null,
-            double pollIntervalSeconds = 1.0)
+            double pollIntervalSeconds = 1.0,
+            bool pauseOtherOnPlaybackStop = true)
         {
             _roomManager = roomManager ?? throw new ArgumentNullException(nameof(roomManager));
             _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
@@ -50,6 +52,7 @@ namespace Emby.Plugins.WatchTogether
             _serverIdProvider = serverIdProvider ?? (() => string.Empty);
             _clock = clock ?? (() => DateTimeOffset.UtcNow);
             _pollIntervalSeconds = Math.Max(0.05, pollIntervalSeconds);
+            _pauseOtherOnPlaybackStop = pauseOtherOnPlaybackStop;
         }
 
         public void Start()
@@ -144,8 +147,13 @@ namespace Emby.Plugins.WatchTogether
                     // Emby may briefly retain the old ItemId after a player is closed
                     // while reporting PositionTicks = 0. Treat that transition as a
                     // stop, not as a user-issued seek, before observing pending commands.
-                    if (LooksLikePlaybackStopped(runtime, room, snapshots))
+                    if (TryGetStoppedUsers(runtime, room, snapshots, out var stoppedUsers))
                     {
+                        if (_pauseOtherOnPlaybackStop)
+                        {
+                            PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                        }
+
                         runtime.ResetToWaiting();
                         runtime.Error = StoppedPlaybackError;
                         results.Add(Result(room, runtime, eligible));
@@ -280,11 +288,13 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private static bool LooksLikePlaybackStopped(
+        private static bool TryGetStoppedUsers(
             RoomRuntime runtime,
             Room room,
-            IReadOnlyDictionary<string, SessionSnapshot> snapshots)
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            out HashSet<string> stoppedUsers)
         {
+            stoppedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (runtime == null || room == null || snapshots == null ||
                 runtime.State == RoomState.Waiting ||
                 runtime.State == RoomState.Unavailable ||
@@ -294,8 +304,16 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var members = room.JoinedParticipantUserIds;
-            if (snapshots.Count != members.Count ||
-                snapshots.Values.Any(s => s == null || !s.Online || s.Stopped))
+            foreach (var userId in members)
+            {
+                if (!snapshots.TryGetValue(userId, out var current) || current == null ||
+                    !current.Online || current.Stopped)
+                {
+                    stoppedUsers.Add(userId);
+                }
+            }
+
+            if (stoppedUsers.Count > 0)
             {
                 return true;
             }
@@ -306,6 +324,7 @@ namespace Emby.Plugins.WatchTogether
                 string.Equals(primary.ItemId, runtime.Barrier.ItemId, StringComparison.OrdinalIgnoreCase) &&
                 IsPositionReset(runtime.Barrier.PrimaryPositionTicks, primary.PositionTicks))
             {
+                stoppedUsers.Add(room.PrimaryUserId);
                 return true;
             }
 
@@ -320,11 +339,32 @@ namespace Emby.Plugins.WatchTogether
 
                 if (IsPositionReset(previous.PositionTicks, current.PositionTicks))
                 {
+                    stoppedUsers.Add(userId);
                     return true;
                 }
             }
 
             return false;
+        }
+
+        private void PauseOtherAfterPlaybackStopped(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            ISet<string> stoppedUsers,
+            DateTimeOffset now)
+        {
+            foreach (var pair in snapshots)
+            {
+                var snapshot = pair.Value;
+                if (snapshot == null || !snapshot.Online || snapshot.Stopped ||
+                    (stoppedUsers != null && stoppedUsers.Contains(pair.Key)))
+                {
+                    continue;
+                }
+
+                Issue(runtime, room, pair.Key, snapshot, RemoteCommands.Pause, null, now);
+            }
         }
 
         private static bool IsPositionReset(long previousPositionTicks, long currentPositionTicks)
