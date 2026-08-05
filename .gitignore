@@ -7,6 +7,7 @@ obj/
 # Build output / packaging
 artifacts/
 dist/
+.publish*/
 *.dll
 *.pdb
 
