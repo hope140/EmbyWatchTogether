@@ -33,15 +33,9 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
-            var capabilities = snapshot.Capabilities;
-            bool supported =
-                (string.Equals(command, RemoteCommands.Pause, StringComparison.Ordinal) && capabilities.CanPause) ||
-                (string.Equals(command, RemoteCommands.Unpause, StringComparison.Ordinal) && capabilities.CanUnpause) ||
-                (string.Equals(command, RemoteCommands.Seek, StringComparison.Ordinal) && capabilities.CanSeek);
-
-            if (!supported)
+            if (!IsCommandSupported(snapshot.Capabilities, command))
             {
-                error = $"session does not support command {command}";
+                error = "session does not support remote control";
                 return false;
             }
 
@@ -73,6 +67,35 @@ namespace Emby.Plugins.WatchTogether
             {
                 error = ex.Message;
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Command gate ported from the Python reference: a session is targetable
+        /// when it is remotely controllable (SupportsRemoteControl or a non-empty
+        /// command list). Emby clients commonly omit Pause/Unpause/Seek from the
+        /// declared command list (e.g. Emby Theater) while still honouring them
+        /// through the session playback controller, so specific command names are
+        /// not required here.
+        /// </summary>
+        public static bool IsCommandSupported(SessionCapabilityReport capabilities, string command)
+        {
+            if (capabilities == null ||
+                (!capabilities.SupportsRemoteControl && capabilities.SupportedCommands.Count == 0))
+            {
+                return false;
+            }
+
+            switch (command)
+            {
+                case RemoteCommands.Pause:
+                case RemoteCommands.Unpause:
+                case RemoteCommands.PlayPause:
+                case RemoteCommands.Seek:
+                case RemoteCommands.Stop:
+                    return true;
+                default:
+                    return false;
             }
         }
     }
