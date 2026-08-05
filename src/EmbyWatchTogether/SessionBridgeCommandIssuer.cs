@@ -8,7 +8,7 @@ namespace Emby.Plugins.WatchTogether
     /// snapshot's capability report so unsupported clients are never targeted
     /// (same gate as the Python reference session selection).
     /// </summary>
-    public sealed class SessionBridgeCommandIssuer : ICommandIssuer
+    public sealed class SessionBridgeCommandIssuer : ICommandIssuer, IMessageIssuer
     {
         private readonly SessionBridge _bridge;
 
@@ -60,6 +60,49 @@ namespace Emby.Plugins.WatchTogether
                         return false;
                 }
 
+                error = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        public bool TryIssueMessage(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string header,
+            string text,
+            int? timeoutMs,
+            DateTimeOffset now,
+            out string error)
+        {
+            if (snapshot == null || !snapshot.Online)
+            {
+                error = "session is not online";
+                return false;
+            }
+
+            if (snapshot.Capabilities == null || !snapshot.Capabilities.CanDisplayMessage)
+            {
+                error = "session does not support display messages";
+                return false;
+            }
+
+            try
+            {
+                _bridge.SendDisplayMessageAsync(
+                    controllingUserId,
+                    snapshot.SessionId,
+                    header,
+                    text,
+                    timeoutMs,
+                    CancellationToken.None)
+                    .GetAwaiter().GetResult();
                 error = null;
                 return true;
             }
