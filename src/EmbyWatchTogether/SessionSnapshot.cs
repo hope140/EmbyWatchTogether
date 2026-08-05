@@ -22,7 +22,8 @@ namespace Emby.Plugins.WatchTogether
             double playbackRate,
             bool stopped,
             bool supportsRemoteControl,
-            SessionCapabilityReport capabilities)
+            SessionCapabilityReport capabilities,
+            DateTimeOffset lastActivityDateUtc = default)
         {
             SessionId = sessionId ?? string.Empty;
             UserId = userId ?? string.Empty;
@@ -35,6 +36,7 @@ namespace Emby.Plugins.WatchTogether
             Stopped = stopped;
             Capabilities = capabilities ?? new SessionCapabilityReport(false, Array.Empty<string>());
             SupportsRemoteControl = supportsRemoteControl;
+            LastActivityDateUtc = lastActivityDateUtc;
         }
 
         public string SessionId { get; }
@@ -58,6 +60,8 @@ namespace Emby.Plugins.WatchTogether
         public bool SupportsRemoteControl { get; }
 
         public SessionCapabilityReport Capabilities { get; }
+
+        public DateTimeOffset LastActivityDateUtc { get; }
 
         public bool Online => !string.IsNullOrEmpty(SessionId) && !Stopped;
 
@@ -103,7 +107,8 @@ namespace Emby.Plugins.WatchTogether
                 rate,
                 stopped,
                 session.SupportsRemoteControl,
-                capabilities);
+                capabilities,
+                session.LastActivityDate);
         }
     }
 }
