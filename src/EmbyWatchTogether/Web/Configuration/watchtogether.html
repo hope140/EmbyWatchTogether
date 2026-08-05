@@ -334,52 +334,6 @@
             line-height: 1.8;
         }
 
-        @media (prefers-color-scheme: dark) {
-            .wt-page {
-                --wt-text: #f1f3f5;
-                --wt-muted: #b5bec6;
-                --wt-border: rgba(255, 255, 255, .18);
-                --wt-surface: rgba(255, 255, 255, .045);
-            }
-
-            .wt-roomCard,
-            .wt-roomActions button.wt-action,
-            .wt-roomActions button.wt-action--danger,
-            .wt-refresh {
-                background: rgba(255, 255, 255, .06) !important;
-                color: var(--wt-text) !important;
-            }
-
-            .wt-roomActions button.wt-action:hover:not(:disabled),
-            .wt-refresh:hover:not(:disabled) {
-                background: rgba(255, 255, 255, .13) !important;
-            }
-
-            .wt-roomState-waiting {
-                background: rgba(214, 164, 59, .18);
-                color: #f4c96b;
-            }
-
-            .wt-roomState-barrier {
-                background: rgba(88, 169, 208, .18);
-                color: #8ed1f0;
-            }
-
-            .wt-roomState-watching {
-                background: rgba(90, 164, 119, .18);
-                color: #9bdeb2;
-            }
-
-            .wt-roomState-unavailable {
-                background: rgba(216, 121, 127, .18);
-                color: #f1a2a8;
-            }
-
-            .wt-roomError {
-                color: #f1a2a8 !important;
-            }
-        }
-
         @media (max-width: 40em) {
             .wt-formGrid {
                 grid-template-columns: 1fr;
