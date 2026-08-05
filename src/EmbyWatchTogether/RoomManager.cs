@@ -24,8 +24,22 @@ namespace Emby.Plugins.WatchTogether
     public sealed class RoomManager
     {
         private readonly object _lock = new object();
+        private readonly RoomStore _store;
         private readonly Dictionary<string, Room> _rooms = new Dictionary<string, Room>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, RoomRuntime> _runtimes = new Dictionary<string, RoomRuntime>(StringComparer.OrdinalIgnoreCase);
+
+        public RoomManager(RoomStore store = null)
+        {
+            _store = store;
+            if (_store != null)
+            {
+                foreach (var room in _store.ListRooms())
+                {
+                    _rooms[room.Id] = room;
+                    _runtimes[room.Id] = new RoomRuntime();
+                }
+            }
+        }
 
         public Room CreateRoom(
             string serverId,
@@ -85,6 +99,7 @@ namespace Emby.Plugins.WatchTogether
 
                 _rooms[room.Id] = room;
                 _runtimes[room.Id] = new RoomRuntime();
+                _store?.Create(room);
                 return room;
             }
         }
@@ -100,6 +115,11 @@ namespace Emby.Plugins.WatchTogether
             {
                 bool removed = _rooms.Remove(roomId);
                 _runtimes.Remove(roomId);
+                if (removed)
+                {
+                    _store?.Delete(roomId);
+                }
+
                 return removed;
             }
         }

@@ -7,7 +7,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public void EntryPoint_RunAndDispose_DoNotThrowWithNullSessionManager()
         {
-            using var entryPoint = new WatchTogetherEntryPoint(null);
+            using var entryPoint = new WatchTogetherEntryPoint(null, null);
 
             entryPoint.Run();
         }
