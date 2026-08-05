@@ -87,6 +87,9 @@ Python 版已在 `watch_together` 分支跑通并验证：
   REST API+JSON 持久化、Dashboard 页面），S7 提供 `scripts/build.ps1` 打包。
 - 房间持久化改用 Emby 自带 `IJsonSerializer`，插件为**单 DLL** 交付，不附带
   System.Text.Json 等运行库。
+- 已在目标服务器（`117.50.223.21:2334`）部署：插件 DLL 须平铺在 `plugins/`
+  根层（该服务端不扫描插件子目录）；日志确认入口点正常启动、REST 路由已注册、
+  插件页面可访问。
 - 状态机采用参考实现的真实状态（waiting/barrier/watching/unavailable），与本文档
   早期“waiting→syncing→paused→ended”命名不同，语义一致。
 - 实机验收（双客户端同步、DisplayMessage/Seek 行为、主菜单入口呈现）未在本机执行，

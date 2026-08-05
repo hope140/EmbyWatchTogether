@@ -40,17 +40,24 @@ etlp、mpv 代理、嵌入式 Python 或油猴脚本。
 ### 安装
 
 1. 停止 Emby Server。
-2. 把 `dist/EmbyWatchTogether/` 整个文件夹复制到 Emby 的 `plugins/` 目录
-   （Windows 通常为 `%ProgramData%\Emby-Server\programdata\plugins\`）。
-3. 重启 Emby Server，在「插件」页确认 Watch Together 已加载。
+2. 把 `dist/EmbyWatchTogether.zip` 里的单个 `Emby.Plugins.WatchTogether.dll`
+   复制到 Emby 的 `plugins/` 目录**根层**（与服务端既有插件平铺一致；
+   Windows 通常为 `%ProgramData%\Emby-Server\programdata\plugins\`，
+   Docker 常见为 `<config 卷>/plugins/`）。已验证子目录放置不会被本服务端扫描。
+3. 重启 Emby Server。日志出现
+   `Starting entry point Emby.Plugins.WatchTogether.WatchTogetherEntryPoint`
+   即加载成功。
 4. 管理员登录后在主菜单点击「Watch Together」进入房间管理页：创建房间、选择
    两名参与者与主用户；两人用支持控制台遥控的客户端打开同一视频后自动开始同步。
 
 ### 验证状态
 
-单元测试与构建在 CI/本机可完整执行；真实 Emby 服务端的实机验收（双客户端同步、
-DisplayMessage/Seek 行为、UI 入口呈现）需在装有 Emby 4.9 的服务器上按
-`docs/watch-together-emby-plugin-plan.md` 的验收标准执行，本机未安装 Emby 服务端。
+- 构建与 93 个单元测试通过；已在目标服务器（`117.50.223.21:2334`，
+  Emby 4.9.0.60）部署并验证：插件入口点正常启动、`/WatchTogether/*` 路由
+  注册（匿名返回 401）、插件页 `/web/configurationpage?name=WatchTogether`
+  正常返回。
+- 待完成：管理员登录后的 API 验收（建房/控制/消息）与双客户端实机同步测试，
+  见 `docs/watch-together-emby-plugin-plan.md` 验收标准。
 
 ## 禁止事项
 
