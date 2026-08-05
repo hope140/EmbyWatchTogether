@@ -4,6 +4,7 @@ using System.Threading;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.Serialization;
 
 namespace Emby.Plugins.WatchTogether
 {
@@ -15,14 +16,17 @@ namespace Emby.Plugins.WatchTogether
     {
         private readonly ISessionManager _sessionManager;
         private readonly IServerApplicationHost _applicationHost;
+        private readonly IJsonSerializer _jsonSerializer;
         private SyncEngine _syncEngine;
 
         public WatchTogetherEntryPoint(
             ISessionManager sessionManager,
-            IServerApplicationHost applicationHost)
+            IServerApplicationHost applicationHost,
+            IJsonSerializer jsonSerializer)
         {
             _sessionManager = sessionManager;
             _applicationHost = applicationHost;
+            _jsonSerializer = jsonSerializer;
         }
 
         public void Run()
@@ -46,7 +50,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var bridge = new SessionBridge(_sessionManager);
-            var store = new RoomStore(Path.Combine(plugin.DataFolderPath, "rooms.json"));
+            var store = new RoomStore(Path.Combine(plugin.DataFolderPath, "rooms.json"), _jsonSerializer);
             var rooms = new RoomManager(store);
             var provider = new SessionBridgeSnapshotProvider(bridge);
             var issuer = new SessionBridgeCommandIssuer(bridge);

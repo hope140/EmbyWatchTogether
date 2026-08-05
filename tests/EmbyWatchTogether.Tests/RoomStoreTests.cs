@@ -1,5 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
+using MediaBrowser.Model.Serialization;
+using Moq;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
@@ -19,11 +23,11 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public void Create_ThenNewInstance_LoadsPersistedRooms()
         {
-            var store = new RoomStore(_filePath);
+            var store = new RoomStore(_filePath, NewSerializer());
             var room = NewRoom("r1", new[] { "u1", "u2" }, "u1");
             store.Create(room);
 
-            var reloaded = new RoomStore(_filePath);
+            var reloaded = new RoomStore(_filePath, NewSerializer());
             var loaded = reloaded.GetRoom("r1");
 
             Assert.NotNull(loaded);
@@ -35,18 +39,18 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public void Delete_PersistsRemoval()
         {
-            var store = new RoomStore(_filePath);
+            var store = new RoomStore(_filePath, NewSerializer());
             store.Create(NewRoom("r1", new[] { "u1", "u2" }, "u1"));
 
             Assert.True(store.Delete("r1"));
             Assert.False(store.Delete("r1"));
-            Assert.Empty(new RoomStore(_filePath).ListRooms());
+            Assert.Empty(new RoomStore(_filePath, NewSerializer()).ListRooms());
         }
 
         [Fact]
         public void Create_DuplicateId_Throws()
         {
-            var store = new RoomStore(_filePath);
+            var store = new RoomStore(_filePath, NewSerializer());
             store.Create(NewRoom("r1", new[] { "u1", "u2" }, "u1"));
 
             Assert.Throws<RoomStoreException>(() => store.Create(NewRoom("r1", new[] { "u3", "u4" }, "u3")));
@@ -55,7 +59,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public void Create_MemberOverlap_Throws()
         {
-            var store = new RoomStore(_filePath);
+            var store = new RoomStore(_filePath, NewSerializer());
             store.Create(NewRoom("r1", new[] { "u1", "u2" }, "u1"));
 
             Assert.Throws<RoomStoreException>(() => store.Create(NewRoom("r2", new[] { "u2", "u3" }, "u2")));
@@ -66,14 +70,14 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             File.WriteAllText(_filePath, "{ not json");
 
-            Assert.Throws<RoomStoreException>(() => new RoomStore(_filePath));
+            Assert.Throws<RoomStoreException>(() => new RoomStore(_filePath, NewSerializer()));
             Assert.Equal("{ not json", File.ReadAllText(_filePath));
         }
 
         [Fact]
         public void MissingFile_StartsEmpty()
         {
-            var store = new RoomStore(_filePath);
+            var store = new RoomStore(_filePath, NewSerializer());
 
             Assert.Empty(store.ListRooms());
         }
@@ -81,16 +85,28 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public void RoomManager_WithStore_LoadsRoomsAndPersistsCreateDelete()
         {
-            var store = new RoomStore(_filePath);
+            var store = new RoomStore(_filePath, NewSerializer());
             var manager = new RoomManager(store);
             var room = manager.CreateRoom(
                 "server-1", "http://emby", "n", "admin-1", new[] { "u1", "u2" }, "u1");
 
-            var reloadedManager = new RoomManager(new RoomStore(_filePath));
+            var reloadedManager = new RoomManager(new RoomStore(_filePath, NewSerializer()));
             Assert.NotNull(reloadedManager.GetRoom(room.Id));
 
             manager.DeleteRoom(room.Id);
-            Assert.Empty(new RoomStore(_filePath).ListRooms());
+            Assert.Empty(new RoomStore(_filePath, NewSerializer()).ListRooms());
+        }
+
+        private static IJsonSerializer NewSerializer()
+        {
+            var mock = new Mock<IJsonSerializer>();
+            mock.Setup(s => s.SerializeToString(It.IsAny<object>()))
+                .Returns<object>(o => JsonSerializer.Serialize(o, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            mock.Setup(s => s.DeserializeFromString<List<RoomDto>>(It.IsAny<string>()))
+                .Returns<string>(json => JsonSerializer.Deserialize<List<RoomDto>>(
+                    json,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }));
+            return mock.Object;
         }
 
         private static Room NewRoom(string id, string[] participants, string primary)

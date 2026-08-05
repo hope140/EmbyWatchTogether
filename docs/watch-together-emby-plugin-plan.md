@@ -85,6 +85,8 @@ Python 版已在 `watch_together` 分支跑通并验证：
   服务端小版本保持一致；运行时程序集按简单名绑定到服务端自带的 4.9.0.60。
 - C# 实现已完成 S1-S6（骨架/能力探测、SessionBridge、RoomManager+状态机、SyncEngine、
   REST API+JSON 持久化、Dashboard 页面），S7 提供 `scripts/build.ps1` 打包。
+- 房间持久化改用 Emby 自带 `IJsonSerializer`，插件为**单 DLL** 交付，不附带
+  System.Text.Json 等运行库。
 - 状态机采用参考实现的真实状态（waiting/barrier/watching/unavailable），与本文档
   早期“waiting→syncing→paused→ended”命名不同，语义一致。
 - 实机验收（双客户端同步、DisplayMessage/Seek 行为、主菜单入口呈现）未在本机执行，

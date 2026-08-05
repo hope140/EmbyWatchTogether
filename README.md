@@ -33,8 +33,9 @@ etlp、mpv 代理、嵌入式 Python 或油猴脚本。
 .\scripts\build.ps1
 ```
 
-脚本会执行构建、全部单元测试，并把插件 DLL 与运行依赖打包到 `dist/EmbyWatchTogether/`
-目录及 `dist/EmbyWatchTogether.zip`。
+脚本会执行构建、全部单元测试，并把单个插件 DLL 打包到 `dist/EmbyWatchTogether/`
+目录及 `dist/EmbyWatchTogether.zip`。插件只依赖 Emby 服务端自带的程序集
+（MediaBrowser.* / Emby.*）与 `IJsonSerializer`，无需附带额外运行库。
 
 ### 安装
 

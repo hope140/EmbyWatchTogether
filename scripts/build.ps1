@@ -34,12 +34,12 @@ if (Test-Path -LiteralPath $publishDir) {
 dotnet publish $project -c $Configuration -o $publishDir --nologo
 if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
 
-New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
-Get-ChildItem -LiteralPath $publishDir -Filter *.dll | Where-Object {
-    $_.Name -eq 'Emby.Plugins.WatchTogether.dll' -or $_.Name -like 'System.*' -or $_.Name -like 'Microsoft.Bcl.*'
-} | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $pluginDir $_.Name) -Force
+if (Test-Path -LiteralPath $pluginDir) {
+    [System.IO.Directory]::Delete($pluginDir, $true)
 }
+New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $publishDir 'Emby.Plugins.WatchTogether.dll') `
+    -Destination (Join-Path $pluginDir 'Emby.Plugins.WatchTogether.dll') -Force
 
 if (Test-Path -LiteralPath $archivePath) {
     [System.IO.File]::Delete($archivePath)
