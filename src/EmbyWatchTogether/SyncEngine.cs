@@ -544,11 +544,7 @@ namespace Emby.Plugins.WatchTogether
             if (runtime.Pending.TryGetValue(userId, out var existing) &&
                 string.Equals(existing.Command, command, StringComparison.Ordinal))
             {
-                if (command != RemoteCommands.Seek ||
-                    Math.Abs((positionTicks ?? 0) - snapshot.PositionTicks) <= SyncConstants.SeekToleranceTicks)
-                {
-                    return true;
-                }
+                return true;
             }
 
             bool ok;
@@ -854,10 +850,9 @@ namespace Emby.Plugins.WatchTogether
 
                 if (Math.Abs(current.PositionTicks - expected) >= SyncConstants.DriftThresholdTicks)
                 {
-                    bool alreadyPending = pending != null &&
-                        pending.Command == RemoteCommands.Seek &&
-                        PendingMatcher.Matches(pending, current);
-                    if (!suppressSeek && !alreadyPending)
+                    bool pendingSeek = pending != null &&
+                        pending.Command == RemoteCommands.Seek;
+                    if (!suppressSeek && !pendingSeek)
                     {
                         seekChanges.Add((user, current.PositionTicks));
                     }
@@ -899,11 +894,17 @@ namespace Emby.Plugins.WatchTogether
                 }
             }
 
+            bool hasPendingSeek = runtime.Pending.Values.Any(p =>
+                p != null && p.Command == RemoteCommands.Seek);
             var positions = members
                 .Where(u => snapshots.TryGetValue(u, out var s) && s != null)
                 .Select(u => snapshots[u].PositionTicks)
                 .ToList();
-            if (positions.Count == 2 && Math.Abs(positions[0] - positions[1]) > SyncConstants.SeekToleranceTicks)
+            if (hasPendingSeek)
+            {
+                runtime.DriftRounds = 0;
+            }
+            else if (positions.Count == 2 && Math.Abs(positions[0] - positions[1]) > SyncConstants.SeekToleranceTicks)
             {
                 runtime.DriftRounds++;
             }
@@ -912,7 +913,8 @@ namespace Emby.Plugins.WatchTogether
                 runtime.DriftRounds = 0;
             }
 
-            if (runtime.DriftRounds >= SyncConstants.DriftRoundsBeforeSeek && seekChanges.Count == 0)
+            if (!hasPendingSeek &&
+                runtime.DriftRounds >= SyncConstants.DriftRoundsBeforeSeek && seekChanges.Count == 0)
             {
                 var secondary = members.First(u => u != primary);
                 if (snapshots.TryGetValue(primary, out var primarySnapshot) && primarySnapshot != null &&
