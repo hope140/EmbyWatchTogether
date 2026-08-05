@@ -294,6 +294,54 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void StoppedParticipant_NotifiesAgainAfterResumingSameItem()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Single(_messageIssuer.Issued);
+
+            // Reopen the same item and complete a fresh pause/seek/restore barrier.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // pause acknowledged, enter seek stage
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // seek issued
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // seek acknowledged, enter restore stage
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // restore issued
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(2, _messageIssuer.Issued.Count);
+        }
+
+        [Fact]
         public void StoppedParticipant_DoesNotNotifyWhenDisabled()
         {
             var room = CreateRoom();
