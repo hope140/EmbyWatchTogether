@@ -90,6 +90,13 @@ Python 版已在 `watch_together` 分支跑通并验证：
 - 已在目标服务器（`117.50.223.21:2334`）部署：插件 DLL 须平铺在 `plugins/`
   根层（该服务端不扫描插件子目录）；日志确认入口点正常启动、REST 路由已注册、
   插件页面可访问。
+- 修复服务端 ID 解析：`GetSystemInfo(null,...)` 在入口点抛异常，改为
+  `GetPublicSystemInfo` + `Plugin.ResolveServerId()` 懒解析重试。
+- API 层验收已通过（2026-08-05，管理员 hope）：`/WatchTogether/Users` 返回 2 用户；
+  建房 200 返回 RoomId；房间状态 Waiting 且参与者正确；resync 控制 200；
+  消息接口 200（无在线会话时 Sent=0）；删除房间 200；最终房间数 0。
+- 待完成：双客户端实机同步（两人用支持控制台遥控的客户端打开同一视频），
+  需真实播放环境人工验证。
 - 状态机采用参考实现的真实状态（waiting/barrier/watching/unavailable），与本文档
   早期“waiting→syncing→paused→ended”命名不同，语义一致。
 - 实机验收（双客户端同步、DisplayMessage/Seek 行为、主菜单入口呈现）未在本机执行，
