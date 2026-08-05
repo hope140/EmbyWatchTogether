@@ -101,6 +101,12 @@ Python 版已在 `watch_together` 分支跑通并验证：
      `this.view` 未初始化，onResume 抛错、页面停在“加载中”。
   验证：设置抽屉“服务器”分区可见「Watch Together」菜单项；点击后页面渲染，
   用户下拉加载 hope/qsm，房间列表正常刷新。
+- 修复“session does not support command Pause”：实测两个客户端为 Emby Theater
+  （小秘版），其声明命令列表只有 OSD/导航类命令（MoveUp/Select/Back 等），
+  不含 Pause/Unpause/Seek，但 `SupportsRemoteControl=True`（播放中会话）。
+  命令门禁改为与 Python 参考实现一致：仅要求“远程可控”
+  （SupportsRemoteControl 或命令列表非空），不再要求声明具体命令名。
+  待双客户端实机复测。
 - API 层验收已通过（2026-08-05，管理员 hope）：`/WatchTogether/Users` 返回 2 用户；
   建房 200 返回 RoomId；房间状态 Waiting 且参与者正确；resync 控制 200；
   消息接口 200（无在线会话时 Sent=0）；删除房间 200；最终房间数 0。
