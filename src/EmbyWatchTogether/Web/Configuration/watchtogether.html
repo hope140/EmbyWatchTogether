@@ -1,35 +1,455 @@
-<div is="emby-scroller" class="view flex flex-direction-column scrollFrameY flex-grow"
+<div is="emby-scroller" class="view flex flex-direction-column scrollFrameY flex-grow wt-page"
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
      data-controller="__plugin/WatchTogether.js"
      data-require="emby-input,emby-select,emby-button">
-    <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
-        <h1>Watch Together</h1>
-        <p class="sectionDescription" id="wtStatus">加载中…</p>
+    <style>
+        .wt-page {
+            --wt-text: var(--theme-text-color, #26313a);
+            --wt-muted: var(--theme-secondary-text-color, #68737d);
+            --wt-border: rgba(38, 49, 58, .2);
+            --wt-surface: rgba(38, 49, 58, .035);
+            --wt-primary: var(--theme-primary-color, #287fb5);
+            color: var(--wt-text);
+        }
 
-        <div class="verticalSection" style="margin-bottom:2em;">
-            <h2>创建房间</h2>
-            <div class="inputContainer">
-                <input is="emby-input" id="wtRoomName" label="房间名称" placeholder="例如：今晚的电影" />
+        .wt-pageHeader {
+            margin-bottom: 1.5em;
+            padding-bottom: .35em;
+            border-bottom: 1px solid var(--wt-border);
+        }
+
+        .wt-pageHeader h1 {
+            margin-bottom: .25em;
+        }
+
+        .wt-lead,
+        .wt-statusLine,
+        .wt-page .fieldDescription,
+        .wt-page .sectionDescription {
+            color: var(--wt-muted) !important;
+        }
+
+        .wt-lead {
+            max-width: 52em;
+            margin: 0 0 .75em;
+        }
+
+        .wt-statusLine {
+            min-height: 1.4em;
+            margin: 0;
+        }
+
+        .wt-section {
+            margin-bottom: 1.25em;
+            padding: 1.2em 1.3em 1.3em;
+            border: 1px solid var(--wt-border);
+            border-radius: .35em;
+            background: var(--wt-surface);
+        }
+
+        .wt-sectionHeading {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1em;
+            margin-bottom: .8em;
+        }
+
+        .wt-sectionHeading h2 {
+            margin: 0;
+            color: var(--wt-text);
+        }
+
+        .wt-sectionDescription {
+            margin: .35em 0 0;
+        }
+
+        .wt-formGrid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(12em, 1fr));
+            gap: 0 1.25em;
+        }
+
+        .wt-fieldWide {
+            grid-column: 1 / -1;
+        }
+
+        .wt-formActions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: .75em;
+            margin-top: 1em;
+        }
+
+        .wt-formHint {
+            margin: 0;
+        }
+
+        .wt-page input::placeholder {
+            color: #697680 !important;
+            opacity: 1;
+        }
+
+        .wt-page input,
+        .wt-page select {
+            color: var(--wt-text);
+        }
+
+        #wtCreate {
+            min-height: 2.55em;
+            padding: .55em 1.35em;
+            border: 1px solid #216a96 !important;
+            border-radius: .28em;
+            background: var(--wt-primary) !important;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, .16) !important;
+            color: #fff !important;
+            font-weight: 600;
+        }
+
+        #wtCreate:hover:not(:disabled) {
+            background: #216f9f !important;
+        }
+
+        #wtCreate:disabled {
+            border-color: #aeb8bf !important;
+            background: #aeb8bf !important;
+            color: #fff !important;
+            opacity: .72;
+        }
+
+        .wt-refresh {
+            min-height: 2.35em;
+            padding: .45em .95em;
+            border: 1px solid #aeb8bf !important;
+            border-radius: .28em;
+            background: transparent !important;
+            color: var(--wt-text) !important;
+            font-weight: 500;
+        }
+
+        .wt-refresh:hover:not(:disabled) {
+            border-color: #6f7d87 !important;
+            background: rgba(38, 49, 58, .08) !important;
+        }
+
+        #wtCreate:focus-visible,
+        .wt-refresh:focus-visible,
+        .wt-roomActions button.wt-action:focus-visible {
+            outline: 2px solid #2d88bd;
+            outline-offset: 2px;
+        }
+
+        .wt-roomList {
+            display: flex;
+            flex-direction: column;
+            gap: .75em;
+        }
+
+        .wt-roomCard {
+            padding: 1.1em 1.25em;
+            border: 1px solid var(--wt-border);
+            border-radius: .3em;
+            background: var(--theme-background-color, #fff);
+            box-shadow: 0 1px 3px rgba(20, 29, 36, .08);
+        }
+
+        .wt-roomHeader {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1em;
+        }
+
+        .wt-roomName {
+            margin: 0;
+            color: var(--wt-text);
+            font-size: 1.08em;
+            font-weight: 600;
+        }
+
+        .wt-roomMeta {
+            margin-top: .35em;
+            color: var(--wt-muted) !important;
+            line-height: 1.55;
+        }
+
+        .wt-roomMeta + .wt-roomMeta {
+            margin-top: .55em;
+        }
+
+        .wt-roomStateDescription {
+            margin: .3em 0 0;
+            color: var(--wt-muted) !important;
+            line-height: 1.45;
+        }
+
+        .wt-roomState {
+            flex: 0 0 auto;
+            padding: .3em .7em;
+            border: 1px solid currentColor;
+            border-radius: 999px;
+            font-size: .86em;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .wt-roomState-waiting {
+            border-color: #d6a43b;
+            background: #fff7df;
+            color: #855d00;
+        }
+
+        .wt-roomState-barrier {
+            border-color: #58a9d0;
+            background: #e8f5fc;
+            color: #09648e;
+        }
+
+        .wt-roomState-watching {
+            border-color: #5aa477;
+            background: #eaf7ef;
+            color: #23663f;
+        }
+
+        .wt-roomState-unavailable {
+            border-color: #d8797f;
+            background: #fff0f1;
+            color: #9f353e;
+        }
+
+        .wt-roomError {
+            margin-top: .75em;
+            color: #a43b44 !important;
+        }
+
+        .wt-roomActions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: .5em;
+            margin-top: 1em;
+            padding-top: .9em;
+            border-top: 1px solid var(--wt-border);
+        }
+
+        .wt-roomActions button.wt-action {
+            flex: 0 0 auto;
+            min-width: 7.25em;
+            min-height: 2.45em;
+            padding: .5em .85em;
+            margin: 0;
+            border: 1px solid #aeb8bf !important;
+            border-radius: .35em;
+            background: #fff !important;
+            box-shadow: none;
+            color: #36434d !important;
+            font-size: .94em;
+            font-weight: 500;
+            line-height: 1.2;
+            transition: background-color .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease;
+        }
+
+        .wt-roomActions button.wt-action:hover:not(:disabled) {
+            border-color: #6f7d87 !important;
+            background: #f1f4f6 !important;
+        }
+
+        .wt-roomActions button.wt-action:disabled {
+            opacity: .55;
+        }
+
+        .wt-roomActions button.wt-action--primary {
+            border-color: #216a96 !important;
+            background: var(--wt-primary) !important;
+            color: #fff !important;
+        }
+
+        .wt-roomActions button.wt-action--primary:hover:not(:disabled) {
+            border-color: #1b5b82 !important;
+            background: #216f9f !important;
+        }
+
+        .wt-roomActions button.wt-action--accent {
+            border-color: #37835a !important;
+            background: #4b9b6c !important;
+            color: #fff !important;
+        }
+
+        .wt-roomActions button.wt-action--accent:hover:not(:disabled) {
+            border-color: #2e704c !important;
+            background: #3f895f !important;
+        }
+
+        .wt-roomActions button.wt-action--danger {
+            border-color: #d47a80 !important;
+            background: #fff !important;
+            color: #a43b44 !important;
+        }
+
+        .wt-roomActions button.wt-action--danger:hover:not(:disabled) {
+            border-color: #b94f58 !important;
+            background: #fff0f1 !important;
+        }
+
+        .wt-emptyState {
+            padding: 1.25em;
+            border: 1px dashed #aeb8bf;
+            border-radius: .3em;
+            background: var(--wt-surface);
+        }
+
+        .wt-emptyState p {
+            margin: .4em 0 0;
+        }
+
+        .wt-help ol {
+            margin: 0;
+            padding-left: 1.4em;
+            line-height: 1.8;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .wt-page {
+                --wt-text: #f1f3f5;
+                --wt-muted: #b5bec6;
+                --wt-border: rgba(255, 255, 255, .18);
+                --wt-surface: rgba(255, 255, 255, .045);
+            }
+
+            .wt-roomCard,
+            .wt-roomActions button.wt-action,
+            .wt-roomActions button.wt-action--danger,
+            .wt-refresh {
+                background: rgba(255, 255, 255, .06) !important;
+                color: var(--wt-text) !important;
+            }
+
+            .wt-roomActions button.wt-action:hover:not(:disabled),
+            .wt-refresh:hover:not(:disabled) {
+                background: rgba(255, 255, 255, .13) !important;
+            }
+
+            .wt-roomState-waiting {
+                background: rgba(214, 164, 59, .18);
+                color: #f4c96b;
+            }
+
+            .wt-roomState-barrier {
+                background: rgba(88, 169, 208, .18);
+                color: #8ed1f0;
+            }
+
+            .wt-roomState-watching {
+                background: rgba(90, 164, 119, .18);
+                color: #9bdeb2;
+            }
+
+            .wt-roomState-unavailable {
+                background: rgba(216, 121, 127, .18);
+                color: #f1a2a8;
+            }
+
+            .wt-roomError {
+                color: #f1a2a8 !important;
+            }
+        }
+
+        @media (max-width: 40em) {
+            .wt-formGrid {
+                grid-template-columns: 1fr;
+            }
+
+            .wt-fieldWide {
+                grid-column: auto;
+            }
+
+            .wt-roomHeader {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: .65em;
+            }
+
+            .wt-roomActions {
+                gap: .45em;
+            }
+
+            .wt-roomActions button.wt-action {
+                flex: 1 1 calc(50% - .45em);
+                min-width: 0;
+            }
+        }
+
+        @media (max-width: 28em) {
+            .wt-roomActions button.wt-action {
+                flex-basis: 100%;
+            }
+        }
+    </style>
+
+    <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
+        <div class="wt-pageHeader">
+            <h1>一起看</h1>
+            <p class="sectionDescription wt-lead">
+                创建房间后，两位参与者打开同一视频，播放、暂停和进度会自动同步。
+            </p>
+            <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite">正在加载…</p>
+        </div>
+
+        <div class="verticalSection wt-section" id="wtAdminSection">
+            <div class="wt-sectionHeading">
+                <div>
+                    <h2>1. 创建房间</h2>
+                    <p class="fieldDescription wt-sectionDescription">
+                        选择两名参与者，再指定一人为主用户（以主用户的播放进度为准）。
+                    </p>
+                </div>
             </div>
-            <div style="display:flex; flex-wrap:wrap; gap:1em; align-items:flex-end;">
-                <div class="selectContainer">
-                    <select is="emby-select" id="wtUserA" label="参与者 A"></select>
+
+            <div class="wt-formGrid">
+                <div class="inputContainer wt-fieldWide">
+                    <input is="emby-input" id="wtRoomName" label="房间名称" placeholder="例如：今晚的电影" autocomplete="off" />
+                    <div class="fieldDescription">名称只用于在本页识别房间。</div>
                 </div>
                 <div class="selectContainer">
-                    <select is="emby-select" id="wtUserB" label="参与者 B"></select>
+                    <select is="emby-select" id="wtUserA" label="参与者 1"></select>
                 </div>
                 <div class="selectContainer">
+                    <select is="emby-select" id="wtUserB" label="参与者 2"></select>
+                </div>
+                <div class="selectContainer wt-fieldWide">
                     <select is="emby-select" id="wtPrimary" label="主用户"></select>
+                    <div class="fieldDescription">主用户的播放位置作为同步基准。</div>
                 </div>
-                <button is="emby-button" id="wtCreate" type="button" class="raised">创建房间</button>
+            </div>
+
+            <div class="wt-formActions">
+                <button is="emby-button" id="wtCreate" type="button" class="raised button-submit" disabled>创建房间</button>
+                <p class="fieldDescription wt-formHint" id="wtFormHint" role="status" aria-live="polite">正在加载用户列表…</p>
             </div>
         </div>
 
-        <div class="verticalSection">
-            <h2>房间列表</h2>
-            <div id="wtRooms" class="sectionDescription"></div>
+        <div class="verticalSection wt-section">
+            <div class="wt-sectionHeading">
+                <div>
+                    <h2>2. 房间</h2>
+                    <p class="fieldDescription wt-sectionDescription">状态变为“同步中”后，两位参与者会自动保持一致。</p>
+                </div>
+                <button is="emby-button" id="wtRefresh" type="button" class="button-flat wt-refresh">刷新</button>
+            </div>
+            <div id="wtRooms" class="wt-roomList" aria-live="polite" aria-busy="true"></div>
+        </div>
+
+        <div class="verticalSection wt-section wt-help">
+            <h2>使用方法</h2>
+            <ol>
+                <li>创建房间并选择两名参与者。</li>
+                <li>两人分别登录 Emby，打开同一视频。</li>
+                <li>看到“同步中”后即可一起观看。</li>
+            </ol>
+            <p class="fieldDescription">一方暂时不在线时，房间会等待；恢复后会继续尝试同步。</p>
         </div>
     </div>
 </div>

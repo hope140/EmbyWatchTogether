@@ -103,6 +103,57 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void DifferentItems_DoNotReceiveCommands()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1"),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2"));
+
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Contains("不同视频", result.Error);
+            Assert.Empty(_issuer.Issued);
+        }
+
+        [Fact]
+        public void PrimaryPositionResetToZero_DoesNotSeekSecondary()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Contains("播放已停止", result.Error);
+            Assert.Null(runtime.Barrier);
+            Assert.Empty(runtime.Pending);
+            Assert.Empty(runtime.Suppressed);
+            Assert.Empty(runtime.Previous);
+            Assert.Empty(_issuer.Issued);
+            Assert.DoesNotContain(_issuer.Issued, i =>
+                i.command == RemoteCommands.Seek && i.positionTicks == 0);
+
+            // Re-opening the same item near the same position starts a new barrier;
+            // the old watching snapshot is never reused.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Contains(_issuer.Issued, i => i.command == RemoteCommands.Pause);
+        }
+        [Fact]
         public void WatchingTick_PropagatesPauseFromPrimary()
         {
             var room = CreateRoom();

@@ -23,6 +23,8 @@ namespace Emby.Plugins.WatchTogether
 
         public int DriftRounds { get; set; }
 
+        public string SyncItemId { get; set; }
+
         public BarrierState Barrier { get; set; }
 
         public void ResetToWaiting()
@@ -35,6 +37,7 @@ namespace Emby.Plugins.WatchTogether
             Previous.Clear();
             PreviousAtUtc = null;
             DriftRounds = 0;
+            SyncItemId = null;
         }
     }
 }
