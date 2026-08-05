@@ -2,8 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using MediaBrowser.Model.Serialization;
 
 namespace Emby.Plugins.WatchTogether
 {
@@ -22,19 +21,13 @@ namespace Emby.Plugins.WatchTogether
     /// </summary>
     public sealed class RoomStore
     {
-        private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        };
-
         private readonly string _filePath;
+        private readonly IJsonSerializer _serializer;
         private readonly object _lock = new object();
         private readonly Dictionary<string, Room> _rooms =
             new Dictionary<string, Room>(StringComparer.OrdinalIgnoreCase);
 
-        public RoomStore(string filePath)
+        public RoomStore(string filePath, IJsonSerializer serializer)
         {
             if (string.IsNullOrWhiteSpace(filePath))
             {
@@ -42,6 +35,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             _filePath = filePath;
+            _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
             Reload();
         }
 
@@ -117,7 +111,7 @@ namespace Emby.Plugins.WatchTogether
 
             try
             {
-                var dtos = JsonSerializer.Deserialize<List<RoomDto>>(File.ReadAllText(_filePath), JsonOptions);
+                var dtos = _serializer.DeserializeFromString<List<RoomDto>>(File.ReadAllText(_filePath));
                 if (dtos == null)
                 {
                     return;
@@ -160,8 +154,7 @@ namespace Emby.Plugins.WatchTogether
                 Directory.CreateDirectory(directory);
             }
 
-            var payload = JsonSerializer.Serialize(
-                _rooms.Values.Select(RoomDto.From).ToList(), JsonOptions);
+            var payload = _serializer.SerializeToString(_rooms.Values.Select(RoomDto.From).ToList());
             var tempPath = _filePath + ".tmp";
             File.WriteAllText(tempPath, payload);
             if (File.Exists(_filePath))
