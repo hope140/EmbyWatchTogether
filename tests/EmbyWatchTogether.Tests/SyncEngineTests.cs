@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
@@ -11,6 +12,44 @@ namespace Emby.Plugins.WatchTogether.Tests
         private readonly RecordingIssuer _issuer = new RecordingIssuer();
         private readonly RoomManager _rooms = new RoomManager();
         private readonly FakeSnapshotProvider _provider = new FakeSnapshotProvider();
+
+        [Fact]
+        public void RequestImmediatePoll_WakesBackgroundLoop_AndDisposeIsIdempotent()
+        {
+            var rooms = new RoomManager();
+            rooms.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { "u1", "u2" }, "u1");
+            var provider = new CountingSnapshotProvider();
+            var engine = new SyncEngine(
+                rooms,
+                provider,
+                new RecordingIssuer(),
+                () => "server-1",
+                pollIntervalSeconds: 5.0);
+
+            try
+            {
+                engine.Start();
+                Assert.True(provider.WaitForCount(1, TimeSpan.FromSeconds(2)));
+
+                var countAfterInitialPoll = provider.Count;
+                engine.RequestImmediatePoll();
+
+                Assert.True(provider.WaitForCount(
+                    countAfterInitialPoll + 1,
+                    TimeSpan.FromSeconds(2)));
+
+                engine.Stop();
+                engine.Dispose();
+                engine.Dispose();
+                engine.RequestImmediatePoll();
+            }
+            finally
+            {
+                engine.Dispose();
+            }
+        }
 
         [Fact]
         public void PollOnce_NoRooms_ReturnsEmpty()
@@ -389,6 +428,30 @@ namespace Emby.Plugins.WatchTogether.Tests
             public void Advance(double seconds)
             {
                 Now = Now.AddSeconds(seconds);
+            }
+        }
+
+        private sealed class CountingSnapshotProvider : ISessionSnapshotProvider
+        {
+            private int _count;
+
+            public int Count => Volatile.Read(ref _count);
+
+            public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
+            {
+                Interlocked.Increment(ref _count);
+                return Array.Empty<SessionSnapshot>();
+            }
+
+            public bool WaitForCount(int expected, TimeSpan timeout)
+            {
+                var deadline = DateTime.UtcNow + timeout;
+                while (Count < expected && DateTime.UtcNow < deadline)
+                {
+                    Thread.Sleep(10);
+                }
+
+                return Count >= expected;
             }
         }
 

@@ -34,6 +34,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly bool _pauseOtherOnPlaybackStop;
         private readonly object _lock = new object();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+        private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
         private Thread _thread;
         private bool _disposed;
 
@@ -59,7 +60,7 @@ namespace Emby.Plugins.WatchTogether
         {
             lock (_lock)
             {
-                if (_thread != null)
+                if (_disposed || _thread != null)
                 {
                     return;
                 }
@@ -75,7 +76,45 @@ namespace Emby.Plugins.WatchTogether
 
         public void Stop()
         {
-            _cts.Cancel();
+            Thread thread;
+            lock (_lock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _cts.Cancel();
+                _wakeEvent.Set();
+                thread = _thread;
+            }
+
+            JoinThread(thread);
+        }
+
+        /// <summary>
+        /// Requests one immediate poll. AutoResetEvent coalesces concurrent
+        /// requests so a burst of session events cannot create a poll storm.
+        /// </summary>
+        public void RequestImmediatePoll()
+        {
+            lock (_lock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                try
+                {
+                    _wakeEvent.Set();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // A concurrent disposal has already completed the wake-up
+                    // path; callers must not observe a disposal race.
+                }
+            }
         }
 
         public IReadOnlyList<RoomPollResult> PollOnce(DateTimeOffset now)
@@ -253,19 +292,31 @@ namespace Emby.Plugins.WatchTogether
 
         public void Dispose()
         {
-            if (_disposed)
+            Thread thread;
+            lock (_lock)
             {
-                return;
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                _cts.Cancel();
+                _wakeEvent.Set();
+                thread = _thread;
             }
 
-            _disposed = true;
-            Stop();
+            JoinThread(thread);
+            _wakeEvent.Dispose();
             _cts.Dispose();
         }
 
         private void Loop()
         {
             var token = _cts.Token;
+            var waitHandles = new WaitHandle[] { token.WaitHandle, _wakeEvent };
+            var timeoutMilliseconds = GetPollTimeoutMilliseconds();
+
             while (!token.IsCancellationRequested)
             {
                 try
@@ -279,12 +330,40 @@ namespace Emby.Plugins.WatchTogether
 
                 try
                 {
-                    token.WaitHandle.WaitOne(TimeSpan.FromSeconds(_pollIntervalSeconds));
+                    WaitHandle.WaitAny(waitHandles, timeoutMilliseconds);
                 }
                 catch
                 {
                     return;
                 }
+            }
+        }
+
+        private int GetPollTimeoutMilliseconds()
+        {
+            var milliseconds = _pollIntervalSeconds * 1000.0;
+            if (milliseconds >= int.MaxValue)
+            {
+                return int.MaxValue;
+            }
+
+            return Math.Max(1, (int)Math.Ceiling(milliseconds));
+        }
+
+        private static void JoinThread(Thread thread)
+        {
+            if (thread == null || thread == Thread.CurrentThread)
+            {
+                return;
+            }
+
+            try
+            {
+                thread.Join();
+            }
+            catch
+            {
+                // A stopping/disposal path must not surface thread races.
             }
         }
 

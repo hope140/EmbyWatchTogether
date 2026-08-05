@@ -10,7 +10,7 @@ namespace Emby.Plugins.WatchTogether
     {
         public bool Enabled { get; set; } = true;
 
-        public double PollIntervalSeconds { get; set; } = 1.0;
+        public double PollIntervalSeconds { get; set; } = 0.5;
 
         public bool PauseOtherOnPlaybackStop { get; set; } = true;
 
