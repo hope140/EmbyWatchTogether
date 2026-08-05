@@ -44,9 +44,20 @@ namespace Emby.Plugins.WatchTogether
 
         public override Guid Id => PluginId;
 
-        /// <summary>
-        /// Web UI pages are registered by the S6 stack; none yet.
-        /// </summary>
-        public IEnumerable<PluginPageInfo> GetPages() => Array.Empty<PluginPageInfo>();
+        public IEnumerable<PluginPageInfo> GetPages()
+        {
+            return new[]
+            {
+                new PluginPageInfo
+                {
+                    Name = "WatchTogether",
+                    DisplayName = "Watch Together",
+                    EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
+                    EnableInMainMenu = true,
+                    MenuSection = "server",
+                    MenuIcon = "videocam",
+                },
+            };
+        }
     }
 }
