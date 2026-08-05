@@ -89,13 +89,14 @@ namespace Emby.Plugins.WatchTogether
         {
             RequireAdmin();
             var plugin = RequirePlugin();
-            if (string.IsNullOrWhiteSpace(plugin.ServerId))
+            string serverId = plugin.ResolveServerId();
+            if (string.IsNullOrWhiteSpace(serverId))
             {
                 throw new ArgumentException("server identity is not resolved yet");
             }
 
             var room = plugin.Rooms.CreateRoom(
-                serverId: plugin.ServerId,
+                serverId: serverId,
                 serverUrl: string.Empty,
                 name: request.Name,
                 adminUserId: CurrentUserId(),

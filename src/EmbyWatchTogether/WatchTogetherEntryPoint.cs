@@ -37,17 +37,8 @@ namespace Emby.Plugins.WatchTogether
                 return;
             }
 
-            try
-            {
-                var systemInfo = _applicationHost
-                    .GetSystemInfo(null, null, CancellationToken.None)
-                    .GetAwaiter().GetResult();
-                plugin.ServerId = systemInfo?.Id;
-            }
-            catch
-            {
-                // Server id stays empty; rooms are marked unavailable until it resolves.
-            }
+            plugin.ApplicationHost = _applicationHost;
+            plugin.ResolveServerId();
 
             var bridge = new SessionBridge(_sessionManager);
             var store = new RoomStore(Path.Combine(plugin.DataFolderPath, "rooms.json"), _jsonSerializer);
@@ -64,7 +55,7 @@ namespace Emby.Plugins.WatchTogether
                 rooms,
                 provider,
                 issuer,
-                () => plugin.ServerId,
+                plugin.ResolveServerId,
                 pollIntervalSeconds: plugin.Configuration.PollIntervalSeconds);
             _syncEngine.Start();
         }

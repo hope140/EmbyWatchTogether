@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Controller;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
@@ -36,6 +38,37 @@ namespace Emby.Plugins.WatchTogether
         public ICommandIssuer Issuer { get; internal set; }
 
         public string ServerId { get; internal set; }
+
+        public IServerApplicationHost ApplicationHost { get; internal set; }
+
+        /// <summary>
+        /// Lazily resolves and caches the server id. Called at startup and
+        /// retried by room creation / the sync engine until it succeeds.
+        /// </summary>
+        public string ResolveServerId()
+        {
+            if (!string.IsNullOrEmpty(ServerId))
+            {
+                return ServerId;
+            }
+
+            try
+            {
+                var info = ApplicationHost?
+                    .GetPublicSystemInfo(CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                if (!string.IsNullOrEmpty(info?.Id))
+                {
+                    ServerId = info.Id;
+                }
+            }
+            catch
+            {
+                // Kept empty; callers retry lazily.
+            }
+
+            return ServerId;
+        }
 
         public override string Name => "Watch Together";
 
