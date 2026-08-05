@@ -276,6 +276,24 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void StoppedParticipant_NotifiesOnlyOnceUntilPlaybackResumes()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Single(_messageIssuer.Issued);
+        }
+
+        [Fact]
         public void StoppedParticipant_DoesNotNotifyWhenDisabled()
         {
             var room = CreateRoom();
