@@ -75,10 +75,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function setConfigBusy(page, isBusy) {
-        var checkbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+        var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+        var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
         var saveButton = page.querySelector('#wtSaveConfig');
-        if (checkbox) {
-            checkbox.disabled = isBusy;
+        if (pauseCheckbox) {
+            pauseCheckbox.disabled = isBusy;
+        }
+        if (notifyCheckbox) {
+            notifyCheckbox.disabled = isBusy;
         }
         if (saveButton) {
             saveButton.disabled = isBusy || !page._wtConfigReady;
@@ -88,12 +92,17 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function applyPluginConfiguration(page, config) {
-        var checkbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+        var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+        var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
         page._wtPluginConfiguration = config || {};
         page._wtConfigReady = true;
-        if (checkbox) {
-            checkbox.checked = page._wtPluginConfiguration.PauseOtherOnPlaybackStop !== false;
-            checkbox.disabled = false;
+        if (pauseCheckbox) {
+            pauseCheckbox.checked = page._wtPluginConfiguration.PauseOtherOnPlaybackStop !== false;
+            pauseCheckbox.disabled = false;
+        }
+        if (notifyCheckbox) {
+            notifyCheckbox.checked = page._wtPluginConfiguration.NotifyOtherOnPlaybackStop !== false;
+            notifyCheckbox.disabled = false;
         }
         var saveButton = page.querySelector('#wtSaveConfig');
         if (saveButton) {
@@ -110,10 +119,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return config;
         }).catch(function (error) {
             page._wtConfigReady = false;
-            var checkbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+            var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+            var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
             var saveButton = page.querySelector('#wtSaveConfig');
-            if (checkbox) {
-                checkbox.disabled = true;
+            if (pauseCheckbox) {
+                pauseCheckbox.disabled = true;
+            }
+            if (notifyCheckbox) {
+                notifyCheckbox.disabled = true;
             }
             if (saveButton) {
                 saveButton.disabled = true;
@@ -130,8 +143,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function savePluginConfiguration(page) {
-        var checkbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
-        if (!checkbox || !page._wtConfigReady) {
+        var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
+        var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
+        if (!pauseCheckbox || !notifyCheckbox || !page._wtConfigReady) {
             return Promise.resolve();
         }
 
@@ -139,7 +153,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         setConfigStatus(page, '正在保存配置…');
         return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             config = config || {};
-            config.PauseOtherOnPlaybackStop = checkbox.checked;
+            config.PauseOtherOnPlaybackStop = pauseCheckbox.checked;
+            config.NotifyOtherOnPlaybackStop = notifyCheckbox.checked;
             return ApiClient.updatePluginConfiguration(pluginId, config);
         }).then(function () {
             return ApiClient.getPluginConfiguration(pluginId);

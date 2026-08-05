@@ -24,10 +24,20 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
+            Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
             Assert.Contains("wtSaveConfig", html);
             Assert.Contains("PauseOtherOnPlaybackStop", javascript);
+            Assert.Contains("NotifyOtherOnPlaybackStop", javascript);
             Assert.Contains("getPluginConfiguration", javascript);
             Assert.Contains("updatePluginConfiguration", javascript);
+
+            var roomsIndex = html.IndexOf("id=\"wtRooms\"", System.StringComparison.Ordinal);
+            var configIndex = html.IndexOf("id=\"wtConfigSection\"", System.StringComparison.Ordinal);
+            var helpIndex = html.IndexOf("class=\"verticalSection wt-section wt-help\"", System.StringComparison.Ordinal);
+
+            Assert.True(roomsIndex >= 0);
+            Assert.True(configIndex > roomsIndex);
+            Assert.True(helpIndex > configIndex);
         }
 
         private static string ReadResource(Assembly assembly, string resourceName)
