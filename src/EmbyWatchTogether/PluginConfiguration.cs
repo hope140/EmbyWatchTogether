@@ -12,6 +12,8 @@ namespace Emby.Plugins.WatchTogether
 
         public double PollIntervalSeconds { get; set; } = 1.0;
 
+        public bool PauseOtherOnPlaybackStop { get; set; } = true;
+
         public int MaxRuntimeDifferenceSeconds { get; set; } = 3;
 
         public int SeekToleranceSeconds { get; set; } = 2;

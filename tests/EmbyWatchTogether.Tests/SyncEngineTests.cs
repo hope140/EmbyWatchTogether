@@ -119,7 +119,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void PrimaryPositionResetToZero_DoesNotSeekSecondary()
+        public void PrimaryPositionResetToZero_PausesSecondaryByDefault()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -138,9 +138,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Empty(runtime.Pending);
             Assert.Empty(runtime.Suppressed);
             Assert.Empty(runtime.Previous);
-            Assert.Empty(_issuer.Issued);
+            Assert.Contains(_issuer.Issued, i =>
+                i.userId == "u2" && i.command == RemoteCommands.Pause);
             Assert.DoesNotContain(_issuer.Issued, i =>
-                i.command == RemoteCommands.Seek && i.positionTicks == 0);
+                i.userId == "u1" && i.command == RemoteCommands.Pause);
+            Assert.DoesNotContain(_issuer.Issued, i =>
+                i.userId == "u2" && i.command == RemoteCommands.Seek && i.positionTicks == 0);
 
             // Re-opening the same item near the same position starts a new barrier;
             // the old watching snapshot is never reused.
@@ -153,6 +156,66 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Barrier, result.State);
             Assert.Contains(_issuer.Issued, i => i.command == RemoteCommands.Pause);
         }
+
+        [Fact]
+        public void StoppedParticipant_PausesOnlyTheOnlineParticipant()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Contains(_issuer.Issued, i =>
+                i.userId == "u2" && i.command == RemoteCommands.Pause);
+            Assert.DoesNotContain(_issuer.Issued, i =>
+                i.userId == "u1" && i.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void MissingParticipant_PausesOnlyTheRemainingParticipant()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Contains(_issuer.Issued, i =>
+                i.userId == "u2" && i.command == RemoteCommands.Pause);
+            Assert.DoesNotContain(_issuer.Issued, i => i.userId == "u1");
+        }
+
+        [Fact]
+        public void PrimaryPositionReset_DoesNotPauseSecondaryWhenDisabled()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine(pauseOtherOnPlaybackStop: false);
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Contains("播放已停止", result.Error);
+            Assert.Empty(_issuer.Issued);
+            Assert.Empty(runtime.Pending);
+            Assert.Empty(runtime.Previous);
+        }
+
         [Fact]
         public void WatchingTick_PropagatesPauseFromPrimary()
         {
@@ -251,10 +314,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.True(_issuer.Issued.Count > issuedBefore);
         }
 
-        private SyncEngine CreateEngine(string serverId = "server-1")
+        private SyncEngine CreateEngine(
+            string serverId = "server-1",
+            bool pauseOtherOnPlaybackStop = true)
         {
             return new SyncEngine(
-                _rooms, _provider, _issuer, () => serverId, () => _clock.Now, pollIntervalSeconds: 1.0);
+                _rooms, _provider, _issuer, () => serverId, () => _clock.Now,
+                pollIntervalSeconds: 1.0,
+                pauseOtherOnPlaybackStop: pauseOtherOnPlaybackStop);
         }
 
         private Room CreateRoom()
@@ -303,12 +370,13 @@ namespace Emby.Plugins.WatchTogether.Tests
             string userId,
             bool paused,
             long position,
-            string itemId = "i1")
+            string itemId = "i1",
+            bool stopped = false)
         {
             return new SessionSnapshot(
                 sessionId, userId, itemId, "m1",
                 position, 100 * SessionSnapshot.TicksPerSecond, paused, 1.0,
-                stopped: false, supportsRemoteControl: true,
+                stopped: stopped, supportsRemoteControl: true,
                 new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek" }),
                 new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         }
