@@ -26,6 +26,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
             Assert.Contains("wtSaveConfig", html);
+            Assert.Contains("--wt-text: var(--theme-text-color, #26313a);", html);
+            Assert.Contains("--wt-muted: var(--theme-secondary-text-color, #68737d);", html);
+            Assert.DoesNotContain("@media (prefers-color-scheme: dark)", html);
             Assert.Contains("PauseOtherOnPlaybackStop", javascript);
             Assert.Contains("NotifyOtherOnPlaybackStop", javascript);
             Assert.Contains("getPluginConfiguration", javascript);
