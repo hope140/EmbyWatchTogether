@@ -274,32 +274,47 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void WatchingTick_DriftCorrectionAfterTwoRounds()
+        public void WatchingTick_NaturalRateDifferenceAndSustainedDriftDoNotSeek()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
             EnterWatching(engine, room);
             _issuer.Issued.Clear();
 
-            // Round 1: small divergence (> 2s apart, but each within 5s of its
-            // expected position) -> drift counter increments, no command yet.
+            // Each round advances normally, but the playback-rate difference
+            // gradually grows the position gap beyond the seek threshold.
+            for (int round = 1; round <= 6; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false, position: (50 + round) * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false, position: (50 + 2 * round) * SessionSnapshot.TicksPerSecond));
+                _clock.Advance(1);
+                engine.PollOnce(_clock.Now);
+
+                Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+            }
+
+            Assert.Equal(0, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+        }
+
+        [Fact]
+        public void WatchingTick_SingleRoundLargeJumpSeeksOnce()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
-            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
 
-            // Round 2: divergence persists -> drift seek issued to the follower.
-            _clock.Advance(1);
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
-            engine.PollOnce(_clock.Now);
-
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
             Assert.Contains(_issuer.Issued, i =>
                 i.userId == "u2" && i.command == RemoteCommands.Seek &&
-                i.positionTicks == 53 * SessionSnapshot.TicksPerSecond);
+                i.positionTicks == 60 * SessionSnapshot.TicksPerSecond);
         }
 
         [Fact]
@@ -311,14 +326,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             _issuer.Issued.Clear();
 
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
@@ -326,25 +335,26 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.True(_rooms.GetRuntime(room.Id).Pending.TryGetValue("u2", out var pending));
             Assert.Equal(RemoteCommands.Seek, pending.Command);
 
-            // Several rounds with an unchanged backend position must not repeat
-            // the pending seek before its timeout.
+            // Several normal rounds must not repeat or reverse the pending seek
+            // before its timeout.
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 54 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+                Snapshot("s1", "u1", paused: false, position: 61 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 55 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+                Snapshot("s1", "u1", paused: false, position: 62 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
+
             Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
             Assert.DoesNotContain(_issuer.Issued, i =>
                 i.userId == "u1" && i.command == RemoteCommands.Seek);
         }
 
         [Fact]
-        public void WatchingTick_AcknowledgedSeekAllowsLaterCorrection()
+        public void WatchingTick_AcknowledgedSeekDoesNotRepeatForSustainedDrift()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -352,37 +362,39 @@ namespace Emby.Plugins.WatchTogether.Tests
             _issuer.Issued.Clear();
 
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
+                Snapshot("s1", "u1", paused: false, position: 61 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
             Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
 
             // The target position acknowledges the pending seek.
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 54 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
+                Snapshot("s1", "u1", paused: false, position: 61 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
             Assert.DoesNotContain(RemoteCommands.Seek, _rooms.GetRuntime(room.Id).Pending.Values.Select(p => p.Command));
 
-            // Once acknowledged, a later sustained drift can issue another seek.
+            // Once acknowledged, a later sustained drift must not issue another seek.
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 54 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(6);
+                Snapshot("s1", "u1", paused: false, position: 64 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 58 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 65 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 59 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
-            Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
-            Assert.Contains(_issuer.Issued, i =>
-                i.userId == "u2" && i.command == RemoteCommands.Seek &&
-                i.positionTicks == 54 * SessionSnapshot.TicksPerSecond);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
         }
 
         [Fact]
@@ -394,16 +406,13 @@ namespace Emby.Plugins.WatchTogether.Tests
             _issuer.Issued.Clear();
 
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 46 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
 
+            // The unacknowledged seek is retried once after the timeout.
             _clock.Advance(3);
             engine.PollOnce(_clock.Now);
             Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
@@ -415,7 +424,6 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Waiting, runtime.State);
             Assert.Equal("playback command was not acknowledged", runtime.Error);
         }
-
         [Fact]
         public void PendingCommand_NotAcknowledged_RetriesThenFailsToWaiting()
         {

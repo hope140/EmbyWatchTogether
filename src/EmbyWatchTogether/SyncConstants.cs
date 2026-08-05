@@ -21,6 +21,5 @@ namespace Emby.Plugins.WatchTogether
 
         public const double BarrierTimeoutSeconds = 3.0;
 
-        public const int DriftRoundsBeforeSeek = 2;
     }
 }

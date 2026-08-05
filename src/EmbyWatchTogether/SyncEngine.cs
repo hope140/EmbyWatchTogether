@@ -236,7 +236,6 @@ namespace Emby.Plugins.WatchTogether
                         runtime.State = RoomState.Waiting;
                         runtime.Barrier = null;
                         runtime.Previous.Clear();
-                        runtime.DriftRounds = 0;
                         results.Add(Result(room, runtime, eligible));
                         continue;
                     }
@@ -253,7 +252,6 @@ namespace Emby.Plugins.WatchTogether
                             runtime.State = RoomState.Waiting;
                             runtime.Barrier = null;
                             runtime.Previous.Clear();
-                            runtime.DriftRounds = 0;
                         }
                     }
                     else if (eligible)
@@ -280,7 +278,6 @@ namespace Emby.Plugins.WatchTogether
                         runtime.State = RoomState.Waiting;
                         runtime.Barrier = null;
                         runtime.Previous.Clear();
-                        runtime.DriftRounds = 0;
                     }
 
                     results.Add(Result(room, runtime, eligible));
@@ -706,7 +703,6 @@ namespace Emby.Plugins.WatchTogether
                         }
 
                         runtime.PreviousAtUtc = now;
-                        runtime.DriftRounds = 0;
                         runtime.SyncItemId = barrier.ItemId;
                     }
                     else if ((now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
@@ -798,7 +794,6 @@ namespace Emby.Plugins.WatchTogether
                 return;
             }
 
-            double elapsedSeconds = Math.Max(0, (now - runtime.PreviousAtUtc.Value).TotalSeconds);
             string primary = room.PrimaryUserId;
             var pauseChanges = new List<(string userId, bool paused)>();
             var seekChanges = new List<(string userId, long positionTicks)>();
@@ -842,13 +837,10 @@ namespace Emby.Plugins.WatchTogether
                     }
                 }
 
-                long expected = old.PositionTicks;
-                if (!old.IsPaused)
-                {
-                    expected += (long)(elapsedSeconds * old.PlaybackRate * SyncConstants.TicksPerSecond);
-                }
-
-                if (Math.Abs(current.PositionTicks - expected) >= SyncConstants.DriftThresholdTicks)
+                // Only treat a large position change within this poll interval as
+                // a user-issued seek. Natural playback-rate differences accumulate
+                // across rounds and must not trigger periodic correction seeks.
+                if (Math.Abs(current.PositionTicks - old.PositionTicks) >= SyncConstants.DriftThresholdTicks)
                 {
                     bool pendingSeek = pending != null &&
                         pending.Command == RemoteCommands.Seek;
@@ -892,38 +884,6 @@ namespace Emby.Plugins.WatchTogether
                         Issue(runtime, room, user, snapshot, RemoteCommands.Seek, winner.positionTicks, now);
                     }
                 }
-            }
-
-            bool hasPendingSeek = runtime.Pending.Values.Any(p =>
-                p != null && p.Command == RemoteCommands.Seek);
-            var positions = members
-                .Where(u => snapshots.TryGetValue(u, out var s) && s != null)
-                .Select(u => snapshots[u].PositionTicks)
-                .ToList();
-            if (hasPendingSeek)
-            {
-                runtime.DriftRounds = 0;
-            }
-            else if (positions.Count == 2 && Math.Abs(positions[0] - positions[1]) > SyncConstants.SeekToleranceTicks)
-            {
-                runtime.DriftRounds++;
-            }
-            else
-            {
-                runtime.DriftRounds = 0;
-            }
-
-            if (!hasPendingSeek &&
-                runtime.DriftRounds >= SyncConstants.DriftRoundsBeforeSeek && seekChanges.Count == 0)
-            {
-                var secondary = members.First(u => u != primary);
-                if (snapshots.TryGetValue(primary, out var primarySnapshot) && primarySnapshot != null &&
-                    snapshots.TryGetValue(secondary, out var secondarySnapshot) && secondarySnapshot != null)
-                {
-                    Issue(runtime, room, secondary, secondarySnapshot, RemoteCommands.Seek, primarySnapshot.PositionTicks, now);
-                }
-
-                runtime.DriftRounds = 0;
             }
 
             runtime.Previous.Clear();
