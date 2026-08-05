@@ -24,14 +24,18 @@ namespace Emby.Plugins.WatchTogether
     public sealed class SyncEngine : IDisposable
     {
         private const string StoppedPlaybackError = "播放已停止，等待双方重新打开同一视频";
+        private const string StoppedPlaybackMessageHeader = "一起观看";
+        private const string StoppedPlaybackMessageText = "对方已停止播放，请重新打开视频";
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
         private readonly ICommandIssuer _issuer;
+        private readonly IMessageIssuer _messageIssuer;
         private readonly Func<string> _serverIdProvider;
         private readonly Func<DateTimeOffset> _clock;
         private readonly double _pollIntervalSeconds;
         private readonly bool _pauseOtherOnPlaybackStop;
+        private readonly bool _notifyOtherOnPlaybackStop;
         private readonly object _lock = new object();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
@@ -45,15 +49,19 @@ namespace Emby.Plugins.WatchTogether
             Func<string> serverIdProvider,
             Func<DateTimeOffset> clock = null,
             double pollIntervalSeconds = 1.0,
-            bool pauseOtherOnPlaybackStop = true)
+            bool pauseOtherOnPlaybackStop = true,
+            bool notifyOtherOnPlaybackStop = true,
+            IMessageIssuer messageIssuer = null)
         {
             _roomManager = roomManager ?? throw new ArgumentNullException(nameof(roomManager));
             _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
             _issuer = issuer;
+            _messageIssuer = messageIssuer;
             _serverIdProvider = serverIdProvider ?? (() => string.Empty);
             _clock = clock ?? (() => DateTimeOffset.UtcNow);
             _pollIntervalSeconds = Math.Max(0.05, pollIntervalSeconds);
             _pauseOtherOnPlaybackStop = pauseOtherOnPlaybackStop;
+            _notifyOtherOnPlaybackStop = notifyOtherOnPlaybackStop;
         }
 
         public void Start()
@@ -188,9 +196,25 @@ namespace Emby.Plugins.WatchTogether
                     // stop, not as a user-issued seek, before observing pending commands.
                     if (TryGetStoppedUsers(runtime, room, snapshots, out var stoppedUsers))
                     {
-                        if (_pauseOtherOnPlaybackStop)
+                        // SessionSelector omits stopped/offline sessions, so the
+                        // same stop condition can be observed on every poll until
+                        // the participant starts again. Apply stop side effects
+                        // only on the transition into the stopped state.
+                        bool stopAlreadyHandled = string.Equals(
+                            runtime.Error,
+                            StoppedPlaybackError,
+                            StringComparison.Ordinal);
+                        if (!stopAlreadyHandled)
                         {
-                            PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                            if (_pauseOtherOnPlaybackStop)
+                            {
+                                PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                            }
+
+                            if (_notifyOtherOnPlaybackStop)
+                            {
+                                NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                            }
                         }
 
                         runtime.ResetToWaiting();
@@ -440,6 +464,51 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 Issue(runtime, room, pair.Key, snapshot, RemoteCommands.Pause, null, now);
+            }
+        }
+
+        private void NotifyOtherAfterPlaybackStopped(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            ISet<string> stoppedUsers,
+            DateTimeOffset now)
+        {
+            if (_messageIssuer == null || room == null || snapshots == null)
+            {
+                return;
+            }
+
+            foreach (var pair in snapshots)
+            {
+                var snapshot = pair.Value;
+                if (snapshot == null || !snapshot.Online || snapshot.Stopped ||
+                    (stoppedUsers != null && stoppedUsers.Contains(pair.Key)))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    // Display messages are advisory: a client that rejects the
+                    // capability or fails to receive the message must not alter
+                    // the stop transition or its existing pause behavior.
+                    _messageIssuer.TryIssueMessage(
+                        room.Id,
+                        room.AdminUserId,
+                        pair.Key,
+                        snapshot,
+                        StoppedPlaybackMessageHeader,
+                        StoppedPlaybackMessageText,
+                        timeoutMs: null,
+                        now: now,
+                        out _);
+                }
+                catch
+                {
+                    // Message delivery is best effort and must never block the
+                    // playback state machine.
+                }
             }
         }
 
