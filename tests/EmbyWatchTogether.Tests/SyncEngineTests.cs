@@ -129,8 +129,125 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
             Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
             Assert.Null(_rooms.GetRuntime(room.Id).Barrier);
+        }
+
+        [Fact]
+        public void Barrier_ReanchorsPrimaryAfterPauseAcknowledgement()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+
+            engine.PollOnce(_clock.Now);
+
+            // The primary advances while the pause commands are being applied.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var seek = _issuer.Issued.Last();
+            Assert.Equal(RemoteCommands.Seek, seek.command);
+            Assert.Equal("u2", seek.userId);
+            Assert.Equal(53 * SessionSnapshot.TicksPerSecond, seek.positionTicks);
+        }
+
+        [Fact]
+        public void Barrier_FinalAlignsSecondaryAfterRestore()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 53 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            // Both restore commands are acknowledged, but the secondary starts a
+            // little behind because restore commands are delivered independently.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(room.Id).State);
+
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            var finalAlign = _issuer.Issued.Last();
+            Assert.Equal(RemoteCommands.Seek, finalAlign.command);
+            Assert.Equal("u2", finalAlign.userId);
+            Assert.Equal(53 * SessionSnapshot.TicksPerSecond, finalAlign.positionTicks);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+        }
+
+        [Fact]
+        public void Barrier_SkipsFinalAlignWhenRestoreDriftIsWithinStartupTolerance()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 53 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 52 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+            Assert.Equal(5, _issuer.Issued.Count);
         }
 
         [Fact]
@@ -329,6 +446,8 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now); // restore issued
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // restore acknowledged, enter final alignment stage
             _clock.Advance(1);
             Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
 
@@ -718,6 +837,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 

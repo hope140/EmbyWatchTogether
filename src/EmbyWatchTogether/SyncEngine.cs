@@ -712,6 +712,10 @@ namespace Emby.Plugins.WatchTogether
 
                     if (members.All(u => snapshots[u].IsPaused))
                     {
+                        // The primary may continue playing until Emby applies the
+                        // pause command. Re-anchor after both acknowledgements so
+                        // the secondary does not seek to the stale start snapshot.
+                        barrier.PrimaryPositionTicks = snapshots[room.PrimaryUserId].PositionTicks;
                         barrier.Stage = BarrierStage.Seek;
                         barrier.StartedAtUtc = now;
                         return;
@@ -770,24 +774,64 @@ namespace Emby.Plugins.WatchTogether
                     bool desired = barrier.PrimaryPaused;
                     if (members.All(u => snapshots[u].IsPaused == desired))
                     {
-                        runtime.State = RoomState.Watching;
-                        runtime.Barrier = null;
-                        runtime.Pending.Clear();
-                        runtime.Suppressed.Clear();
-                        runtime.Previous.Clear();
-                        foreach (var pair in snapshots)
+                        // Unpause commands are delivered sequentially. When the
+                        // original state was playing, give the secondary one final
+                        // position correction before declaring the barrier complete.
+                        if (!barrier.PrimaryPaused)
                         {
-                            runtime.Previous[pair.Key] = pair.Value;
+                            barrier.Stage = BarrierStage.FinalAlign;
+                            barrier.StartedAtUtc = now;
+                            return;
                         }
 
-                        runtime.PreviousAtUtc = now;
-                        runtime.SyncItemId = barrier.ItemId;
+                        EnterWatching(runtime, barrier, snapshots, now);
                     }
                     else if (runtime.Pending.Count == 0 &&
                              (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
                         runtime.State = RoomState.Waiting;
                         runtime.Error = "barrier restore timed out";
+                        runtime.Barrier = null;
+                    }
+
+                    return;
+
+                case BarrierStage.FinalAlign:
+                    var finalSecondary = members.First(u => u != room.PrimaryUserId);
+                    if (!barrier.FinalAlignSent)
+                    {
+                        long primaryPosition = snapshots[room.PrimaryUserId].PositionTicks;
+                        long secondaryPosition = snapshots[finalSecondary].PositionTicks;
+                        if (Math.Abs(primaryPosition - secondaryPosition) <= SyncConstants.StartupAlignToleranceTicks)
+                        {
+                            EnterWatching(runtime, barrier, snapshots, now);
+                            return;
+                        }
+
+                        barrier.FinalAlignPositionTicks = primaryPosition;
+                        Issue(
+                            runtime,
+                            room,
+                            finalSecondary,
+                            snapshots[finalSecondary],
+                            RemoteCommands.Seek,
+                            primaryPosition,
+                            now);
+                        barrier.FinalAlignSent = true;
+                        return;
+                    }
+
+                    if (Math.Abs(
+                            snapshots[finalSecondary].PositionTicks - barrier.FinalAlignPositionTicks) <=
+                        SyncConstants.SeekToleranceTicks)
+                    {
+                        EnterWatching(runtime, barrier, snapshots, now);
+                    }
+                    else if (runtime.Pending.Count == 0 &&
+                             (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
+                    {
+                        runtime.State = RoomState.Waiting;
+                        runtime.Error = "barrier final alignment timed out";
                         runtime.Barrier = null;
                     }
 
@@ -844,6 +888,26 @@ namespace Emby.Plugins.WatchTogether
             {
                 Issue(runtime, room, pair.Key, pair.Value, RemoteCommands.Pause, null, now);
             }
+        }
+
+        private static void EnterWatching(
+            RoomRuntime runtime,
+            BarrierState barrier,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            runtime.State = RoomState.Watching;
+            runtime.Barrier = null;
+            runtime.Pending.Clear();
+            runtime.Suppressed.Clear();
+            runtime.Previous.Clear();
+            foreach (var pair in snapshots)
+            {
+                runtime.Previous[pair.Key] = pair.Value;
+            }
+
+            runtime.PreviousAtUtc = now;
+            runtime.SyncItemId = barrier.ItemId;
         }
 
         private void WatchingTick(
