@@ -273,7 +273,11 @@ namespace Emby.Plugins.WatchTogether
                         }
                         else
                         {
-                            if (sameItem) PauseOtherWhenWaiting(runtime, room, snapshots, now);
+                            // A participant may have switched to the next episode or
+                            // another item. Do not seek across item boundaries; pause
+                            // any active peer(s) once the pair is no longer eligible.
+                            // PauseOtherWhenWaiting keeps the solo-player guard.
+                            PauseOtherWhenWaiting(runtime, room, snapshots, now);
                             runtime.State = RoomState.Waiting;
                             runtime.Barrier = null;
                             runtime.Previous.Clear();
@@ -313,7 +317,10 @@ namespace Emby.Plugins.WatchTogether
                     }
                     else
                     {
-                        if (sameItem) PauseOtherWhenWaiting(runtime, room, snapshots, now);
+                        // Waiting is also the safe state for a different-item pair:
+                        // pause active sessions instead of trying to seek one item to
+                        // the other. The helper avoids interrupting a solo player.
+                        PauseOtherWhenWaiting(runtime, room, snapshots, now);
                         runtime.State = RoomState.Waiting;
                         runtime.Barrier = null;
                         runtime.Previous.Clear();
@@ -557,6 +564,37 @@ namespace Emby.Plugins.WatchTogether
                     // Message delivery is best effort and must not block sync.
                 }
             }
+        }
+
+        private static bool IsManualSeek(
+            SessionSnapshot previous,
+            SessionSnapshot current,
+            DateTimeOffset previousAtUtc,
+            DateTimeOffset now)
+        {
+            if (previous == null || current == null)
+            {
+                return false;
+            }
+
+            // A position change observed together with play/pause or playback-rate
+            // changes belongs to that user action. Do not reinterpret the elapsed
+            // movement as a seek, especially when the next poll is delayed.
+            if (previous.IsPaused != current.IsPaused ||
+                Math.Abs(previous.PlaybackRate - current.PlaybackRate) > SyncConstants.PlaybackRateTolerance)
+            {
+                return false;
+            }
+
+            double elapsedSeconds = Math.Max(0, (now - previousAtUtc).TotalSeconds);
+            double expectedPosition = previous.PositionTicks;
+            if (!previous.IsPaused)
+            {
+                expectedPosition += elapsedSeconds * previous.PlaybackRate * SessionSnapshot.TicksPerSecond;
+            }
+
+            double difference = Math.Abs(current.PositionTicks - expectedPosition);
+            return difference >= SyncConstants.DriftThresholdTicks;
         }
 
         private static bool IsPositionReset(long previousPositionTicks, long currentPositionTicks)
@@ -1031,10 +1069,13 @@ namespace Emby.Plugins.WatchTogether
                     }
                 }
 
-                // Only treat a large position change within this poll interval as
-                // a user-issued seek. Natural playback-rate differences accumulate
-                // across rounds and must not trigger periodic correction seeks.
-                if (Math.Abs(current.PositionTicks - old.PositionTicks) >= SyncConstants.DriftThresholdTicks)
+                // Compare the current position with where the old snapshot says
+                // playback should have reached during this polling interval. The
+                // previous implementation compared only raw deltas, so a delayed
+                // snapshot or a long poll interval could look like a manual seek.
+                // Normal playback drift is intentionally not corrected here; only a
+                // single, clearly out-of-band position jump is propagated.
+                if (IsManualSeek(old, current, runtime.PreviousAtUtc.Value, now))
                 {
                     bool pendingSeek = pending != null &&
                         pending.Command == RemoteCommands.Seek;
