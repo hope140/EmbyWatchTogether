@@ -181,6 +181,38 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return user ? user.Name : (id || '未知用户');
     }
 
+    function roomName(room) {
+        return room && (room.Name || room.RoomId) || '未命名房间';
+    }
+
+    function findRoomForUser(page, userId) {
+        var rooms = Array.isArray(page._wtRooms) ? page._wtRooms : [];
+        var normalizedId = String(userId || '').toLowerCase();
+        return rooms.filter(function (room) {
+            return (room.ParticipantUserIds || []).some(function (id) {
+                return String(id).toLowerCase() === normalizedId;
+            });
+        })[0] || null;
+    }
+
+    function findRoomConflict(page, userIds) {
+        for (var i = 0; i < userIds.length; i++) {
+            var room = findRoomForUser(page, userIds[i]);
+            if (room) {
+                return {
+                    userId: userIds[i],
+                    room: room
+                };
+            }
+        }
+        return null;
+    }
+
+    function conflictMessage(conflict) {
+        return '用户“' + userName(conflict.userId) + '”已在房间“' + roomName(conflict.room) +
+            '”中，请先退出或删除原房间，或者选择其他用户。';
+    }
+
     function fillSelect(select, options, selected) {
         if (!select) {
             return;
@@ -249,11 +281,20 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         } else if (a === b) {
             hint = '两名参与者必须不同。';
             isError = true;
-        } else if (!primary || !primary.value) {
-            hint = '请选择主用户。';
-            isError = true;
         } else {
-            hint = '准备完成，可以创建房间。';
+            var conflict = findRoomConflict(page, [a, b]);
+            if (conflict) {
+                hint = conflictMessage(conflict);
+                isError = true;
+            }
+        }
+        if (!isError) {
+            if (!primary || !primary.value) {
+                hint = '请选择主用户。';
+                isError = true;
+            } else {
+                hint = '准备完成，可以创建房间。';
+            }
         }
 
         if (createButton && !createButton.getAttribute('aria-busy')) {
@@ -266,11 +307,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return apiGet('WatchTogether/Users').then(function (list) {
             page._wtIsAdmin = true;
             users = Array.isArray(list) ? list : [];
+            page._wtRooms = null;
             fillSelect(page.querySelector('#wtUserA'), users, users.length > 0 ? users[0].Id : null);
             fillSelect(page.querySelector('#wtUserB'), users, users.length > 1 ? users[1].Id : null);
             syncForm(page);
         }).catch(function (err) {
             page._wtIsAdmin = false;
+            page._wtRooms = null;
             users = [];
             fillSelect(page.querySelector('#wtUserA'), [], null);
             fillSelect(page.querySelector('#wtUserB'), [], null);
@@ -434,12 +477,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
         return apiGet('WatchTogether/Rooms').then(function (rooms) {
             var list = Array.isArray(rooms) ? rooms : [];
+            page._wtRooms = list;
             renderRooms(page, list);
+            syncForm(page);
             if (announce) {
                 setStatus(page, list.length > 0 ? '已更新 ' + list.length + ' 个房间' : '暂无房间，可以创建一个。');
             }
             return list;
         }).catch(function (err) {
+            page._wtRooms = null;
+            syncForm(page);
             setStatus(page, '房间加载失败：' + errorMessage(err) + '。', true);
             return [];
         }).then(function (result) {
@@ -553,6 +600,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
         if (a === b) {
             setStatus(page, '请选择两名不同的参与者。', true);
+            return;
+        }
+        var conflict = findRoomConflict(page, [a, b]);
+        if (conflict) {
+            var message = conflictMessage(conflict);
+            setStatus(page, message, true);
+            setFormHint(page, message, true);
+            syncForm(page);
             return;
         }
         if (!primary || !primary.value || (primary.value !== a && primary.value !== b)) {
