@@ -264,7 +264,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void DifferentItems_DoNotReceiveCommands()
+        public void DifferentItems_DoNotSeek_AndPauseActiveSessions()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -276,7 +276,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Equal(RoomState.Waiting, result.State);
             Assert.Contains("不同视频", result.Error);
-            Assert.Empty(_issuer.Issued);
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+            Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
         }
 
         [Fact]
@@ -589,6 +590,79 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Contains(_issuer.Issued, i =>
                 i.userId == "u2" && i.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void WatchingTick_PlayPauseTransitionDoesNotLookLikeSeek()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            // A pause acknowledgement is observed first.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            // The users resume after a delayed poll. The ten-second movement is
+            // caused by resuming playback, not by a seek, so only Unpause should
+            // be propagated.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(10);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Contains(_issuer.Issued, i =>
+                i.userId == "u2" && i.command == RemoteCommands.Unpause);
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingTick_LongPollingIntervalUsesExpectedPosition_AndDoesNotSeek()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            // A delayed poll reports ten seconds of normal playback in one
+            // snapshot. Raw delta logic would treat this as a manual seek.
+            _clock.Advance(10);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            engine.PollOnce(_clock.Now);
+
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingTick_DifferentPlaybackRatesFollowTheirProjection_AndDoNotSeek()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            // Establish different, but stable playback rates before the long
+            // polling interval. Their resulting position gap is intentional.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, playbackRate: 1.0),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, playbackRate: 1.5));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            _clock.Advance(10);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond, playbackRate: 1.0),
+                Snapshot("s2", "u2", paused: false, position: 65 * SessionSnapshot.TicksPerSecond, playbackRate: 1.5));
+            engine.PollOnce(_clock.Now);
+
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
         }
 
         [Fact]
@@ -969,11 +1043,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             bool paused,
             long position,
             string itemId = "i1",
-            bool stopped = false)
+            bool stopped = false,
+            double playbackRate = 1.0)
         {
             return new SessionSnapshot(
                 sessionId, userId, itemId, "m1",
-                position, 100 * SessionSnapshot.TicksPerSecond, paused, 1.0,
+                position, 100 * SessionSnapshot.TicksPerSecond, paused, playbackRate,
                 stopped: stopped, supportsRemoteControl: true,
                 new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek" }),
                 new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
