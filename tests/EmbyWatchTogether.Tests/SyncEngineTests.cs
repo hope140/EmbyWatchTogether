@@ -280,6 +280,44 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void ParticipantLeavingBeforePlaybackStarts_DoesNotStickStoppedError()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+
+            // Both participants only opened the item. The coordinator has
+            // started the barrier, but neither side has produced playback.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(room.Id).State);
+
+            // The secondary closes before playback starts. SessionSelector
+            // omits the stopped session, so the barrier should simply reset.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0, stopped: true));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Null(result.Error);
+            Assert.Null(_rooms.GetRuntime(room.Id).Barrier);
+
+            // Both reopen later at different positions. A fresh barrier must
+            // start automatically without pressing the manual resync action.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Null(result.Error);
+        }
+
+        [Fact]
         public void PrimaryPositionResetToZero_PausesSecondaryByDefault()
         {
             var room = CreateRoom();
@@ -767,6 +805,80 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PendingCommandFailure_AutomaticallyRetriesWhenBothClientsRemainReady()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+
+            engine.PollOnce(_clock.Now); // initial pause commands
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now); // first retry
+            _clock.Advance(4);
+            var failed = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, failed.State);
+            Assert.Equal("playback command was not acknowledged", failed.Error);
+            var issuedBeforeRetry = _issuer.Issued.Count;
+
+            // Cooldown prevents an immediate command storm.
+            _clock.Advance(SyncConstants.AutomaticBarrierRetryDelaySeconds - 0.1);
+            var coolingDown = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Waiting, coolingDown.State);
+            Assert.Equal("playback command was not acknowledged", coolingDown.Error);
+            Assert.Equal(issuedBeforeRetry, _issuer.Issued.Count);
+
+            // Once the cooldown expires, both ready clients automatically get a
+            // fresh barrier without the manual resync action.
+            _clock.Advance(0.1);
+            var retried = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Barrier, retried.State);
+            Assert.Null(retried.Error);
+            Assert.True(_issuer.Issued.Count > issuedBeforeRetry);
+            Assert.Equal(2, _messageIssuer.Issued.Count);
+            Assert.Equal(new[] { "u1", "u2" }, _messageIssuer.Issued.Select(message => message.userId).OrderBy(userId => userId));
+            Assert.All(_messageIssuer.Issued, message =>
+                Assert.True(
+                    message.text.Contains("自动") || message.text.Contains("重新同步"),
+                    $"Unexpected automatic retry message: {message.text}"));
+
+            // Later barrier polling must not repeat the automatic retry notice.
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, _messageIssuer.Issued.Count);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void AutomaticRetry_MessageFailure_DoesNotBlockBarrier(bool throwException)
+        {
+            var room = CreateRoom();
+            var messageIssuer = new RecordingMessageIssuer
+            {
+                ReturnFalse = !throwException,
+                ThrowOnIssue = throwException,
+            };
+            var engine = CreateEngine(messageIssuer: messageIssuer);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(4);
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+
+            _clock.Advance(SyncConstants.AutomaticBarrierRetryDelaySeconds);
+            var retried = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, retried.State);
+            Assert.Equal(2, messageIssuer.Issued.Count);
+        }
+
+        [Fact]
         public void Resync_AfterError_AllowsBarrierAgain()
         {
             var room = CreateRoom();
@@ -914,6 +1026,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             public List<(string userId, string header, string text)> Issued { get; } =
                 new List<(string, string, string)>();
 
+            public bool ReturnFalse { get; set; }
+
+            public bool ThrowOnIssue { get; set; }
+
             public bool TryIssueMessage(
                 string roomId,
                 string controllingUserId,
@@ -926,8 +1042,13 @@ namespace Emby.Plugins.WatchTogether.Tests
                 out string error)
             {
                 Issued.Add((userId, header, text));
-                error = null;
-                return true;
+                if (ThrowOnIssue)
+                {
+                    throw new InvalidOperationException("message delivery failed");
+                }
+
+                error = ReturnFalse ? "message delivery failed" : null;
+                return !ReturnFalse;
             }
         }
 
