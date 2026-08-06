@@ -686,6 +686,41 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PendingCommandFailure_AutomaticallyRetriesWhenBothClientsRemainReady()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+
+            engine.PollOnce(_clock.Now); // initial pause commands
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now); // first retry
+            _clock.Advance(4);
+            var failed = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, failed.State);
+            Assert.Equal("playback command was not acknowledged", failed.Error);
+            var issuedBeforeRetry = _issuer.Issued.Count;
+
+            // Cooldown prevents an immediate command storm.
+            _clock.Advance(SyncConstants.AutomaticBarrierRetryDelaySeconds - 0.1);
+            var coolingDown = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Waiting, coolingDown.State);
+            Assert.Equal("playback command was not acknowledged", coolingDown.Error);
+            Assert.Equal(issuedBeforeRetry, _issuer.Issued.Count);
+
+            // Once the cooldown expires, both ready clients automatically get a
+            // fresh barrier without the manual resync action.
+            _clock.Advance(0.1);
+            var retried = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Barrier, retried.State);
+            Assert.Null(retried.Error);
+            Assert.True(_issuer.Issued.Count > issuedBeforeRetry);
+        }
+
+        [Fact]
         public void Resync_AfterError_AllowsBarrierAgain()
         {
             var room = CreateRoom();

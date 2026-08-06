@@ -28,5 +28,10 @@ namespace Emby.Plugins.WatchTogether
 
         public const double BarrierTimeoutSeconds = 3.0;
 
+        // If startup fails after both clients are available, retry the barrier
+        // automatically after a short cooldown instead of requiring a manual
+        // resync action.
+        public const double AutomaticBarrierRetryDelaySeconds = 3.0;
+
     }
 }

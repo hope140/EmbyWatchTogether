@@ -258,9 +258,7 @@ namespace Emby.Plugins.WatchTogether
 
                     if (pendingFailed)
                     {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Barrier = null;
-                        runtime.Previous.Clear();
+                        ScheduleBarrierRetry(runtime, "playback command was not acknowledged", now);
                         results.Add(Result(room, runtime, eligible));
                         continue;
                     }
@@ -283,11 +281,18 @@ namespace Emby.Plugins.WatchTogether
                     {
                         if (runtime.State == RoomState.Waiting && runtime.Error != null)
                         {
-                            // A command failure requires an explicit resync (or a
-                            // fresh room action) before another barrier issues
-                            // commands; prevents one-second command storms.
-                            results.Add(Result(room, runtime, eligible));
-                            continue;
+                            bool retryReady = runtime.BarrierRetryAtUtc.HasValue &&
+                                now >= runtime.BarrierRetryAtUtc.Value;
+                            if (retryReady && sameItem)
+                            {
+                                runtime.Error = null;
+                                runtime.BarrierRetryAtUtc = null;
+                            }
+                            else
+                            {
+                                results.Add(Result(room, runtime, eligible));
+                                continue;
+                            }
                         }
 
                         if (runtime.State != RoomState.Barrier)
@@ -599,6 +604,16 @@ namespace Emby.Plugins.WatchTogether
             return failed;
         }
 
+        private static void ScheduleBarrierRetry(
+            RoomRuntime runtime,
+            string error,
+            DateTimeOffset now)
+        {
+            runtime.ResetToWaiting();
+            runtime.Error = error;
+            runtime.BarrierRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
+        }
+
         private bool Issue(
             RoomRuntime runtime,
             Room room,
@@ -714,9 +729,7 @@ namespace Emby.Plugins.WatchTogether
                     if (runtime.Pending.Count == 0 &&
                         (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Error = "barrier pause timed out";
-                        runtime.Barrier = null;
+                        ScheduleBarrierRetry(runtime, "barrier pause timed out", now);
                     }
 
                     return;
@@ -741,9 +754,7 @@ namespace Emby.Plugins.WatchTogether
                     if (runtime.Pending.Count == 0 &&
                         (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Error = "barrier seek timed out";
-                        runtime.Barrier = null;
+                        ScheduleBarrierRetry(runtime, "barrier seek timed out", now);
                     }
 
                     return;
@@ -780,9 +791,7 @@ namespace Emby.Plugins.WatchTogether
                     else if (runtime.Pending.Count == 0 &&
                              (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Error = "barrier restore timed out";
-                        runtime.Barrier = null;
+                        ScheduleBarrierRetry(runtime, "barrier restore timed out", now);
                     }
 
                     return;
