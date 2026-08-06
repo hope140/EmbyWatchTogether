@@ -26,6 +26,8 @@ namespace Emby.Plugins.WatchTogether
         private const string StoppedPlaybackError = "播放已停止，等待双方重新打开同一视频";
         private const string StoppedPlaybackMessageHeader = "一起观看";
         private const string StoppedPlaybackMessageText = "对方已停止播放，请重新打开视频";
+        private const string AutomaticResyncMessageHeader = "一起观看";
+        private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -191,9 +193,10 @@ namespace Emby.Plugins.WatchTogether
                         snapshots.Values.All(s => s != null) &&
                         snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
 
-                    // Emby may briefly retain the old ItemId after a player is closed
-                    // while reporting PositionTicks = 0. Treat that transition as a
-                    // stop, not as a user-issued seek, before observing pending commands.
+                    // While actively watching, Emby may briefly retain the old
+                    // ItemId after a player is closed while reporting
+                    // PositionTicks = 0. Treat that transition as a stop, not as
+                    // a user-issued seek, before observing pending commands.
                     if (TryGetStoppedUsers(runtime, room, snapshots, out var stoppedUsers))
                     {
                         // SessionSelector omits stopped/offline sessions, so the
@@ -257,9 +260,7 @@ namespace Emby.Plugins.WatchTogether
 
                     if (pendingFailed)
                     {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Barrier = null;
-                        runtime.Previous.Clear();
+                        ScheduleBarrierRetry(runtime, "playback command was not acknowledged", now);
                         results.Add(Result(room, runtime, eligible));
                         continue;
                     }
@@ -280,18 +281,32 @@ namespace Emby.Plugins.WatchTogether
                     }
                     else if (eligible)
                     {
+                        bool automaticRetry = false;
                         if (runtime.State == RoomState.Waiting && runtime.Error != null)
                         {
-                            // A command failure requires an explicit resync (or a
-                            // fresh room action) before another barrier issues
-                            // commands; prevents one-second command storms.
-                            results.Add(Result(room, runtime, eligible));
-                            continue;
+                            bool retryReady = runtime.BarrierRetryAtUtc.HasValue &&
+                                now >= runtime.BarrierRetryAtUtc.Value;
+                            if (retryReady && sameItem)
+                            {
+                                runtime.Error = null;
+                                runtime.BarrierRetryAtUtc = null;
+                                automaticRetry = true;
+                            }
+                            else
+                            {
+                                results.Add(Result(room, runtime, eligible));
+                                continue;
+                            }
                         }
 
                         if (runtime.State != RoomState.Barrier)
                         {
                             StartBarrier(runtime, room, snapshots, now);
+                        }
+
+                        if (automaticRetry)
+                        {
+                            NotifyAutomaticBarrierRetry(room, snapshots, now);
                         }
 
                         BarrierTick(runtime, room, snapshots, now);
@@ -396,10 +411,13 @@ namespace Emby.Plugins.WatchTogether
         {
             stoppedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (runtime == null || room == null || snapshots == null ||
-                runtime.State == RoomState.Waiting ||
-                runtime.State == RoomState.Unavailable ||
+                runtime.State != RoomState.Watching ||
                 room.JoinedParticipantUserIds.Count != 2)
             {
+                // A barrier is only the pause/seek/restore handshake. A
+                // participant can close the video before playback ever starts;
+                // that must reset the handshake, not create a persistent
+                // "playback stopped" error.
                 return false;
             }
 
@@ -415,16 +433,6 @@ namespace Emby.Plugins.WatchTogether
 
             if (stoppedUsers.Count > 0)
             {
-                return true;
-            }
-
-            if (runtime.State == RoomState.Barrier && runtime.Barrier != null &&
-                snapshots.TryGetValue(room.PrimaryUserId, out var primary) &&
-                primary != null &&
-                string.Equals(primary.ItemId, runtime.Barrier.ItemId, StringComparison.OrdinalIgnoreCase) &&
-                IsPositionReset(runtime.Barrier.PrimaryPositionTicks, primary.PositionTicks))
-            {
-                stoppedUsers.Add(room.PrimaryUserId);
                 return true;
             }
 
@@ -508,6 +516,45 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Message delivery is best effort and must never block the
                     // playback state machine.
+                }
+            }
+        }
+
+        private void NotifyAutomaticBarrierRetry(
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            if (_messageIssuer == null || room == null || snapshots == null)
+            {
+                return;
+            }
+
+            foreach (var userId in room.JoinedParticipantUserIds)
+            {
+                if (!snapshots.TryGetValue(userId, out var snapshot) || snapshot == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    // Automatic retry notices are advisory. Delivery failures
+                    // must not prevent the new barrier from being started.
+                    _messageIssuer.TryIssueMessage(
+                        room.Id,
+                        room.AdminUserId,
+                        userId,
+                        snapshot,
+                        AutomaticResyncMessageHeader,
+                        AutomaticResyncMessageText,
+                        timeoutMs: null,
+                        now: now,
+                        out _);
+                }
+                catch
+                {
+                    // Message delivery is best effort and must not block sync.
                 }
             }
         }
@@ -603,6 +650,16 @@ namespace Emby.Plugins.WatchTogether
             }
 
             return failed;
+        }
+
+        private static void ScheduleBarrierRetry(
+            RoomRuntime runtime,
+            string error,
+            DateTimeOffset now)
+        {
+            runtime.ResetToWaiting();
+            runtime.Error = error;
+            runtime.BarrierRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
         }
 
         private bool Issue(
@@ -724,9 +781,7 @@ namespace Emby.Plugins.WatchTogether
                     if (runtime.Pending.Count == 0 &&
                         (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Error = "barrier pause timed out";
-                        runtime.Barrier = null;
+                        ScheduleBarrierRetry(runtime, "barrier pause timed out", now);
                     }
 
                     return;
@@ -751,9 +806,7 @@ namespace Emby.Plugins.WatchTogether
                     if (runtime.Pending.Count == 0 &&
                         (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Error = "barrier seek timed out";
-                        runtime.Barrier = null;
+                        ScheduleBarrierRetry(runtime, "barrier seek timed out", now);
                     }
 
                     return;
@@ -789,9 +842,7 @@ namespace Emby.Plugins.WatchTogether
                     else if (runtime.Pending.Count == 0 &&
                              (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Error = "barrier restore timed out";
-                        runtime.Barrier = null;
+                        ScheduleBarrierRetry(runtime, "barrier restore timed out", now);
                     }
 
                     return;
