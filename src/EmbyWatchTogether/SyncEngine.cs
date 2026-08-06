@@ -561,12 +561,19 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                if ((now - pending.IssuedAtUtc).TotalSeconds < SyncConstants.PendingTimeoutSeconds)
+                double timeoutSeconds = SyncConstants.PendingTimeoutSeconds;
+                if (runtime.State == RoomState.Barrier &&
+                    pending.Retries >= SyncConstants.MaxPendingRetries)
+                {
+                    timeoutSeconds += SyncConstants.PendingRetryGraceSeconds;
+                }
+
+                if ((now - pending.IssuedAtUtc).TotalSeconds < timeoutSeconds)
                 {
                     continue;
                 }
 
-                if (pending.Retries == 0 && snapshot != null)
+                if (pending.Retries < SyncConstants.MaxPendingRetries && snapshot != null)
                 {
                     long? positionTicks = pending.PositionTicks;
                     runtime.Pending.Remove(userId);
@@ -574,7 +581,7 @@ namespace Emby.Plugins.WatchTogether
                     {
                         if (runtime.Pending.TryGetValue(userId, out var retry))
                         {
-                            retry.Retries = 1;
+                            retry.Retries = pending.Retries + 1;
                             if (runtime.State == RoomState.Barrier && runtime.Barrier != null)
                             {
                                 runtime.Barrier.StartedAtUtc = now;
@@ -710,7 +717,8 @@ namespace Emby.Plugins.WatchTogether
                         return;
                     }
 
-                    if ((now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
+                    if (runtime.Pending.Count == 0 &&
+                        (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
                         runtime.State = RoomState.Waiting;
                         runtime.Error = "barrier pause timed out";
@@ -736,7 +744,8 @@ namespace Emby.Plugins.WatchTogether
                         return;
                     }
 
-                    if ((now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
+                    if (runtime.Pending.Count == 0 &&
+                        (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
                         runtime.State = RoomState.Waiting;
                         runtime.Error = "barrier seek timed out";
@@ -774,7 +783,8 @@ namespace Emby.Plugins.WatchTogether
                         runtime.PreviousAtUtc = now;
                         runtime.SyncItemId = barrier.ItemId;
                     }
-                    else if ((now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
+                    else if (runtime.Pending.Count == 0 &&
+                             (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
                         runtime.State = RoomState.Waiting;
                         runtime.Error = "barrier restore timed out";

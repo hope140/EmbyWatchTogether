@@ -586,6 +586,44 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal("playback command was not acknowledged", runtime.Error);
         }
         [Fact]
+        public void InitialBarrier_DelayedSnapshotAcknowledgementWithinGrace_DoesNotFail()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+
+            engine.PollOnce(_clock.Now); // pause issued, pending recorded
+            Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(room.Id).State);
+
+            // The first retry is issued after 3s, but the SessionInfo snapshot
+            // still exposes the pre-command state at that exact poll.
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(4, _issuer.Issued.Count);
+
+            // At the retry timeout, keep waiting for the bounded snapshot grace
+            // instead of racing BarrierTick into a false failure.
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(room.Id).State);
+            Assert.Null(_rooms.GetRuntime(room.Id).Error);
+
+            // The delayed acknowledgement arrives within the one-second grace.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 0),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(0.5);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Null(runtime.Error);
+            Assert.Equal(4, _issuer.Issued.Count);
+        }
+
+        [Fact]
         public void PendingCommand_NotAcknowledged_RetriesThenFailsToWaiting()
         {
             var room = CreateRoom();
@@ -597,10 +635,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             engine.PollOnce(_clock.Now); // pause issued, pending recorded
             Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(room.Id).State);
 
-            // 3s pass without acknowledgement; first retry re-issues, second round fails.
+            // 3s pass without acknowledgement; first retry re-issues. The
+            // bounded grace expires one second later and still fails.
             _clock.Advance(3);
             engine.PollOnce(_clock.Now);
-            _clock.Advance(3);
+            _clock.Advance(4);
             engine.PollOnce(_clock.Now);
 
             var runtime = _rooms.GetRuntime(room.Id);
@@ -620,7 +659,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             engine.PollOnce(_clock.Now);
             _clock.Advance(3);
             engine.PollOnce(_clock.Now);
-            _clock.Advance(3);
+            _clock.Advance(4);
             engine.PollOnce(_clock.Now);
             Assert.Equal(RoomState.Waiting, _rooms.GetRuntime(room.Id).State);
             Assert.NotNull(_rooms.GetRuntime(room.Id).Error);

@@ -17,6 +17,13 @@ namespace Emby.Plugins.WatchTogether
 
         public const double PendingTimeoutSeconds = 3.0;
 
+        // Emby can acknowledge a command in the player before the next
+        // SessionInfo snapshot exposes the new state. Keep this grace bounded
+        // and apply it only after the one allowed retry in the initial barrier.
+        public const double PendingRetryGraceSeconds = 1.0;
+
+        public const int MaxPendingRetries = 1;
+
         public const double SuppressSeconds = 3.0;
 
         public const double BarrierTimeoutSeconds = 3.0;
