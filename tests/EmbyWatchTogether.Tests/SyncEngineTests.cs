@@ -163,6 +163,44 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void ParticipantLeavingBeforePlaybackStarts_DoesNotStickStoppedError()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+
+            // Both participants only opened the item. The coordinator has
+            // started the barrier, but neither side has produced playback.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(room.Id).State);
+
+            // The secondary closes before playback starts. SessionSelector
+            // omits the stopped session, so the barrier should simply reset.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0, stopped: true));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Null(result.Error);
+            Assert.Null(_rooms.GetRuntime(room.Id).Barrier);
+
+            // Both reopen later at different positions. A fresh barrier must
+            // start automatically without pressing the manual resync action.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Null(result.Error);
+        }
+
+        [Fact]
         public void PrimaryPositionResetToZero_PausesSecondaryByDefault()
         {
             var room = CreateRoom();
