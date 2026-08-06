@@ -26,6 +26,8 @@ namespace Emby.Plugins.WatchTogether
         private const string StoppedPlaybackError = "播放已停止，等待双方重新打开同一视频";
         private const string StoppedPlaybackMessageHeader = "一起观看";
         private const string StoppedPlaybackMessageText = "对方已停止播放，请重新打开视频";
+        private const string AutomaticResyncMessageHeader = "一起观看";
+        private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -279,6 +281,7 @@ namespace Emby.Plugins.WatchTogether
                     }
                     else if (eligible)
                     {
+                        bool automaticRetry = false;
                         if (runtime.State == RoomState.Waiting && runtime.Error != null)
                         {
                             bool retryReady = runtime.BarrierRetryAtUtc.HasValue &&
@@ -287,6 +290,7 @@ namespace Emby.Plugins.WatchTogether
                             {
                                 runtime.Error = null;
                                 runtime.BarrierRetryAtUtc = null;
+                                automaticRetry = true;
                             }
                             else
                             {
@@ -298,6 +302,11 @@ namespace Emby.Plugins.WatchTogether
                         if (runtime.State != RoomState.Barrier)
                         {
                             StartBarrier(runtime, room, snapshots, now);
+                        }
+
+                        if (automaticRetry)
+                        {
+                            NotifyAutomaticBarrierRetry(room, snapshots, now);
                         }
 
                         BarrierTick(runtime, room, snapshots, now);
@@ -507,6 +516,45 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Message delivery is best effort and must never block the
                     // playback state machine.
+                }
+            }
+        }
+
+        private void NotifyAutomaticBarrierRetry(
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            if (_messageIssuer == null || room == null || snapshots == null)
+            {
+                return;
+            }
+
+            foreach (var userId in room.JoinedParticipantUserIds)
+            {
+                if (!snapshots.TryGetValue(userId, out var snapshot) || snapshot == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    // Automatic retry notices are advisory. Delivery failures
+                    // must not prevent the new barrier from being started.
+                    _messageIssuer.TryIssueMessage(
+                        room.Id,
+                        room.AdminUserId,
+                        userId,
+                        snapshot,
+                        AutomaticResyncMessageHeader,
+                        AutomaticResyncMessageText,
+                        timeoutMs: null,
+                        now: now,
+                        out _);
+                }
+                catch
+                {
+                    // Message delivery is best effort and must not block sync.
                 }
             }
         }

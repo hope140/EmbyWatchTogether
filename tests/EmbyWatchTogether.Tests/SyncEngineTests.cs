@@ -718,6 +718,45 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Barrier, retried.State);
             Assert.Null(retried.Error);
             Assert.True(_issuer.Issued.Count > issuedBeforeRetry);
+            Assert.Equal(2, _messageIssuer.Issued.Count);
+            Assert.Equal(new[] { "u1", "u2" }, _messageIssuer.Issued.Select(message => message.userId).OrderBy(userId => userId));
+            Assert.All(_messageIssuer.Issued, message =>
+                Assert.True(
+                    message.text.Contains("自动") || message.text.Contains("重新同步"),
+                    $"Unexpected automatic retry message: {message.text}"));
+
+            // Later barrier polling must not repeat the automatic retry notice.
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, _messageIssuer.Issued.Count);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void AutomaticRetry_MessageFailure_DoesNotBlockBarrier(bool throwException)
+        {
+            var room = CreateRoom();
+            var messageIssuer = new RecordingMessageIssuer
+            {
+                ReturnFalse = !throwException,
+                ThrowOnIssue = throwException,
+            };
+            var engine = CreateEngine(messageIssuer: messageIssuer);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(4);
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+
+            _clock.Advance(SyncConstants.AutomaticBarrierRetryDelaySeconds);
+            var retried = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, retried.State);
+            Assert.Equal(2, messageIssuer.Issued.Count);
         }
 
         [Fact]
@@ -866,6 +905,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             public List<(string userId, string header, string text)> Issued { get; } =
                 new List<(string, string, string)>();
 
+            public bool ReturnFalse { get; set; }
+
+            public bool ThrowOnIssue { get; set; }
+
             public bool TryIssueMessage(
                 string roomId,
                 string controllingUserId,
@@ -878,8 +921,13 @@ namespace Emby.Plugins.WatchTogether.Tests
                 out string error)
             {
                 Issued.Add((userId, header, text));
-                error = null;
-                return true;
+                if (ThrowOnIssue)
+                {
+                    throw new InvalidOperationException("message delivery failed");
+                }
+
+                error = ReturnFalse ? "message delivery failed" : null;
+                return !ReturnFalse;
             }
         }
 
