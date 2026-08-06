@@ -191,9 +191,10 @@ namespace Emby.Plugins.WatchTogether
                         snapshots.Values.All(s => s != null) &&
                         snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
 
-                    // Emby may briefly retain the old ItemId after a player is closed
-                    // while reporting PositionTicks = 0. Treat that transition as a
-                    // stop, not as a user-issued seek, before observing pending commands.
+                    // While actively watching, Emby may briefly retain the old
+                    // ItemId after a player is closed while reporting
+                    // PositionTicks = 0. Treat that transition as a stop, not as
+                    // a user-issued seek, before observing pending commands.
                     if (TryGetStoppedUsers(runtime, room, snapshots, out var stoppedUsers))
                     {
                         // SessionSelector omits stopped/offline sessions, so the
@@ -396,10 +397,13 @@ namespace Emby.Plugins.WatchTogether
         {
             stoppedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (runtime == null || room == null || snapshots == null ||
-                runtime.State == RoomState.Waiting ||
-                runtime.State == RoomState.Unavailable ||
+                runtime.State != RoomState.Watching ||
                 room.JoinedParticipantUserIds.Count != 2)
             {
+                // A barrier is only the pause/seek/restore handshake. A
+                // participant can close the video before playback ever starts;
+                // that must reset the handshake, not create a persistent
+                // "playback stopped" error.
                 return false;
             }
 
@@ -415,16 +419,6 @@ namespace Emby.Plugins.WatchTogether
 
             if (stoppedUsers.Count > 0)
             {
-                return true;
-            }
-
-            if (runtime.State == RoomState.Barrier && runtime.Barrier != null &&
-                snapshots.TryGetValue(room.PrimaryUserId, out var primary) &&
-                primary != null &&
-                string.Equals(primary.ItemId, runtime.Barrier.ItemId, StringComparison.OrdinalIgnoreCase) &&
-                IsPositionReset(runtime.Barrier.PrimaryPositionTicks, primary.PositionTicks))
-            {
-                stoppedUsers.Add(room.PrimaryUserId);
                 return true;
             }
 
