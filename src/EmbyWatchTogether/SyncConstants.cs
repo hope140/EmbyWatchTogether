@@ -11,6 +11,10 @@ namespace Emby.Plugins.WatchTogether
 
         public const long SeekToleranceTicks = 2 * TicksPerSecond;
 
+        // Startup alignment is stricter than the general seek acknowledgement
+        // tolerance so a short restore-order skew is corrected before Watching.
+        public const long StartupAlignToleranceTicks = 1 * TicksPerSecond;
+
         public const long DriftThresholdTicks = 5 * TicksPerSecond;
 
         public const double PlaybackRateTolerance = 0.010000001;
