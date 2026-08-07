@@ -40,10 +40,15 @@ namespace Emby.Plugins.WatchTogether.Tests
             var roomsIndex = html.IndexOf("id=\"wtRooms\"", System.StringComparison.Ordinal);
             var configIndex = html.IndexOf("id=\"wtConfigSection\"", System.StringComparison.Ordinal);
             var helpIndex = html.IndexOf("class=\"verticalSection wt-section wt-help\"", System.StringComparison.Ordinal);
+            var settingsIndex = html.IndexOf("id=\"wtSettingsSection\"", System.StringComparison.Ordinal);
+            var updateIndex = html.IndexOf("id=\"wtUpdateSection\"", System.StringComparison.Ordinal);
 
             Assert.True(roomsIndex >= 0);
+            Assert.True(settingsIndex >= 0);
             Assert.True(configIndex > roomsIndex);
-            Assert.True(helpIndex > configIndex);
+            Assert.True(helpIndex < settingsIndex);
+            Assert.True(configIndex > helpIndex);
+            Assert.True(updateIndex > settingsIndex);
         }
 
         private static string ReadResource(Assembly assembly, string resourceName)
