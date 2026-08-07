@@ -27,8 +27,6 @@ namespace Emby.Plugins.WatchTogether
 
         public BarrierState Barrier { get; set; }
 
-        public RealignState Realign { get; set; }
-
         public DateTimeOffset? BarrierRetryAtUtc { get; set; }
 
         public void ResetToWaiting()
@@ -36,7 +34,6 @@ namespace Emby.Plugins.WatchTogether
             State = RoomState.Waiting;
             Error = null;
             Barrier = null;
-            Realign = null;
             Pending.Clear();
             Suppressed.Clear();
             Previous.Clear();

@@ -29,10 +29,6 @@ namespace Emby.Plugins.WatchTogether
         private const string StoppedPlaybackMessageText = "对方已停止播放，请重新打开视频";
         private const string AutomaticResyncMessageHeader = "一起观看";
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
-        private const string RealignWaitingMessageHeader = "一起观看";
-        private const string RealignWaitingMessageText = "对方加载中，已暂停等待，加载完成后自动继续";
-        private const string RealignTimeoutMessageHeader = "一起观看";
-        private const string RealignTimeoutMessageText = "对方长时间未就绪，已暂停等待；如长时间无变化可手动重新同步";
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -612,6 +608,15 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
+            // External players often report a small position rewind (a few
+            // seconds) shortly after a seek lands while re-basing their clock.
+            // Only large backward jumps are treated as user seeks.
+            if (current.PositionTicks < previous.PositionTicks &&
+                previous.PositionTicks - current.PositionTicks < SyncConstants.ManualSeekBackwardToleranceTicks)
+            {
+                return false;
+            }
+
             double elapsedSeconds = Math.Max(0, (now - previousAtUtc).TotalSeconds);
             double expectedPosition = previous.PositionTicks;
             if (!previous.IsPaused)
@@ -788,29 +793,31 @@ namespace Emby.Plugins.WatchTogether
             RoomRuntime runtime,
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
-            DateTimeOffset now)
+            DateTimeOffset now,
+            string anchorUserId = null)
         {
-            var primary = snapshots[room.PrimaryUserId];
+            string anchorUser = anchorUserId ?? room.PrimaryUserId;
+            var anchor = snapshots[anchorUser];
             runtime.State = RoomState.Barrier;
             runtime.Error = null;
             runtime.Barrier = new BarrierState
             {
                 Stage = BarrierStage.Pause,
                 StartedAtUtc = now,
-                PrimaryPositionTicks = primary.PositionTicks,
-                PrimaryPaused = primary.IsPaused,
-                ItemId = primary.ItemId,
+                AnchorUserId = anchorUser,
+                PrimaryPositionTicks = anchor.PositionTicks,
+                PrimaryPaused = anchor.IsPaused,
+                ItemId = anchor.ItemId,
                 PauseSent = false,
                 SeekSent = false,
                 RestoreSent = false,
             };
-            runtime.SyncItemId = primary.ItemId;
+            runtime.SyncItemId = anchor.ItemId;
             runtime.Pending.Clear();
             runtime.Suppressed.Clear();
-            runtime.Realign = null;
             _logger?.Info(
-                $"Room {room.Id}: barrier started, primary={room.PrimaryUserId}, " +
-                $"anchor={FormatPosition(primary.PositionTicks)}s, paused={primary.IsPaused}");
+                $"Room {room.Id}: barrier started, anchor={anchorUser}, " +
+                $"target={FormatPosition(anchor.PositionTicks)}s, paused={anchor.IsPaused}");
         }
 
         private void BarrierTick(
@@ -853,7 +860,7 @@ namespace Emby.Plugins.WatchTogether
                         // The primary may continue playing until Emby applies the
                         // pause command. Re-anchor after both acknowledgements so
                         // the secondary does not seek to the stale start snapshot.
-                        barrier.PrimaryPositionTicks = snapshots[room.PrimaryUserId].PositionTicks;
+                        barrier.PrimaryPositionTicks = snapshots[barrier.AnchorUserId].PositionTicks;
                         barrier.Stage = BarrierStage.Seek;
                         barrier.StartedAtUtc = now;
                         return;
@@ -868,16 +875,16 @@ namespace Emby.Plugins.WatchTogether
                     return;
 
                 case BarrierStage.Seek:
-                    var secondary = members.First(u => u != room.PrimaryUserId);
+                    var follower = members.First(u => !string.Equals(u, barrier.AnchorUserId, StringComparison.OrdinalIgnoreCase));
                     long target = barrier.PrimaryPositionTicks;
                     if (!barrier.SeekSent)
                     {
-                        Issue(runtime, room, secondary, snapshots[secondary], RemoteCommands.Seek, target, now);
+                        Issue(runtime, room, follower, snapshots[follower], RemoteCommands.Seek, target, now);
                         barrier.SeekSent = true;
                         return;
                     }
 
-                    if (Math.Abs(snapshots[secondary].PositionTicks - target) <= SyncConstants.SeekToleranceTicks)
+                    if (Math.Abs(snapshots[follower].PositionTicks - target) <= SyncConstants.SeekToleranceTicks)
                     {
                         barrier.Stage = BarrierStage.Restore;
                         barrier.StartedAtUtc = now;
@@ -929,32 +936,32 @@ namespace Emby.Plugins.WatchTogether
                     return;
 
                 case BarrierStage.FinalAlign:
-                    var finalSecondary = members.First(u => u != room.PrimaryUserId);
+                    var finalFollower = members.First(u => !string.Equals(u, barrier.AnchorUserId, StringComparison.OrdinalIgnoreCase));
                     if (!barrier.FinalAlignSent)
                     {
-                        long primaryPosition = snapshots[room.PrimaryUserId].PositionTicks;
-                        long secondaryPosition = snapshots[finalSecondary].PositionTicks;
-                        if (Math.Abs(primaryPosition - secondaryPosition) <= SyncConstants.StartupAlignToleranceTicks)
+                        long anchorPosition = snapshots[barrier.AnchorUserId].PositionTicks;
+                        long followerPosition = snapshots[finalFollower].PositionTicks;
+                        if (Math.Abs(anchorPosition - followerPosition) <= SyncConstants.StartupAlignToleranceTicks)
                         {
                             EnterWatching(runtime, room, barrier, snapshots, now);
                             return;
                         }
 
-                        barrier.FinalAlignPositionTicks = primaryPosition;
+                        barrier.FinalAlignPositionTicks = anchorPosition;
                         Issue(
                             runtime,
                             room,
-                            finalSecondary,
-                            snapshots[finalSecondary],
+                            finalFollower,
+                            snapshots[finalFollower],
                             RemoteCommands.Seek,
-                            primaryPosition,
+                            anchorPosition,
                             now);
                         barrier.FinalAlignSent = true;
                         return;
                     }
 
                     if (Math.Abs(
-                            snapshots[finalSecondary].PositionTicks - barrier.FinalAlignPositionTicks) <=
+                            snapshots[finalFollower].PositionTicks - barrier.FinalAlignPositionTicks) <=
                         SyncConstants.SeekToleranceTicks)
                     {
                         EnterWatching(runtime, room, barrier, snapshots, now);
@@ -1031,7 +1038,6 @@ namespace Emby.Plugins.WatchTogether
         {
             runtime.State = RoomState.Watching;
             runtime.Barrier = null;
-            runtime.Realign = null;
             runtime.Pending.Clear();
             runtime.Suppressed.Clear();
             runtime.Previous.Clear();
@@ -1123,11 +1129,7 @@ namespace Emby.Plugins.WatchTogether
                 // snapshot or a long poll interval could look like a manual seek.
                 // Normal playback drift is intentionally not corrected here; only a
                 // single, clearly out-of-band position jump is propagated.
-                // While waiting for the slow side, a position frozen near the
-                // seek anchor is the same loading state, not a new manual seek.
-                bool realignStuck = runtime.Realign != null &&
-                    Math.Abs(current.PositionTicks - runtime.Realign.AnchorPositionTicks) <= SyncConstants.RealignStuckTicks;
-                if (IsManualSeek(old, current, runtime.PreviousAtUtc.Value, now) && !realignStuck)
+                if (IsManualSeek(old, current, runtime.PreviousAtUtc.Value, now))
                 {
                     bool pendingSeek = pending != null &&
                         pending.Command == RemoteCommands.Seek;
@@ -1141,7 +1143,26 @@ namespace Emby.Plugins.WatchTogether
                 }
             }
 
-            if (pauseChanges.Count > 0)
+            if (seekChanges.Count > 0)
+            {
+                var winner = seekChanges.FirstOrDefault(c => c.userId == primary);
+                if (winner.userId == null)
+                {
+                    winner = seekChanges[0];
+                }
+
+                // A manual seek is handled as a fresh alignment barrier: pause
+                // both sides, seek the other side to the seeker's position, wait
+                // until it is in place, then restore. This matches the observed
+                // reliable flow (pause -> drag -> both in place -> play) and
+                // avoids live lead/stuck decisions that caused repeated
+                // pause/seeks in real sessions.
+                StartBarrier(runtime, room, snapshots, now, anchorUserId: winner.userId);
+                _logger?.Info(
+                    $"Room {room.Id}: manual seek from {winner.userId} to " +
+                    $"{FormatPosition(winner.positionTicks)}s; starting align barrier");
+            }
+            else if (pauseChanges.Count > 0)
             {
                 var winner = pauseChanges.FirstOrDefault(c => c.userId == primary);
                 if (winner.userId == null)
@@ -1162,37 +1183,6 @@ namespace Emby.Plugins.WatchTogether
                     $"Room {room.Id}: pause change from {winner.userId} ({winner.paused}) propagated");
             }
 
-            if (seekChanges.Count > 0)
-            {
-                var winner = seekChanges.FirstOrDefault(c => c.userId == primary);
-                if (winner.userId == null)
-                {
-                    winner = seekChanges[0];
-                }
-
-                foreach (var user in members)
-                {
-                    if (user != winner.userId && snapshots.TryGetValue(user, out var snapshot) && snapshot != null)
-                    {
-                        Issue(runtime, room, user, snapshot, RemoteCommands.Seek, winner.positionTicks, now);
-                    }
-                }
-
-                // Wait for the seeker to actually start playing at the target
-                // before letting the peer run ahead indefinitely.
-                runtime.Realign = new RealignState
-                {
-                    SeekerUserId = winner.userId,
-                    AnchorPositionTicks = winner.positionTicks,
-                    StartedAtUtc = now,
-                };
-                _logger?.Info(
-                    $"Room {room.Id}: seek {FormatPosition(winner.positionTicks)}s propagated; " +
-                    "watching loading state before either side may run ahead");
-            }
-
-            RealignTick(runtime, room, snapshots, now);
-
             runtime.Previous.Clear();
             foreach (var pair in snapshots)
             {
@@ -1200,189 +1190,6 @@ namespace Emby.Plugins.WatchTogether
             }
 
             runtime.PreviousAtUtc = now;
-        }
-
-        private void RealignTick(
-            RoomRuntime runtime,
-            Room room,
-            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
-            DateTimeOffset now)
-        {
-            var realign = runtime.Realign;
-            if (realign == null || snapshots == null)
-            {
-                return;
-            }
-
-            var members = room.JoinedParticipantUserIds;
-            if (members.Count != 2 ||
-                !snapshots.TryGetValue(members[0], out var firstSnapshot) || firstSnapshot == null ||
-                !snapshots.TryGetValue(members[1], out var secondSnapshot) || secondSnapshot == null)
-            {
-                runtime.Realign = null;
-                return;
-            }
-
-            long anchor = realign.AnchorPositionTicks;
-            var first = members[0];
-            var second = members[1];
-            bool firstResumed = !firstSnapshot.IsPaused &&
-                firstSnapshot.PositionTicks >= anchor + SyncConstants.RealignResumeTicks;
-            bool secondResumed = !secondSnapshot.IsPaused &&
-                secondSnapshot.PositionTicks >= anchor + SyncConstants.RealignResumeTicks;
-            bool firstStuck = Math.Abs(firstSnapshot.PositionTicks - anchor) <= SyncConstants.RealignStuckTicks;
-            bool secondStuck = Math.Abs(secondSnapshot.PositionTicks - anchor) <= SyncConstants.RealignStuckTicks;
-
-            // Both sides are actually playing again: nothing left to wait for.
-            if (firstResumed && secondResumed)
-            {
-                runtime.Realign = null;
-                return;
-            }
-
-            string pausedUser = realign.PausedUserId;
-
-            if (!realign.TimeoutAdvisorySent &&
-                (now - realign.StartedAtUtc).TotalSeconds >= SyncConstants.RealignTimeoutSeconds)
-            {
-                realign.TimeoutAdvisorySent = true;
-                var notifyTarget = pausedUser != null
-                    ? (string.Equals(pausedUser, first, StringComparison.OrdinalIgnoreCase) ? second : first)
-                    : first;
-                var notifySnapshot = string.Equals(notifyTarget, first, StringComparison.OrdinalIgnoreCase)
-                    ? firstSnapshot
-                    : secondSnapshot;
-                NotifyRealignMessage(
-                    room,
-                    notifyTarget,
-                    notifySnapshot,
-                    RealignTimeoutMessageHeader,
-                    RealignTimeoutMessageText,
-                    now);
-                _logger?.Info(
-                    $"Room {room.Id}: stuck side not ready after {SyncConstants.RealignTimeoutSeconds:0}s; " +
-                    "timeout advisory sent");
-            }
-
-            if (pausedUser != null)
-            {
-                // Resume the paused side once the side we were waiting for is
-                // actually playing again.
-                string waitFor = string.Equals(pausedUser, first, StringComparison.OrdinalIgnoreCase)
-                    ? second
-                    : first;
-                bool waitForResumed = string.Equals(waitFor, first, StringComparison.OrdinalIgnoreCase)
-                    ? firstResumed
-                    : secondResumed;
-                if (waitForResumed)
-                {
-                    var pausedSnapshot = string.Equals(pausedUser, first, StringComparison.OrdinalIgnoreCase)
-                        ? firstSnapshot
-                        : secondSnapshot;
-                    var waitForSnapshot = string.Equals(waitFor, first, StringComparison.OrdinalIgnoreCase)
-                        ? firstSnapshot
-                        : secondSnapshot;
-                    if (pausedSnapshot.IsPaused)
-                    {
-                        Issue(runtime, room, pausedUser, pausedSnapshot, RemoteCommands.Unpause, null, now);
-                        _logger?.Info(
-                            $"Room {room.Id}: {waitFor} started playing at " +
-                            $"{FormatPosition(waitForSnapshot.PositionTicks)}s; resuming {pausedUser}");
-                    }
-
-                    runtime.Realign = null;
-                    return;
-                }
-
-                // The paused side was resumed manually while the other is still
-                // stuck: re-pause it (once it leads again) after a cooldown
-                // instead of spamming pause commands every poll.
-                bool otherStuck = string.Equals(pausedUser, first, StringComparison.OrdinalIgnoreCase)
-                    ? secondStuck
-                    : firstStuck;
-                bool pausedLeading = string.Equals(pausedUser, first, StringComparison.OrdinalIgnoreCase)
-                    ? (!firstSnapshot.IsPaused && firstSnapshot.PositionTicks >= anchor + SyncConstants.RealignWaitLeadTicks)
-                    : (!secondSnapshot.IsPaused && secondSnapshot.PositionTicks >= anchor + SyncConstants.RealignWaitLeadTicks);
-                bool canRepause = !realign.PauseSentAtUtc.HasValue ||
-                    (now - realign.PauseSentAtUtc.Value).TotalSeconds >= SyncConstants.RealignRepauseIntervalSeconds;
-                if (otherStuck && pausedLeading && canRepause)
-                {
-                    var pausedSnapshot = string.Equals(pausedUser, first, StringComparison.OrdinalIgnoreCase)
-                        ? firstSnapshot
-                        : secondSnapshot;
-                    Issue(runtime, room, pausedUser, pausedSnapshot, RemoteCommands.Pause, null, now);
-                    realign.PauseSentAtUtc = now;
-                    _logger?.Info(
-                        $"Room {room.Id}: {pausedUser} resumed manually while {waitFor} still loading; re-pausing");
-                }
-
-                return;
-            }
-
-            // No one paused yet: pause the leading side while the other side is
-            // still loading at the anchor.
-            string stuckUser = firstStuck ? first : (secondStuck ? second : null);
-            if (stuckUser != null)
-            {
-                string leader = string.Equals(stuckUser, first, StringComparison.OrdinalIgnoreCase)
-                    ? second
-                    : first;
-                bool leaderLeading = string.Equals(leader, first, StringComparison.OrdinalIgnoreCase)
-                    ? (!firstSnapshot.IsPaused && firstSnapshot.PositionTicks >= anchor + SyncConstants.RealignWaitLeadTicks)
-                    : (!secondSnapshot.IsPaused && secondSnapshot.PositionTicks >= anchor + SyncConstants.RealignWaitLeadTicks);
-                if (leaderLeading)
-                {
-                    var leaderSnapshot = string.Equals(leader, first, StringComparison.OrdinalIgnoreCase)
-                        ? firstSnapshot
-                        : secondSnapshot;
-                    Issue(runtime, room, leader, leaderSnapshot, RemoteCommands.Pause, null, now);
-                    realign.PausedUserId = leader;
-                    realign.PauseSentAtUtc = now;
-                    NotifyRealignMessage(
-                        room,
-                        leader,
-                        leaderSnapshot,
-                        RealignWaitingMessageHeader,
-                        RealignWaitingMessageText,
-                        now);
-                    _logger?.Info(
-                        $"Room {room.Id}: {stuckUser} still loading at {FormatPosition(anchor)}s while " +
-                        $"{leader} reached {FormatPosition(leaderSnapshot.PositionTicks)}s; pausing {leader}");
-                }
-            }
-
-        }
-
-        private void NotifyRealignMessage(
-            Room room,
-            string userId,
-            SessionSnapshot snapshot,
-            string header,
-            string text,
-            DateTimeOffset now)
-        {
-            if (_messageIssuer == null || snapshot == null)
-            {
-                return;
-            }
-
-            try
-            {
-                _messageIssuer.TryIssueMessage(
-                    room.Id,
-                    room.AdminUserId,
-                    userId,
-                    snapshot,
-                    header,
-                    text,
-                    timeoutMs: null,
-                    now: now,
-                    out _);
-            }
-            catch
-            {
-                // Message delivery is best effort and must never block sync.
-            }
         }
 
         private static string FormatPosition(long? positionTicks)
