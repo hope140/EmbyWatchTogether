@@ -27,7 +27,18 @@ namespace Emby.Plugins.WatchTogether
         // as a user seek. 4s makes the common +/-5s player buttons symmetric
         // (a 5s forward jump exceeds the projection by only 4s because playback
         // itself advances during the poll interval).
-        public const long SeekDetectionThresholdTicks = 4 * TicksPerSecond;
+        // The floor is raised for a user whose command acknowledgement latency
+        // (rolling EMA, see RoomRuntime.AckLatencySeconds) is higher, so that a
+        // stale snapshot for a slow client is not mistaken for a manual seek.
+        public const double SeekDetectionFloorSeconds = 4.0;
+
+        // Upper bound for the measured per-user command acknowledgement latency
+        // used to raise the seek detection threshold.
+        public const double AckLatencyMaxSeconds = 10.0;
+
+        // Pause propagation alignment: if the follower has not been aligned to
+        // the paused anchor within this window, give up seeking it.
+        public const double PauseAlignTimeoutSeconds = 10.0;
 
         public const double PlaybackRateTolerance = 0.010000001;
 

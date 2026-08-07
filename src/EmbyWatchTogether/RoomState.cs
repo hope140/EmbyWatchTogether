@@ -68,4 +68,17 @@ namespace Emby.Plugins.WatchTogether
 
         public DateTimeOffset UntilUtc { get; set; }
     }
+
+    /// <summary>
+    /// Deferred target for aligning a follower that confirmed a propagated
+    /// pause: seek it to the paused anchor's position before anyone resumes.
+    /// </summary>
+    public sealed class PauseAlignState
+    {
+        public string AnchorUserId { get; set; }
+
+        public long TargetPositionTicks { get; set; }
+
+        public DateTimeOffset CreatedAtUtc { get; set; }
+    }
 }
