@@ -37,7 +37,7 @@ Stack: S<n> - <名称>
 测试命令: <可直接运行的命令>
 回滚方式: <通常为 revert 当前 Stack commit>
 允许并行: <是/否及依据>
-子代理: <luna_worker | 主线程>
+子代理: <luna_worker | deepseek_worker | 主线程>
 ```
 
 主线程绘制依赖顺序：无依赖且所有权不重叠的 Stack 可从共同基础并行；有依赖的 Stack 从直接前置 Stack 的已审核 commit 创建。相同文件、共享生成文件、数据库迁移、锁文件、公共接口先后变更或同一可变测试环境均视为冲突，必须串行。
@@ -60,6 +60,8 @@ Windows PowerShell 中必须把 `<worktree-path>` 替换为已核验的绝对路
 ## 阶段四：派发 Luna
 
 每个写 Stack 使用独立代理线程，并向 `luna_worker` 发送完整契约：
+
+当主线程环境只有 DeepSeek v4 可用（OpenAI 额度用完或 `gpt-5.6-luna` 不可用）时，改派 `deepseek_worker`（DeepSeek V4 Flash）。契约字段、派发纪律与审核门禁完全相同，仅代理角色和模型不同。
 
 ```text
 执行 Stack: S<n> - <名称>
@@ -124,7 +126,8 @@ git diff <基础分支>...HEAD
 
 ## 能力边界
 
-- 项目配置可以启用多代理、限制并发，并定义 `luna_worker` 的模型、推理等级、沙箱和持久指令。
+- 项目配置可以启用多代理、限制并发，并定义 `luna_worker` 的模型、推理等级、沙箱和持久指令，以及仅有 DeepSeek v4 可用时的备用代理 `deepseek_worker`（DeepSeek V4 Flash）。
+- 模型可用性回退由主线程依据 `AGENTS.md` 判断并选择 `deepseek_worker`，Codex 不会自动探测 `gpt-5.6-luna` 是否可用。
 - Codex 桌面端和 Git 均支持 worktree；主线程也可以显式运行 `git worktree add`。
 - agent 配置不能声明文件级写权限、自动分支、自动 worktree、PR Stack 依赖图或禁止 push 的机械策略；这些由本文件、`AGENTS.md`、派发契约和主线程实证审核执行。
 - 运行时权限覆盖或组织策略可能高于 agent 文件。派发前必须检查实际权限和 worktree，不能只依赖静态配置。
