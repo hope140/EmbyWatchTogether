@@ -4,6 +4,7 @@ using System.Threading;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
 
 namespace Emby.Plugins.WatchTogether
@@ -17,17 +18,20 @@ namespace Emby.Plugins.WatchTogether
         private readonly ISessionManager _sessionManager;
         private readonly IServerApplicationHost _applicationHost;
         private readonly IJsonSerializer _jsonSerializer;
+        private readonly ILogManager _logManager;
         private SessionBridge _bridge;
         private SyncEngine _syncEngine;
 
         public WatchTogetherEntryPoint(
             ISessionManager sessionManager,
             IServerApplicationHost applicationHost,
-            IJsonSerializer jsonSerializer)
+            IJsonSerializer jsonSerializer,
+            ILogManager logManager = null)
         {
             _sessionManager = sessionManager;
             _applicationHost = applicationHost;
             _jsonSerializer = jsonSerializer;
+            _logManager = logManager;
         }
 
         public void Run()
@@ -61,7 +65,8 @@ namespace Emby.Plugins.WatchTogether
                 pollIntervalSeconds: plugin.Configuration.PollIntervalSeconds,
                 pauseOtherOnPlaybackStop: plugin.Configuration.PauseOtherOnPlaybackStop,
                 notifyOtherOnPlaybackStop: plugin.Configuration.NotifyOtherOnPlaybackStop,
-                messageIssuer: issuer);
+                messageIssuer: issuer,
+                logManager: _logManager);
             SubscribeToSessionChanges(bridge);
             _syncEngine.Start();
         }

@@ -67,4 +67,25 @@ namespace Emby.Plugins.WatchTogether
 
         public DateTimeOffset UntilUtc { get; set; }
     }
+
+    /// <summary>
+    /// Tracks "wait for the slow side" after a manual seek was propagated.
+    /// Whichever side is still loading at the seek target is the one we wait
+    /// for; the leading side is paused until the stuck side actually starts
+    /// playing again.
+    /// </summary>
+    public sealed class RealignState
+    {
+        public string SeekerUserId { get; set; }
+
+        public long AnchorPositionTicks { get; set; }
+
+        public string PausedUserId { get; set; }
+
+        public DateTimeOffset? PauseSentAtUtc { get; set; }
+
+        public bool TimeoutAdvisorySent { get; set; }
+
+        public DateTimeOffset StartedAtUtc { get; set; }
+    }
 }
