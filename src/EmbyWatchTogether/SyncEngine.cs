@@ -629,7 +629,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             double difference = Math.Abs(current.PositionTicks - expectedPosition);
-            return difference >= SyncConstants.DriftThresholdTicks;
+            return difference >= SyncConstants.SeekDetectionThresholdTicks;
         }
 
         private static bool IsPositionReset(long previousPositionTicks, long currentPositionTicks)
@@ -924,63 +924,12 @@ namespace Emby.Plugins.WatchTogether
                     bool desired = barrier.PrimaryPaused;
                     if (members.All(u => snapshots[u].IsPaused == desired))
                     {
-                        // Unpause commands are delivered sequentially. When the
-                        // original state was playing, give the secondary one final
-                        // position correction before declaring the barrier complete.
-                        if (!barrier.PrimaryPaused)
-                        {
-                            barrier.Stage = BarrierStage.FinalAlign;
-                            barrier.StartedAtUtc = now;
-                            return;
-                        }
-
                         EnterWatching(runtime, room, barrier, snapshots, now);
                     }
                     else if (runtime.Pending.Count == 0 &&
                              (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
                         ScheduleBarrierRetry(runtime, room.Id, "barrier restore timed out", now);
-                    }
-
-                    return;
-
-                case BarrierStage.FinalAlign:
-                    var finalFollower = members.First(u => !string.Equals(u, barrier.AnchorUserId, StringComparison.OrdinalIgnoreCase));
-                    if (!barrier.FinalAlignSent)
-                    {
-                        long anchorPosition = snapshots[barrier.AnchorUserId].PositionTicks;
-                        long followerPosition = snapshots[finalFollower].PositionTicks;
-                        if (Math.Abs(anchorPosition - followerPosition) <= SyncConstants.StartupAlignToleranceTicks)
-                        {
-                            EnterWatching(runtime, room, barrier, snapshots, now);
-                            return;
-                        }
-
-                        barrier.FinalAlignPositionTicks = anchorPosition;
-                        Issue(
-                            runtime,
-                            room,
-                            finalFollower,
-                            snapshots[finalFollower],
-                            RemoteCommands.Seek,
-                            anchorPosition,
-                            now);
-                        barrier.FinalAlignSent = true;
-                        return;
-                    }
-
-                    if (Math.Abs(
-                            snapshots[finalFollower].PositionTicks - barrier.FinalAlignPositionTicks) <=
-                        SyncConstants.SeekToleranceTicks)
-                    {
-                        EnterWatching(runtime, room, barrier, snapshots, now);
-                    }
-                    else if (runtime.Pending.Count == 0 &&
-                             (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
-                    {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Error = "barrier final alignment timed out";
-                        runtime.Barrier = null;
                     }
 
                     return;

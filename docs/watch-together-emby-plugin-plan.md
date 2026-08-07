@@ -19,7 +19,7 @@
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
 
-程序集目标框架为 `netstandard2.0`，项目版本为 `1.2.0.4`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。C# 行为、公共 API 和版本号不由本文档改变。
+程序集目标框架为 `netstandard2.0`，项目版本为 `1.2.0.5`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。C# 行为、公共 API 和版本号不由本文档改变。
 
 ## 2. 组件和数据流
 

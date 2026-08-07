@@ -11,10 +11,6 @@ namespace Emby.Plugins.WatchTogether
 
         public const long SeekToleranceTicks = 2 * TicksPerSecond;
 
-        // Startup alignment is stricter than the general seek acknowledgement
-        // tolerance so a short restore-order skew is corrected before Watching.
-        public const long StartupAlignToleranceTicks = 1 * TicksPerSecond;
-
         public const long DriftThresholdTicks = 5 * TicksPerSecond;
 
         // External players often report a small position rewind (a few seconds)
@@ -25,6 +21,13 @@ namespace Emby.Plugins.WatchTogether
         public const long ManualSeekBackwardToleranceTicks = 15 * TicksPerSecond;
 
         public const double SeekCalibrationWindowSeconds = 15.0;
+
+        // Manual seek detection (both directions): the position must differ
+        // from the expected playback projection by at least this much to count
+        // as a user seek. 4s makes the common +/-5s player buttons symmetric
+        // (a 5s forward jump exceeds the projection by only 4s because playback
+        // itself advances during the poll interval).
+        public const long SeekDetectionThresholdTicks = 4 * TicksPerSecond;
 
         public const double PlaybackRateTolerance = 0.010000001;
 
