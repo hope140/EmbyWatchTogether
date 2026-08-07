@@ -33,6 +33,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("NotifyOtherOnPlaybackStop", javascript);
             Assert.Contains("getPluginConfiguration", javascript);
             Assert.Contains("updatePluginConfiguration", javascript);
+            Assert.Contains("更新配置已读取", javascript);
+            Assert.Contains("_wtUpdateBusy", javascript);
 
             var roomsIndex = html.IndexOf("id=\"wtRooms\"", System.StringComparison.Ordinal);
             var configIndex = html.IndexOf("id=\"wtConfigSection\"", System.StringComparison.Ordinal);
