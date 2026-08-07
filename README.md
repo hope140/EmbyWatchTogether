@@ -1,137 +1,122 @@
 # Emby Watch Together 插件
 
-这是一个运行在 Emby Server 内的双人一起看插件。它通过 Emby 的会话快照和远程控制接口，让同一房间的两位参与者在**起播、暂停/继续、用户手动拖动进度、切换视频和停止播放**这些明确操作上保持一致。
+Watch Together 是一个运行在 Emby Server 内的双人同步观看插件。它读取同一台服务器上的会话快照，并通过 Emby 远程控制命令协调起播、暂停/继续、用户手动拖动进度、切换视频和停止播放。
 
-插件的核心原则是：**正常播放不做周期性 Seek**。播放过程中两端存在小幅速度差、网络延迟或 SessionInfo 更新延迟时，插件不会为了追求每一轮完全相同而反复跳转；只有检测到相对于预计播放位置的明显、单次位置跳变，才把它当作用户手动 Seek。
+插件只负责房间内的协调，不会修改媒体库、转码设置或播放器客户端。正常播放期间不做周期性 Seek：网络延迟、SessionInfo 更新延迟和小幅播放速度差不会被反复纠正。
 
-## 当前行为
+## 功能
 
-- 两位参与者打开同一 Item 后，房间自动进入起播 Barrier：暂停两端、以主用户位置为基准对齐另一端、恢复原来的播放状态。
-- 主用户负责解决同时发生的冲突；非主用户的暂停/继续和手动 Seek仍可被识别，但不会覆盖主用户在同一轮的操作。
-- 正常播放按“上一次快照位置 + 经过时间 × 上一次播放速度”计算预计位置，不执行周期性漂移纠偏。
-- 一方手动 Seek 时，只向另一方发送一次 Seek；Pending acknowledgement 和 Suppressed 窗口用于避免命令回环和重复 Seek。
-- 一方切换到下一集或其他 Item 时，房间回到 `Waiting`，不跨 Item Seek；检测到两端都在播放时会暂停活跃会话，等待两端重新打开同一 Item。只有一端独自播放时保留单人保护，不会被自动暂停。
-- 一方停止或退出视频时，默认暂停另一方并发送文字提示；这两个行为都可以在插件设置页单独关闭。
-- 起播命令没有及时被客户端确认时，插件会进行有限次数重试；仍失败则进入等待状态并设置冷却，避免命令风暴。双方再次可用后会自动重新尝试，并向客户端发送“正在自动重新同步，请稍候”。
+- 管理员创建一个包含两名用户的房间，并指定主用户；每名用户同时只能属于一个房间。
+- 两位参与者打开相同 Item 后，插件执行起播 Barrier：暂停双方、以主用户位置为锚点对齐另一端，再恢复起播前的暂停/播放状态。
+- `Watching` 阶段传播明确的暂停/继续和手动 Seek。主用户同时操作时优先作为冲突裁决者，命令确认和抑制窗口可避免回环与重复控制。
+- 切换到不同 Item 时回到等待状态，不跨 Item Seek；两人都在播放时会按安全规则暂停活跃会话，单人播放受到保护。
+- 检测到一方停止、退出或位置重置时，默认暂停另一方并发送提示消息；两个行为可以分别关闭。
+- Emby 管理页提供房间创建、加入/退出、暂停、继续、重新同步、删除和状态查看。
+- 命令确认超时后只做有限重试；起播失败进入冷却并自动重试，不会无限刷命令。
 
-## 目录
+## 兼容性与边界
 
-```text
-src/EmbyWatchTogether/       插件源码、同步状态机、REST API、Emby 配置页
-  SyncEngine.cs               房间轮询与 Barrier/Watching 状态机
-  SessionBridge*.cs           Emby 会话快照和远程命令适配
-  Room*.cs                    房间持久化、运行时状态和权限边界
-  Web/Configuration/          Emby 插件设置页
+- 目标运行环境是 Emby Server 4.9 API（项目引用 `MediaBrowser.Server.Core` `4.9.0.52-beta`），程序集目标框架为 `netstandard2.0`。
+- 一个房间恰好两名参与者，且两人必须登录同一台 Emby Server；不支持跨服务器或多人同步。
+- 两个会话必须打开相同 Item、媒体时长相差不超过 3 秒、播放速率接近 1，并同时支持 Pause、Unpause、Seek 远程命令。客户端没有这些能力时房间会停留在 `Waiting`。
+- SessionInfo 是服务器轮询快照，不是播放器内部时钟。插件只传播明显的单次位置跳变（默认 5 秒阈值），不保证每一帧都相同，也不主动消除长期的小幅漂移。
+- 不依赖外部运行时、脚本或额外服务；消息展示、远程控制和确认延迟仍取决于实际 Emby 客户端。
+- `Enabled` 等部分配置字段在当前版本保留在 Emby 配置对象中，但未作为设置页开关或实时策略使用；请以本 README 描述的行为为准。
 
-tests/EmbyWatchTogether.Tests/ 单元测试和同步边界回归测试
-scripts/build.ps1             构建、测试、发布 DLL 并生成 ZIP
-docs/                         设计和运行说明
-reference/python-watch-together/ Python 参考实现，仅用于对照
-```
+## 安装已构建插件
 
-## 构建与测试
+1. 在 Emby Server 管理后台确认服务器已停止写入旧版本（升级前建议备份旧 DLL）。
+2. 从发布产物解压 `EmbyWatchTogether.zip`，得到根目录下的 `Emby.Plugins.WatchTogether.dll`。
+3. 将 DLL 直接复制到 Emby Server 数据目录的 `plugins` 目录，不要再套一层 `EmbyWatchTogether` 子目录。若不确定数据目录位置，可在 Emby 管理后台的服务器路径页面查看。
+4. 启动或重启 Emby Server。进入 **Dashboard → Plugins → Watch Together**，确认设置页能够打开。
 
-要求：可用的 .NET SDK，以及能够还原 Emby `MediaBrowser.Server.Core` 包的 NuGet 源。
+插件是单 DLL 交付，不需要复制源码、NuGet 包或其他旁车进程。升级时停止 Emby、替换 DLL 后再启动；回滚时恢复备份的旧 DLL。
+
+## 使用方法
+
+### 创建房间
+
+1. 使用管理员账号打开 **Watch Together** 页面。
+2. 填写房间名称，选择两名不同的参与者，并从两人中指定主用户。
+3. 创建后让两名用户登录同一 Emby Server、打开同一个视频；必要时在房间卡片上点击“加入房间”。
+4. 房间状态依次可能显示为：
+
+   - `Waiting`（等待参与者或等待双方打开同一 Item）；
+   - `Barrier`（正在暂停、Seek 和恢复）；
+   - `Watching`（已完成起播同步）；
+   - `Unavailable`（房间归属的服务器 ID 与当前实例不一致）。
+
+进入 `Watching` 后，暂停/继续和明显的手动拖动会传播到另一端。管理员可以对房间执行暂停、继续或重新同步；重新同步会清理运行时状态并重新执行 Barrier。
+
+### 停止行为设置
+
+设置页的“播放停止行为”区域提供两个独立开关，默认均开启：
+
+| 配置项 | 默认值 | 作用 |
+| --- | ---: | --- |
+| `PauseOtherOnPlaybackStop` | `true` | 一方停止、退出或被识别为位置重置时，暂停仍在播放的另一方 |
+| `NotifyOtherOnPlaybackStop` | `true` | 同一事件发生时向另一方发送文字提示 |
+
+配置由 Emby 保存，只有管理员可以修改。`PollIntervalSeconds` 默认 `0.5` 秒，用于控制会话轮询频率；轮询频率不会开启周期性漂移 Seek。`MaxRuntimeDifferenceSeconds`、`SeekToleranceSeconds`、`BarrierSeekTimeoutSeconds` 和 `StaleSessionTimeoutSeconds` 是当前配置模型中的保留字段，现版本的关键同步阈值由代码固定，修改这些字段不会改变设置页显示的策略。
+
+## 构建、测试和打包
+
+要求：PowerShell、可用的 .NET SDK，以及能够还原 `MediaBrowser.Server.Core` `4.9.0.52-beta` 的 NuGet 源。首次构建可先执行 `dotnet restore`，然后运行：
 
 ```powershell
 dotnet test tests/EmbyWatchTogether.Tests/EmbyWatchTogether.Tests.csproj -c Release --nologo -v minimal
 dotnet build src/EmbyWatchTogether.sln -c Release --nologo
+```
+
+发布脚本会按相同配置依次构建、测试、发布并压缩单 DLL：
+
+```powershell
 .\scripts\build.ps1 -Configuration Release
 ```
 
-打包脚本会把插件发布到 `dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll`，并生成 `dist/EmbyWatchTogether.zip`。插件按单 DLL 交付，DLL 应直接放在 Emby 的 `plugins` 目录中，不要再套一层插件子目录。更新后重启 Emby Server，使入口点和设置页重新加载。
-
-## Emby 设置
-
-在 Emby 管理后台的插件页面打开 **Watch Together**。配置由 Emby 保存，修改后点击保存即可；同步服务会在插件入口点重启时读取配置。
-
-| 配置项 | 默认值 | 作用 |
-| --- | ---: | --- |
-| `Enabled` | `true` | 是否启用插件功能 |
-| `PollIntervalSeconds` | `0.5` | 会话轮询间隔；只影响检测响应速度，不会启用周期性漂移 Seek |
-| `PauseOtherOnPlaybackStop` | `true` | 一方停止/退出视频时暂停另一方 |
-| `NotifyOtherOnPlaybackStop` | `true` | 一方停止/退出视频时向另一方发送文字提示 |
-| `MaxRuntimeDifferenceSeconds` | `3` | 起播时允许的媒体时长差 |
-| `SeekToleranceSeconds` | `2` | 远程 Seek acknowledgement 的容差 |
-| `BarrierSeekTimeoutSeconds` | `10` | 兼容配置字段；起播 Barrier 的实际命令确认仍受有限重试和超时保护 |
-| `StaleSessionTimeoutSeconds` | `60` | 会话陈旧判断配置字段 |
-
-“停止/退出行为”两个开关位于设置页下方，和播放行为放在同一组。默认值为：暂停另一方、发送文字提示。
-
-## 房间生命周期
-
-房间需要两名参与者和一名主用户。房间状态为：
-
-- `Waiting`：等待双方加入、上线或打开同一 Item；不同 Item 也停留在此状态。
-- `Barrier`：起播或失败恢复的暂停—Seek—恢复握手。
-- `Watching`：双方已经完成起播，对手动播放操作做单次传播。
-- `Unavailable`：房间属于另一台 Emby Server，当前实例不负责处理。
-
-房间数据保存在插件数据目录的 `rooms.json` 中；轮询中的 Pending、Suppressed、上一轮快照等运行时状态只保存在内存，插件重启后会重新等待并建立 Barrier。
-
-## 同步规则
-
-### 起播
-
-当两位参与者都在线、具备远程控制能力并打开同一 Item 时：
-
-1. 向双方发送 Pause；
-2. 等两端快照确认暂停；
-3. 重新读取主用户位置，避免暂停命令传播期间主用户继续前进造成旧锚点；
-4. 向非主用户发送 Seek；
-5. 恢复双方起播前的暂停/播放状态；
-6. 必要时做一次起播最终对齐，然后进入 `Watching`。
-
-每条命令都有确认、超时、有限重试和失败冷却。确认失败不会在每轮无限发送相同命令。
-
-### 播放、暂停和继续
-
-`Watching` 状态只响应快照中观察到的状态变化。主用户优先作为冲突裁决者；向另一端发送 Pause 或 Unpause 后，Pending/Suppressed 机制会阻止远端回传造成重复控制。
-
-### 手动 Seek
-
-插件不会用“两次快照的原始位置差”判断 Seek，而是先估算：
+成功后产物为：
 
 ```text
-预计位置 = 上一次位置 + 经过时间 × 上一次播放速度
+dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll
+dist/EmbyWatchTogether.zip
 ```
 
-只有当前快照相对预计位置发生明显单次跳变（默认阈值 5 秒）才判定为手动 Seek。这样可以避免长轮询间隔、网络延迟和不同播放速度造成误判。对自然播放速度差异不做周期性纠偏，因此不会频繁跳转。
+ZIP 内 DLL 位于根目录，解压后可直接按“安装已构建插件”中的步骤复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。
 
-### 切换下一集或打开不同视频
+## 项目结构
 
-不同 Item 之间不发送 Seek。房间回到 `Waiting`，并在双方都处于播放状态时暂停活跃会话，等待双方打开同一 Item 后重新进入 Barrier。若当前只有一个在线播放者，单人保护生效，不会因为等待另一人而暂停它。
+```text
+src/EmbyWatchTogether/       插件入口、房间存储、会话适配、同步状态机和嵌入式管理页
+tests/EmbyWatchTogether.Tests/ 单元测试和同步边界回归测试
+scripts/build.ps1             构建、测试、发布 DLL 并生成 ZIP
+docs/                          当前实现说明、排错和协作流程
+```
 
-### 停止或退出
-
-在 `Watching` 状态下，以下情况会被视为停止/退出：会话消失、会话标记为 stopped，或位置从较大值重置到接近零。房间会回到 `Waiting`，默认暂停仍在播放的一方，并向其发送“对方已停止播放，请重新打开视频”。通知和暂停均可独立关闭。
-
-起播 Barrier 中的会话退出只会取消本次 Barrier，不会错误地产生持久的“播放已停止”状态。
+插件运行时在 Emby 插件数据目录写入 `rooms.json`。房间元数据会持久化；Pending、Suppressed、上一轮快照和 Barrier 阶段等运行时状态只保存在内存，重启后会重新进入 `Waiting` 并建立新的 Barrier。
 
 ## REST API
 
-插件服务注册以下接口，管理页使用这些接口：
+所有接口都需要 Emby 身份认证。管理员可以管理房间和用户列表；参与者只能查看或操作自己参与的房间。
 
-- `GET /WatchTogether/Users`
-- `GET /WatchTogether/Rooms`
-- `POST /WatchTogether/Rooms`
-- `DELETE /WatchTogether/Rooms/{id}`
-- `GET /WatchTogether/Rooms/{id}/State`
-- `POST /WatchTogether/Rooms/{id}/Join`
-- `POST /WatchTogether/Rooms/{id}/Leave`
-- `POST /WatchTogether/Rooms/{id}/Action`：支持 `resync` 等房间控制
-- `POST /WatchTogether/Rooms/{id}/Message`
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/WatchTogether/Users` | 管理员读取用户列表 |
+| `GET` / `POST` | `/WatchTogether/Rooms` | 列出或创建房间 |
+| `DELETE` | `/WatchTogether/Rooms/{id}` | 删除房间 |
+| `GET` | `/WatchTogether/Rooms/{id}/State` | 查看状态、资格和会话快照 |
+| `POST` | `/WatchTogether/Rooms/{id}/Join` | 参与者加入房间 |
+| `POST` | `/WatchTogether/Rooms/{id}/Leave` | 参与者退出房间 |
+| `POST` | `/WatchTogether/Rooms/{id}/Action` | 管理员执行 `pause`、`resume` 或 `resync` |
+| `POST` | `/WatchTogether/Rooms/{id}/Message` | 管理员向在线参与者发送提示 |
 
-接口权限由服务端校验：管理员可管理房间，参与者只能读取和操作自己参与的房间。
+服务端会再次校验管理员和参与者权限，不能仅依赖管理页隐藏按钮作为安全边界。
 
-## 已知限制
+## 排错清单
 
-- 同步依赖 Emby 客户端实际暴露的远程控制能力。不同客户端对 Pause、Seek 和 DisplayMessage 的支持和确认延迟可能不同。
-- 插件只协调同一 Emby Server 上的两位用户，不负责跨服务器或多人房间。
-- SessionInfo 是轮询快照，不是播放器内部时钟；本实现优先避免打断播放，因此不会保证播放期间每一帧都完全相同。
-- 真实客户端、不同网络线路和 STRM/CMS 场景仍需在目标 Emby 环境进行人工验收。
+- 状态长时间为 `Waiting`：确认两人已加入、在线会话打开相同 Item，且客户端报告了 Pause、Unpause、Seek 能力。
+- 状态出现不同视频提示：两端 ItemId 不一致；插件不会跨视频追赶，重新打开相同视频即可触发新的 Barrier。
+- Barrier 失败：查看房间卡片的错误信息，确认 Emby 能返回更新后的 SessionInfo；命令会有限重试，冷却结束后自动重试。
+- 频繁跳转：本插件只对明显单次跳变发送 Seek。若正常播放仍反复跳转，应先检查其他客户端、插件或遥控器是否在发送 Seek。
+- 停止后另一端未暂停或未收到消息：检查设置页两个开关，以及目标客户端是否支持 Pause 或 DisplayMessage。
 
-## 相关文档
-
-- `docs/watch-together-emby-plugin-plan.md`：当前实现的架构、状态机、验收和排错说明。
-- `docs/pr-stack-workflow.md`：本仓库的 Stack/Worktree 协作流程。
+更完整的状态机、确认窗口、测试范围和人工验收步骤见 [`docs/watch-together-emby-plugin-plan.md`](docs/watch-together-emby-plugin-plan.md)。
