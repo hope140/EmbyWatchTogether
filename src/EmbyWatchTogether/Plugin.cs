@@ -41,13 +41,6 @@ namespace Emby.Plugins.WatchTogether
 
         public IServerApplicationHost ApplicationHost { get; internal set; }
 
-        /// <summary>
-        /// Shared updater owned by the server entry point. It is intentionally
-        /// internal to the plugin so REST handlers can expose a read-only
-        /// snapshot without constructing a second scheduler.
-        /// </summary>
-        public PluginUpdateManager UpdateManager { get; internal set; }
-
         public override void UpdateConfiguration(BasePluginConfiguration configuration)
         {
             var pluginConfiguration = configuration as PluginConfiguration;
@@ -56,16 +49,7 @@ namespace Emby.Plugins.WatchTogether
                 throw new ArgumentException("invalid Watch Together plugin configuration", nameof(configuration));
             }
 
-            if (pluginConfiguration.UpdateCheckIntervalHours < 1 ||
-                pluginConfiguration.UpdateCheckIntervalHours > 720)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(pluginConfiguration.UpdateCheckIntervalHours),
-                    "更新检测间隔必须是 1 到 720 小时之间的整数。");
-            }
-
             base.UpdateConfiguration(pluginConfiguration);
-            UpdateManager?.NotifyConfigurationChanged();
         }
 
         /// <summary>

@@ -34,11 +34,11 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件。�
 
 ## 插件正式版更新
 
-设置页底部的“插件更新”区域默认关闭自动更新。管理员可启用自动检测，并将间隔设置为 1 到 720 个整数小时（默认 24 小时）。启用后插件会立即异步检查一次，之后按上次检查时间和该间隔执行；保存设置会动态重排任务，关闭后会取消后台调度。
+插件更新由 Emby 计划任务处理，插件配置页不再提供检查、安装或更新设置。服务器启动后，**Dashboard → 计划任务** 中会出现名为“Watch Together 更新检查”的任务，默认每 24 小时运行一次；管理员可以在那里调整检测时间、禁用任务或手动执行。插件配置页只显示当前版本和 GitHub 链接。
 
-更新通过 GitHub 的公开下载地址 `releases/latest/download/Emby.Plugins.WatchTogether.dll` 获取最新正式版，不调用 GitHub REST API，因此不会受匿名 API 速率限制影响（该配额与 Emby 自身的更新检查共享）。下载后插件会校验文件是名称严格为 `Emby.Plugins.WatchTogether` 的有效程序集并读取其程序集版本作为最新版本，同时计算 MD5 交给 Emby 安装器做二次校验。手动“检查更新”不会自动安装，只有后台自动检查发现新版本时才会安装。
+任务通过 GitHub 的公开下载地址 `releases/latest/download/Emby.Plugins.WatchTogether.dll` 获取最新正式版，不调用 GitHub REST API，因此不会受匿名 API 速率限制影响（该配额与 Emby 自身的更新检查共享）。下载后插件会校验文件是名称严格为 `Emby.Plugins.WatchTogether` 的有效程序集并读取其程序集版本作为最新版本，同时计算 MD5 交给 Emby 安装器做二次校验；发现新版本时自动安装。
 
-安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后页面会提示“重启 Emby 后生效”，并在重启前避免重复安装同一版本。发布正式版时，GitHub release 必须同时附带版本 tag 和固定名称的 DLL asset，且 tag 版本必须与程序集版本一致。
+安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示，任务也会标记为完成；重启前同一版本不会重复安装。发布正式版时，GitHub release 必须同时附带版本 tag 和固定名称的 DLL asset，且 tag 版本必须与程序集版本一致。
 
 ## 使用方法
 
@@ -116,9 +116,7 @@ docs/                          当前实现说明、排错和协作流程
 | `POST` | `/WatchTogether/Rooms/{id}/Leave` | 参与者退出房间 |
 | `POST` | `/WatchTogether/Rooms/{id}/Action` | 管理员执行 `pause`、`resume` 或 `resync` |
 | `POST` | `/WatchTogether/Rooms/{id}/Message` | 管理员向在线参与者发送提示 |
-| `GET` | `/WatchTogether/Update` | 管理员读取缓存的更新状态 |
-| `POST` | `/WatchTogether/Update/Check` | 管理员手动检查正式版（不会自动安装） |
-| `POST` | `/WatchTogether/Update/Install` | 管理员安装已校验的正式版，等待重启生效 |
+| `GET` | `/WatchTogether/Info` | 管理员读取当前版本与 GitHub 仓库地址 |
 
 服务端会再次校验管理员和参与者权限，不能仅依赖管理页隐藏按钮作为安全边界。
 

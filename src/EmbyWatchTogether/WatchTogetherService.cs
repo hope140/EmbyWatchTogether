@@ -64,14 +64,8 @@ namespace Emby.Plugins.WatchTogether
     [Route("/WatchTogether/Users", "GET")]
     public class GetUsersRequest { }
 
-    [Route("/WatchTogether/Update", "GET")]
-    public class GetUpdateRequest { }
-
-    [Route("/WatchTogether/Update/Check", "POST")]
-    public class CheckUpdateRequest { }
-
-    [Route("/WatchTogether/Update/Install", "POST")]
-    public class InstallUpdateRequest { }
+    [Route("/WatchTogether/Info", "GET")]
+    public class GetPluginInfoRequest { }
 
     /// <summary>
     /// REST API for room management and remote control. Admin endpoints verify
@@ -293,30 +287,15 @@ namespace Emby.Plugins.WatchTogether
 #pragma warning restore CS0618
         }
 
-        public object Get(GetUpdateRequest request)
-        {
-            RequireAdmin();
-            return GetUpdateStatus();
-        }
-
-        public object Post(CheckUpdateRequest request)
+        public object Get(GetPluginInfoRequest request)
         {
             RequireAdmin();
             var plugin = RequirePlugin();
-            return plugin.UpdateManager == null
-                ? GetUnavailableUpdateStatus(plugin)
-                : plugin.UpdateManager.CheckForUpdatesAsync(false, CancellationToken.None)
-                    .GetAwaiter().GetResult();
-        }
-
-        public object Post(InstallUpdateRequest request)
-        {
-            RequireAdmin();
-            var plugin = RequirePlugin();
-            return plugin.UpdateManager == null
-                ? GetUnavailableUpdateStatus(plugin)
-                : plugin.UpdateManager.InstallAsync(CancellationToken.None)
-                    .GetAwaiter().GetResult();
+            return new
+            {
+                CurrentVersion = plugin.Version?.ToString(),
+                RepositoryUrl = GitHubReleaseClient.RepositoryUrl,
+            };
         }
 
         private static Dictionary<string, SessionSnapshot> BuildSnapshots(Plugin plugin, Room room)
@@ -342,24 +321,6 @@ namespace Emby.Plugins.WatchTogether
         private static Plugin RequirePlugin()
         {
             return Plugin.Instance ?? throw new InvalidOperationException("plugin is not initialized");
-        }
-
-        private PluginUpdateStatus GetUpdateStatus()
-        {
-            var plugin = RequirePlugin();
-            return plugin.UpdateManager == null
-                ? GetUnavailableUpdateStatus(plugin)
-                : plugin.UpdateManager.GetStatus();
-        }
-
-        private static PluginUpdateStatus GetUnavailableUpdateStatus(Plugin plugin)
-        {
-            return new PluginUpdateStatus
-            {
-                CurrentVersion = plugin?.Version?.ToString(),
-                RepositoryUrl = GitHubReleaseClient.RepositoryUrl,
-                StartingUp = true,
-            };
         }
 
         private string CurrentUserId()

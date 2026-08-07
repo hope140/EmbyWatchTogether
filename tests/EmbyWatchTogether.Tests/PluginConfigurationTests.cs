@@ -1,3 +1,4 @@
+using System.Linq;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
@@ -24,6 +25,24 @@ namespace Emby.Plugins.WatchTogether.Tests
             var configuration = new PluginConfiguration();
 
             Assert.Equal(0.5, configuration.PollIntervalSeconds);
+        }
+
+        [Fact]
+        public void UpdateSettings_AreNotPartOfPluginConfiguration()
+        {
+            var properties = typeof(PluginConfiguration).GetProperties();
+
+            Assert.DoesNotContain(properties, p => p.Name == "AutoUpdateEnabled");
+            Assert.DoesNotContain(properties, p => p.Name == "UpdateCheckIntervalHours");
+            Assert.DoesNotContain(properties, p => p.Name == "LastUpdateCheckAtUtc");
+        }
+
+        [Fact]
+        public void PendingUpdateVersion_RemainsInternalStateWithNullDefault()
+        {
+            var configuration = new PluginConfiguration();
+
+            Assert.Null(configuration.PendingUpdateVersion);
         }
     }
 }

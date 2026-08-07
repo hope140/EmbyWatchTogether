@@ -10,9 +10,9 @@ using MediaBrowser.Model.Updates;
 namespace Emby.Plugins.WatchTogether
 {
     /// <summary>
-    /// Coordinates update checks, scheduling and installation. The manager is
-    /// deliberately independent from the REST service so automatic work and
-    /// administrator actions share the same operation gate.
+    /// Core update check and installation logic. Scheduling is owned by the
+    /// Emby scheduled task (<see cref="WatchTogetherUpdateTask"/>); this
+    /// manager only guards concurrent operations and exposes status.
     /// </summary>
     public sealed class PluginUpdateManager : IDisposable
     {
@@ -28,10 +28,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly CancellationTokenSource _lifetimeCancellation = new CancellationTokenSource();
 
         private readonly PluginUpdateStatus _status;
-        private Task _schedulerTask;
-        private TaskCompletionSource<bool> _scheduleSignal = NewSignal();
         private VerifiedPluginRelease _verifiedRelease;
-        private bool _started;
         private bool _disposed;
 
         public PluginUpdateManager(
@@ -99,43 +96,9 @@ namespace Emby.Plugins.WatchTogether
             {
                 CurrentVersion = FormatVersion(currentVersion),
                 PendingVersion = configuration.PendingUpdateVersion,
-                LastCheckedAtUtc = configuration.LastUpdateCheckAtUtc,
                 RestartRequired = IsPendingRestartRequired(configuration.PendingUpdateVersion, currentVersion),
                 RepositoryUrl = GitHubReleaseClient.RepositoryUrl,
             };
-        }
-
-        public void Start()
-        {
-            lock (_stateLock)
-            {
-                ThrowIfDisposed();
-                if (_started)
-                {
-                    return;
-                }
-
-                _started = true;
-                _schedulerTask = Task.Run(() => SchedulerLoopAsync(_lifetimeCancellation.Token));
-            }
-        }
-
-        /// <summary>
-        /// Called after Plugin.UpdateConfiguration has persisted a new config.
-        /// The scheduler is woken up so enable/disable and interval changes do
-        /// not wait for the old timer.
-        /// </summary>
-        public void NotifyConfigurationChanged()
-        {
-            lock (_stateLock)
-            {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                SignalSchedule();
-            }
         }
 
         public PluginUpdateStatus GetStatus()
@@ -266,7 +229,6 @@ namespace Emby.Plugins.WatchTogether
 
         public void Dispose()
         {
-            Task scheduler;
             lock (_stateLock)
             {
                 if (_disposed)
@@ -276,21 +238,6 @@ namespace Emby.Plugins.WatchTogether
 
                 _disposed = true;
                 _lifetimeCancellation.Cancel();
-                SignalSchedule();
-                scheduler = _schedulerTask;
-            }
-
-            if (scheduler != null)
-            {
-                try
-                {
-                    scheduler.Wait(TimeSpan.FromSeconds(5));
-                }
-                catch (AggregateException)
-                {
-                    // Scheduler exceptions are logged in the loop and never
-                    // allowed to escape plugin disposal.
-                }
             }
 
             _operationGate.Dispose();
@@ -305,7 +252,6 @@ namespace Emby.Plugins.WatchTogether
                 _status.IsChecking = true;
                 _status.LastError = null;
                 _status.LastCheckedAtUtc = checkedAt;
-                PersistLastCheckedLocked(checkedAt);
             }
 
             try
@@ -332,14 +278,14 @@ namespace Emby.Plugins.WatchTogether
 
                 if (!IsNewer(release.Version, currentVersion))
                 {
+                    LogInfo("检查完成：当前 v" + FormatVersion(currentVersion) + "，已是最新正式版。");
                     return GetStatus();
                 }
 
-                // A configuration save may disable automatic updates while a
-                // background metadata/download request is in flight. Re-read
-                // the flag immediately before installing so that queued work
-                // cannot install after the administrator turned it off.
-                if (automatic && ReadConfiguration().AutoUpdateEnabled)
+                // The Emby scheduled task always installs when a newer release
+                // is found; the administrator controls this by enabling,
+                // disabling or re-scheduling the task itself.
+                if (automatic)
                 {
                     var configuration = ReadConfiguration();
                     if (!string.IsNullOrWhiteSpace(configuration.PendingUpdateVersion) &&
@@ -436,6 +382,14 @@ namespace Emby.Plugins.WatchTogether
                 var configuration = ReadConfiguration();
                 configuration.PendingUpdateVersion = FormatVersion(release.Version);
                 SaveConfigurationSafely(configuration);
+                try
+                {
+                    _applicationHost?.NotifyPendingRestart();
+                }
+                catch (Exception ex)
+                {
+                    LogException("通知 Emby 等待重启失败。", ex);
+                }
                 lock (_stateLock)
                 {
                     _status.PendingVersion = configuration.PendingUpdateVersion;
@@ -443,6 +397,7 @@ namespace Emby.Plugins.WatchTogether
                     _status.UpdateAvailable = false;
                     _status.ReleaseUrl = release.HtmlUrl;
                 }
+                LogInfo("已安装 v" + FormatVersion(release.Version) + "，重启 Emby 后生效。");
             }
             catch
             {
@@ -473,90 +428,6 @@ namespace Emby.Plugins.WatchTogether
             File.Copy(sourcePath, Path.Combine(backupDir, "previous-version.dll"), true);
         }
 
-        private async Task SchedulerLoopAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    var configuration = ReadConfiguration();
-                    if (!configuration.AutoUpdateEnabled)
-                    {
-                        await WaitForScheduleAsync(null, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    var lastChecked = GetStatus().LastCheckedAtUtc ?? configuration.LastUpdateCheckAtUtc;
-                    var interval = GetInterval(configuration.UpdateCheckIntervalHours);
-                    var dueAt = lastChecked.HasValue
-                        ? lastChecked.Value.AddHours(interval)
-                        : DateTimeOffset.UtcNow;
-                    var delay = dueAt - DateTimeOffset.UtcNow;
-                    if (delay > TimeSpan.Zero)
-                    {
-                        await WaitForScheduleAsync(delay, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    try
-                    {
-                        await CheckForUpdatesAsync(true, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        SetError("自动检查更新失败，请稍后重试。", ex);
-                    }
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                // Normal shutdown.
-            }
-            catch (Exception ex)
-            {
-                SetError("自动更新任务已暂停，请稍后手动检查。", ex);
-            }
-        }
-
-        private Task WaitForScheduleAsync(TimeSpan? delay, CancellationToken cancellationToken)
-        {
-            TaskCompletionSource<bool> signal;
-            lock (_stateLock)
-            {
-                signal = _scheduleSignal;
-            }
-
-            var delayTask = delay.HasValue
-                ? Task.Delay(delay.Value, cancellationToken)
-                : Task.Delay(Timeout.Infinite, cancellationToken);
-            return WaitForEitherAsync(signal.Task, delayTask, cancellationToken);
-        }
-
-        private static async Task WaitForEitherAsync(
-            Task signalTask,
-            Task delayTask,
-            CancellationToken cancellationToken)
-        {
-            await Task.WhenAny(signalTask, delayTask).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-        }
-
-        private void SignalSchedule()
-        {
-            var previous = _scheduleSignal;
-            _scheduleSignal = NewSignal();
-            previous.TrySetResult(true);
-        }
-
-        private static TaskCompletionSource<bool> NewSignal()
-        {
-            return new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        }
-
         private PluginConfiguration ReadConfiguration()
         {
             try
@@ -584,13 +455,6 @@ namespace Emby.Plugins.WatchTogether
         private void RefreshCurrentVersionLocked()
         {
             _status.CurrentVersion = FormatVersion(ReadCurrentVersion());
-        }
-
-        private void PersistLastCheckedLocked(DateTimeOffset checkedAt)
-        {
-            var configuration = ReadConfiguration();
-            configuration.LastUpdateCheckAtUtc = checkedAt;
-            SaveConfigurationSafely(configuration);
         }
 
         private void SaveConfigurationSafely(PluginConfiguration configuration)
@@ -630,9 +494,16 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private static int GetInterval(int intervalHours)
+        private void LogInfo(string message)
         {
-            return intervalHours < 1 || intervalHours > 720 ? 24 : intervalHours;
+            try
+            {
+                _logger?.Info(message);
+            }
+            catch
+            {
+                // Logging must never terminate checking or installation.
+            }
         }
 
         private static bool IsNewer(Version candidate, Version current)
