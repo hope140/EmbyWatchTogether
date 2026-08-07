@@ -29,6 +29,7 @@ namespace Emby.Plugins.WatchTogether
         private const string StoppedPlaybackMessageText = "对方已停止播放，请重新打开视频";
         private const string AutomaticResyncMessageHeader = "一起观看";
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
+        private const int NotificationTimeoutMs = 3000;
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -537,7 +538,7 @@ namespace Emby.Plugins.WatchTogether
                         snapshot,
                         StoppedPlaybackMessageHeader,
                         StoppedPlaybackMessageText,
-                        timeoutMs: null,
+                        timeoutMs: NotificationTimeoutMs,
                         now: now,
                         out _);
                 }
@@ -577,7 +578,7 @@ namespace Emby.Plugins.WatchTogether
                         snapshot,
                         AutomaticResyncMessageHeader,
                         AutomaticResyncMessageText,
-                        timeoutMs: null,
+                        timeoutMs: NotificationTimeoutMs,
                         now: now,
                         out _);
                 }

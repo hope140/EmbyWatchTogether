@@ -345,6 +345,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var message = Assert.Single(_messageIssuer.Issued);
             Assert.Equal("u2", message.userId);
             Assert.Contains("对方已停止播放", message.text);
+            Assert.Equal(3000, message.timeoutMs);
         }
 
         [Fact]
@@ -915,9 +916,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(2, _messageIssuer.Issued.Count);
             Assert.Equal(new[] { "u1", "u2" }, _messageIssuer.Issued.Select(message => message.userId).OrderBy(userId => userId));
             Assert.All(_messageIssuer.Issued, message =>
+            {
                 Assert.True(
                     message.text.Contains("自动") || message.text.Contains("重新同步"),
-                    $"Unexpected automatic retry message: {message.text}"));
+                    $"Unexpected automatic retry message: {message.text}");
+                Assert.Equal(3000, message.timeoutMs);
+            });
 
             // Later barrier polling must not repeat the automatic retry notice.
             engine.PollOnce(_clock.Now);
@@ -1099,8 +1103,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
         private sealed class RecordingMessageIssuer : IMessageIssuer
         {
-            public List<(string userId, string header, string text)> Issued { get; } =
-                new List<(string, string, string)>();
+            public List<(string userId, string header, string text, int? timeoutMs)> Issued { get; } =
+                new List<(string, string, string, int?)>();
 
             public bool ReturnFalse { get; set; }
 
@@ -1117,7 +1121,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 DateTimeOffset now,
                 out string error)
             {
-                Issued.Add((userId, header, text));
+                Issued.Add((userId, header, text, timeoutMs));
                 if (ThrowOnIssue)
                 {
                     throw new InvalidOperationException("message delivery failed");
