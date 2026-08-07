@@ -267,7 +267,7 @@ namespace Emby.Plugins.WatchTogether
                         snapshot.SessionId,
                         "Watch Together",
                         request.Text ?? string.Empty,
-                        timeoutMs: null,
+                        timeoutMs: 3000,
                         cancellationToken: CancellationToken.None)
                     .GetAwaiter().GetResult();
                 sent++;
