@@ -69,6 +69,22 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function setUpdateConfigStatus(page, text, isError) {
+        var el = page.querySelector('#wtUpdateConfigStatus');
+        if (el) {
+            el.textContent = text;
+            el.classList.toggle('error', !!isError);
+        }
+    }
+
+    function setUpdateStatus(page, text, isError) {
+        var el = page.querySelector('#wtUpdateStatus');
+        if (el) {
+            el.textContent = text;
+            el.classList.toggle('error', !!isError);
+        }
+    }
+
     function isPermissionError(error) {
         return !!(error && (error.status === 401 || error.status === 403 ||
             error.statusCode === 401 || error.statusCode === 403));
@@ -91,11 +107,32 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function setUpdateConfigBusy(page, isBusy) {
+        var enabled = page.querySelector('#wtAutoUpdateEnabled');
+        var interval = page.querySelector('#wtUpdateCheckIntervalHours');
+        var saveButton = page.querySelector('#wtSaveUpdateConfig');
+        if (enabled) {
+            enabled.disabled = isBusy || page._wtUpdateAdmin === false;
+        }
+        if (interval) {
+            interval.disabled = isBusy || page._wtUpdateAdmin === false;
+        }
+        if (saveButton) {
+            saveButton.disabled = isBusy || !page._wtUpdateConfigReady || page._wtUpdateAdmin === false;
+            saveButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+            saveButton.textContent = isBusy ? '保存中…' : '保存更新设置';
+        }
+    }
+
     function applyPluginConfiguration(page, config) {
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
+        var autoUpdate = page.querySelector('#wtAutoUpdateEnabled');
+        var updateInterval = page.querySelector('#wtUpdateCheckIntervalHours');
         page._wtPluginConfiguration = config || {};
         page._wtConfigReady = true;
+        page._wtUpdateConfigReady = true;
+        page._wtUpdateAdmin = true;
         if (pauseCheckbox) {
             pauseCheckbox.checked = page._wtPluginConfiguration.PauseOtherOnPlaybackStop !== false;
             pauseCheckbox.disabled = false;
@@ -104,10 +141,20 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             notifyCheckbox.checked = page._wtPluginConfiguration.NotifyOtherOnPlaybackStop !== false;
             notifyCheckbox.disabled = false;
         }
+        if (autoUpdate) {
+            autoUpdate.checked = page._wtPluginConfiguration.AutoUpdateEnabled === true;
+            autoUpdate.disabled = false;
+        }
+        if (updateInterval) {
+            var interval = Number(page._wtPluginConfiguration.UpdateCheckIntervalHours);
+            updateInterval.value = interval >= 1 && interval <= 720 ? String(Math.floor(interval)) : '24';
+            updateInterval.disabled = false;
+        }
         var saveButton = page.querySelector('#wtSaveConfig');
         if (saveButton) {
             saveButton.disabled = false;
         }
+        setUpdateConfigBusy(page, false);
     }
 
     function loadPluginConfiguration(page) {
@@ -122,6 +169,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
             var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
             var saveButton = page.querySelector('#wtSaveConfig');
+            var autoUpdate = page.querySelector('#wtAutoUpdateEnabled');
+            var updateInterval = page.querySelector('#wtUpdateCheckIntervalHours');
+            var updateSaveButton = page.querySelector('#wtSaveUpdateConfig');
             if (pauseCheckbox) {
                 pauseCheckbox.disabled = true;
             }
@@ -131,6 +181,20 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             if (saveButton) {
                 saveButton.disabled = true;
             }
+            if (autoUpdate) {
+                autoUpdate.disabled = true;
+            }
+            if (updateInterval) {
+                updateInterval.disabled = true;
+            }
+            if (updateSaveButton) {
+                updateSaveButton.disabled = true;
+            }
+            page._wtUpdateConfigReady = false;
+            page._wtUpdateAdmin = false;
+            setUpdateConfigStatus(page,
+                isPermissionError(error) ? '只有管理员可以查看和修改更新设置。' : '更新配置读取失败：' + errorMessage(error),
+                true);
             setConfigStatus(page,
                 isPermissionError(error) ? '只有管理员可以查看和修改此设置。' : '配置读取失败：' + errorMessage(error),
                 true);
@@ -167,6 +231,140 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 true);
         }).then(function () {
             setConfigBusy(page, false);
+        });
+    }
+
+    function renderUpdateStatus(page, status) {
+        status = status || {};
+        var current = page.querySelector('#wtUpdateCurrentVersion');
+        var latest = page.querySelector('#wtUpdateLatestVersion');
+        var lastChecked = page.querySelector('#wtUpdateLastChecked');
+        var checkButton = page.querySelector('#wtCheckUpdate');
+        var installButton = page.querySelector('#wtInstallUpdate');
+        if (current) {
+            current.textContent = status.CurrentVersion || '—';
+        }
+        if (latest) {
+            latest.textContent = status.LatestVersion || '—';
+        }
+        if (lastChecked) {
+            lastChecked.textContent = status.LastCheckedAtUtc ? new Date(status.LastCheckedAtUtc).toLocaleString() : '—';
+        }
+        if (checkButton) {
+            checkButton.disabled = page._wtUpdateAdmin === false || !!status.IsChecking || !!status.IsInstalling;
+        }
+        if (installButton) {
+            installButton.disabled = page._wtUpdateAdmin === false || !status.UpdateAvailable ||
+                !!status.IsChecking || !!status.IsInstalling || !!status.RestartRequired;
+        }
+
+        var text = '尚未检查更新。';
+        if (status.IsChecking) {
+            text = '正在检查 GitHub 正式版…';
+        } else if (status.IsInstalling) {
+            text = '正在安装更新…';
+        } else if (status.RestartRequired) {
+            text = '更新已安装，重启 Emby 后生效。';
+        } else if (status.LastError) {
+            text = status.LastError;
+        } else if (status.UpdateAvailable) {
+            text = '发现新正式版，可点击“立即更新”。';
+        } else if (status.LatestVersion) {
+            text = '当前已是最新正式版。';
+        }
+        setUpdateStatus(page, text, !!status.LastError);
+    }
+
+    function loadUpdateStatus(page) {
+        if (page._wtUpdateAdmin === false) {
+            return Promise.resolve(null);
+        }
+
+        return apiGet('WatchTogether/Update').then(function (status) {
+            page._wtUpdateAdmin = true;
+            page._wtUpdateStatus = status || {};
+            renderUpdateStatus(page, page._wtUpdateStatus);
+            return status;
+        }).catch(function (error) {
+            page._wtUpdateAdmin = false;
+            var checkButton = page.querySelector('#wtCheckUpdate');
+            var installButton = page.querySelector('#wtInstallUpdate');
+            if (checkButton) {
+                checkButton.disabled = true;
+            }
+            if (installButton) {
+                installButton.disabled = true;
+            }
+            setUpdateStatus(page,
+                isPermissionError(error) ? '只有管理员可以检查和安装更新。' : '更新状态读取失败：' + errorMessage(error),
+                true);
+            return null;
+        });
+    }
+
+    function saveUpdateConfiguration(page) {
+        var autoUpdate = page.querySelector('#wtAutoUpdateEnabled');
+        var updateInterval = page.querySelector('#wtUpdateCheckIntervalHours');
+        if (!autoUpdate || !updateInterval || !page._wtUpdateConfigReady || page._wtUpdateAdmin === false) {
+            return Promise.resolve();
+        }
+
+        var interval = Number(updateInterval.value);
+        if (!Number.isInteger(interval) || interval < 1 || interval > 720) {
+            setUpdateConfigStatus(page, '检测间隔必须是 1 到 720 的整数小时。', true);
+            updateInterval.focus();
+            return Promise.resolve();
+        }
+
+        setUpdateConfigBusy(page, true);
+        setUpdateConfigStatus(page, '正在保存更新配置…');
+        return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+            config = config || {};
+            config.AutoUpdateEnabled = autoUpdate.checked;
+            config.UpdateCheckIntervalHours = interval;
+            return ApiClient.updatePluginConfiguration(pluginId, config);
+        }).then(function () {
+            return ApiClient.getPluginConfiguration(pluginId);
+        }).then(function (config) {
+            applyPluginConfiguration(page, config);
+            setUpdateConfigStatus(page, '更新配置已保存');
+            return loadUpdateStatus(page);
+        }).catch(function (error) {
+            setUpdateConfigStatus(page,
+                isPermissionError(error) ? '保存被拒绝：只有管理员可以修改更新设置。' : '更新配置保存失败：' + errorMessage(error),
+                true);
+        }).then(function () {
+            setUpdateConfigBusy(page, false);
+        });
+    }
+
+    function checkUpdate(page, button) {
+        setButtonBusy(button, true, '检查中…');
+        setUpdateStatus(page, '正在检查 GitHub 正式版…');
+        return apiSend('WatchTogether/Update/Check', 'POST').then(function (status) {
+            page._wtUpdateStatus = status || {};
+            renderUpdateStatus(page, page._wtUpdateStatus);
+        }).catch(function (error) {
+            setUpdateStatus(page,
+                isPermissionError(error) ? '只有管理员可以检查更新。' : '检查更新失败：' + errorMessage(error),
+                true);
+        }).then(function () {
+            setButtonBusy(button, false);
+        });
+    }
+
+    function installUpdate(page, button) {
+        setButtonBusy(button, true, '安装中…');
+        setUpdateStatus(page, '正在安装正式版更新…');
+        return apiSend('WatchTogether/Update/Install', 'POST').then(function (status) {
+            page._wtUpdateStatus = status || {};
+            renderUpdateStatus(page, page._wtUpdateStatus);
+        }).catch(function (error) {
+            setUpdateStatus(page,
+                isPermissionError(error) ? '只有管理员可以安装更新。' : '安装更新失败：' + errorMessage(error),
+                true);
+        }).then(function () {
+            setButtonBusy(button, false);
         });
     }
 
@@ -642,6 +840,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         dom.addEventListener(page.querySelector('#wtSaveConfig'), 'click', function () {
             savePluginConfiguration(page);
         });
+        dom.addEventListener(page.querySelector('#wtSaveUpdateConfig'), 'click', function () {
+            saveUpdateConfiguration(page);
+        });
+        dom.addEventListener(page.querySelector('#wtCheckUpdate'), 'click', function () {
+            checkUpdate(page, page.querySelector('#wtCheckUpdate'));
+        });
+        dom.addEventListener(page.querySelector('#wtInstallUpdate'), 'click', function () {
+            installUpdate(page, page.querySelector('#wtInstallUpdate'));
+        });
         dom.addEventListener(page.querySelector('#wtCreate'), 'click', function () {
             createRoom(page);
         });
@@ -683,6 +890,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }).then(function () {
             return loadRooms(page, true);
         }).then(function () {
+            return loadUpdateStatus(page);
+        }).then(function () {
             loading.hide();
         }, function () {
             loading.hide();
@@ -691,6 +900,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         clearInterval(page._wtTimer);
         page._wtTimer = setInterval(function () {
             loadRooms(page, false);
+            loadUpdateStatus(page);
         }, 5000);
     };
 

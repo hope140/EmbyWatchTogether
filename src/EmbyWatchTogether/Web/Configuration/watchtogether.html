@@ -453,5 +453,47 @@
             </ol>
             <p class="fieldDescription">一方暂时不在线时，房间会等待；恢复后会继续尝试同步。</p>
         </div>
+
+        <div class="verticalSection wt-section" id="wtUpdateSection">
+            <div class="wt-sectionHeading">
+                <div>
+                    <h2>插件更新</h2>
+                    <p class="fieldDescription wt-sectionDescription">
+                        正式版更新来自 GitHub。安装完成后必须重启 Emby 才会生效，插件不会自动重启服务器。
+                    </p>
+                </div>
+            </div>
+
+            <div class="wt-formGrid">
+                <label class="checkboxContainer wt-fieldWide">
+                    <input is="emby-checkbox" id="wtAutoUpdateEnabled" type="checkbox" disabled />
+                    <span>启用自动更新（默认关闭）</span>
+                </label>
+                <div class="inputContainer">
+                    <input is="emby-input" id="wtUpdateCheckIntervalHours" type="number" min="1" max="720" step="1"
+                           label="自动检测间隔（小时）" disabled />
+                    <div class="fieldDescription">可填写 1 到 720 的整数小时。</div>
+                </div>
+            </div>
+
+            <div class="wt-formActions">
+                <button is="emby-button" id="wtSaveUpdateConfig" type="button" class="raised button-submit" disabled>保存更新设置</button>
+                <p class="fieldDescription wt-formHint" id="wtUpdateConfigStatus" role="status" aria-live="polite">正在读取更新配置…</p>
+            </div>
+
+            <div class="wt-roomMeta" aria-live="polite">
+                <div>当前版本：<span id="wtUpdateCurrentVersion">—</span></div>
+                <div>最新正式版：<span id="wtUpdateLatestVersion">—</span></div>
+                <div>最后检测：<span id="wtUpdateLastChecked">—</span></div>
+            </div>
+            <p class="fieldDescription wt-statusLine" id="wtUpdateStatus" role="status" aria-live="polite">正在读取更新状态…</p>
+
+            <div class="wt-formActions">
+                <button is="emby-button" id="wtCheckUpdate" type="button" class="button-flat wt-refresh" disabled>手动检查更新</button>
+                <button is="emby-button" id="wtInstallUpdate" type="button" class="raised button-submit" disabled>立即更新</button>
+                <a id="wtUpdateRepositoryLink" href="https://github.com/hope140/EmbyWatchTogether"
+                   target="_blank" rel="noopener noreferrer">打开 GitHub 项目</a>
+            </div>
+        </div>
     </div>
 </div>
