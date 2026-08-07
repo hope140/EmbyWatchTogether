@@ -83,6 +83,13 @@ namespace Emby.Plugins.WatchTogether
         public object Get(GetRoomsRequest request)
         {
             var plugin = RequirePlugin();
+            if (plugin.Rooms == null)
+            {
+                // The entry point may still be starting (server restart);
+                // return an empty list instead of failing the poll.
+                return new List<object>();
+            }
+
             string currentUserId = CurrentUserId();
             bool admin = IsAdmin();
             return plugin.Rooms.ListRooms().Select(r =>
