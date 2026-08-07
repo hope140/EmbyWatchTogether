@@ -68,11 +68,10 @@ namespace Emby.Plugins.WatchTogether
             // Some test hosts and older Emby startup paths construct the entry
             // point without update services. Keep the existing sync engine
             // usable in that case while normal DI receives all dependencies.
-            if (_httpClient != null && _jsonSerializer != null && _installationManager != null)
+            if (_httpClient != null && _installationManager != null)
             {
                 var releaseClient = new GitHubReleaseClient(
                     _httpClient,
-                    _jsonSerializer,
                     "EmbyWatchTogether/" + (plugin.Version?.ToString() ?? "unknown") +
                     " (+" + GitHubReleaseClient.RepositoryUrl + ")");
                 _updateManager = new PluginUpdateManager(
