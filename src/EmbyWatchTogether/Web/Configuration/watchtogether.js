@@ -163,6 +163,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             applyPluginConfiguration(page, config);
             setConfigStatus(page, '配置已读取');
+            setUpdateConfigStatus(page, '更新配置已读取');
             return config;
         }).catch(function (error) {
             page._wtConfigReady = false;
@@ -276,7 +277,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function loadUpdateStatus(page) {
-        if (page._wtUpdateAdmin === false) {
+        if (page._wtUpdateAdmin === false || page._wtUpdateBusy) {
             return Promise.resolve(null);
         }
 
@@ -341,6 +342,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function checkUpdate(page, button) {
         setButtonBusy(button, true, '检查中…');
         setUpdateStatus(page, '正在检查 GitHub 正式版…');
+        page._wtUpdateBusy = true;
         return apiSend('WatchTogether/Update/Check', 'POST').then(function (status) {
             page._wtUpdateStatus = status || {};
             renderUpdateStatus(page, page._wtUpdateStatus);
@@ -349,6 +351,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 isPermissionError(error) ? '只有管理员可以检查更新。' : '检查更新失败：' + errorMessage(error),
                 true);
         }).then(function () {
+            page._wtUpdateBusy = false;
             setButtonBusy(button, false);
         });
     }
@@ -356,6 +359,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function installUpdate(page, button) {
         setButtonBusy(button, true, '安装中…');
         setUpdateStatus(page, '正在安装正式版更新…');
+        page._wtUpdateBusy = true;
         return apiSend('WatchTogether/Update/Install', 'POST').then(function (status) {
             page._wtUpdateStatus = status || {};
             renderUpdateStatus(page, page._wtUpdateStatus);
@@ -364,6 +368,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 isPermissionError(error) ? '只有管理员可以安装更新。' : '安装更新失败：' + errorMessage(error),
                 true);
         }).then(function () {
+            page._wtUpdateBusy = false;
             setButtonBusy(button, false);
         });
     }
