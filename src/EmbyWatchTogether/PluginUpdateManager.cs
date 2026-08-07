@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Updates;
@@ -400,6 +401,19 @@ namespace Emby.Plugins.WatchTogether
 
             try
             {
+                // Keep one previous DLL before Emby's installer overwrites it.
+                // The fixed file name means only the most recent backup is kept.
+                try
+                {
+                    BackupPluginDll(
+                        Plugin.Instance?.AssemblyFilePath,
+                        Plugin.Instance?.DataFolderPath);
+                }
+                catch (Exception ex)
+                {
+                    LogException("更新前备份当前插件失败。", ex);
+                }
+
                 var release = verifiedRelease.Release;
                 var package = new PackageVersionInfo
                 {
@@ -441,6 +455,22 @@ namespace Emby.Plugins.WatchTogether
                     _status.IsInstalling = false;
                 }
             }
+        }
+
+        public static void BackupPluginDll(string sourcePath, string backupDir)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(backupDir))
+            {
+                return;
+            }
+
+            if (!File.Exists(sourcePath))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(backupDir);
+            File.Copy(sourcePath, Path.Combine(backupDir, "previous-version.dll"), true);
         }
 
         private async Task SchedulerLoopAsync(CancellationToken cancellationToken)

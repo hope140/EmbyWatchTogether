@@ -4,9 +4,9 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Emby.Plugins.WatchTogether</RootNamespace>
     <AssemblyName>Emby.Plugins.WatchTogether</AssemblyName>
-    <Version>1.1.0.2</Version>
-    <FileVersion>1.1.0.2</FileVersion>
-    <AssemblyVersion>1.1.0.2</AssemblyVersion>
+    <Version>1.1.0.3</Version>
+    <FileVersion>1.1.0.3</FileVersion>
+    <AssemblyVersion>1.1.0.3</AssemblyVersion>
     <Description>Emby server plugin for two-person synchronized watching (Watch Together).</Description>
     <Nullable>disable</Nullable>
   </PropertyGroup>

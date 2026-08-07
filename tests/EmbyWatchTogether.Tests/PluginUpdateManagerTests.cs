@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Updates;
@@ -136,6 +137,35 @@ namespace Emby.Plugins.WatchTogether.Tests
             {
                 UpdateCheckIntervalHours = interval,
             }));
+        }
+
+        [Fact]
+        public void BackupPluginDll_KeepsOnlyMostRecentBackup()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "watchtogether-backup-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var source = Path.Combine(dir, "source.dll");
+                File.WriteAllText(source, "version one");
+
+                PluginUpdateManager.BackupPluginDll(source, dir);
+
+                var backup = Path.Combine(dir, "previous-version.dll");
+                Assert.True(File.Exists(backup));
+                Assert.Equal("version one", File.ReadAllText(backup));
+
+                File.WriteAllText(source, "version two");
+                PluginUpdateManager.BackupPluginDll(source, dir);
+
+                Assert.True(File.Exists(backup));
+                Assert.Equal("version two", File.ReadAllText(backup));
+                Assert.Single(Directory.GetFiles(dir, "previous-version.dll"));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
         }
 
         private static IInstallationManager CreateInstallationManager(out Mock<IInstallationManager> mock)
