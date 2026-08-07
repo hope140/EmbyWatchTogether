@@ -36,6 +36,10 @@
 
 主线程应把边界明确、可验证、可回滚的编码任务交给 `luna_worker`。架构取舍、需求澄清、跨 Stack 集成、最终发布和无法明确划界的修改仍由主线程负责。
 
+### 模型可用性回退
+
+当主线程环境只有 DeepSeek v4 可用（OpenAI 额度用完或 `gpt-5.6-luna` 不可用）时，本应交由 `luna_worker` 的实现任务改派给 `deepseek_worker`（使用 DeepSeek V4 Flash）；OpenAI 恢复可用后仍使用 `luna_worker`。派发契约、worktree 隔离、审核门禁与回滚要求不因代理切换而放宽。
+
 ## PR Stack 与并发规则
 
 - 无依赖的 Stack 可以从共同基础分支创建。
