@@ -30,6 +30,7 @@ namespace Emby.Plugins.WatchTogether
         private const string AutomaticResyncMessageHeader = "一起观看";
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
         private const int NotificationTimeoutMs = 3000;
+        private const double AckLatencyEmaAlpha = 0.3;
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -589,12 +590,39 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        private static void UpdateAckLatency(RoomRuntime runtime, string userId, double latencySeconds)
+        {
+            double clamped = Math.Min(Math.Max(0, latencySeconds), SyncConstants.AckLatencyMaxSeconds);
+            if (!runtime.AckLatencySeconds.TryGetValue(userId, out var current))
+            {
+                runtime.AckLatencySeconds[userId] = clamped;
+                return;
+            }
+
+            runtime.AckLatencySeconds[userId] =
+                Math.Min(SyncConstants.AckLatencyMaxSeconds, current * (1 - AckLatencyEmaAlpha) + clamped * AckLatencyEmaAlpha);
+        }
+
+        private static long GetSeekDetectionThresholdTicks(RoomRuntime runtime, string userId)
+        {
+            double latencySeconds = 0;
+            if (runtime != null &&
+                runtime.AckLatencySeconds.TryGetValue(userId, out var measured))
+            {
+                latencySeconds = Math.Max(0, measured);
+            }
+
+            double thresholdSeconds = Math.Max(SyncConstants.SeekDetectionFloorSeconds, latencySeconds);
+            return (long)(thresholdSeconds * SessionSnapshot.TicksPerSecond);
+        }
+
         private static bool IsManualSeek(
             SessionSnapshot previous,
             SessionSnapshot current,
             DateTimeOffset previousAtUtc,
             DateTimeOffset now,
-            DateTimeOffset? lastSeekAtUtc = null)
+            DateTimeOffset? lastSeekAtUtc,
+            long seekDetectionThresholdTicks)
         {
             if (previous == null || current == null)
             {
@@ -630,7 +658,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             double difference = Math.Abs(current.PositionTicks - expectedPosition);
-            return difference >= SyncConstants.SeekDetectionThresholdTicks;
+            return difference >= seekDetectionThresholdTicks;
         }
 
         private static bool IsPositionReset(long previousPositionTicks, long currentPositionTicks)
@@ -672,6 +700,8 @@ namespace Emby.Plugins.WatchTogether
 
                 if (PendingMatcher.Matches(pending, snapshot))
                 {
+                    double latencySeconds = Math.Max(0, (now - pending.IssuedAtUtc).TotalSeconds);
+                    UpdateAckLatency(runtime, userId, latencySeconds);
                     runtime.Pending.Remove(userId);
                     runtime.Suppressed[userId] = new SuppressedCommand
                     {
@@ -681,7 +711,8 @@ namespace Emby.Plugins.WatchTogether
                     };
                     _logger?.Info(
                         $"Room {room.Id}: pending {pending.Command} acknowledged by {userId} " +
-                        $"(position {FormatPosition(pending.PositionTicks)}s), suppressing {SyncConstants.SuppressSeconds:0}s");
+                        $"(position {FormatPosition(pending.PositionTicks)}s, latency {latencySeconds:0.0}s), " +
+                        $"suppressing {SyncConstants.SuppressSeconds:0}s");
                     continue;
                 }
 
@@ -825,6 +856,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.SyncItemId = anchor.ItemId;
             runtime.Pending.Clear();
             runtime.Suppressed.Clear();
+            runtime.PauseAlign.Clear();
             _logger?.Info(
                 $"Room {room.Id}: barrier started, anchor={anchorUser}, " +
                 $"target={FormatPosition(anchor.PositionTicks)}s, paused={anchor.IsPaused}");
@@ -999,6 +1031,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.Barrier = null;
             runtime.Pending.Clear();
             runtime.Suppressed.Clear();
+            runtime.PauseAlign.Clear();
             runtime.Previous.Clear();
             foreach (var pair in snapshots)
             {
@@ -1089,7 +1122,8 @@ namespace Emby.Plugins.WatchTogether
                 // Normal playback drift is intentionally not corrected here; only a
                 // single, clearly out-of-band position jump is propagated.
                 runtime.LastSeekAtUtc.TryGetValue(user, out var lastSeekAtUtc);
-                if (IsManualSeek(old, current, runtime.PreviousAtUtc.Value, now, lastSeekAtUtc))
+                long seekThresholdTicks = GetSeekDetectionThresholdTicks(runtime, user);
+                if (IsManualSeek(old, current, runtime.PreviousAtUtc.Value, now, lastSeekAtUtc, seekThresholdTicks))
                 {
                     bool pendingSeek = pending != null &&
                         pending.Command == RemoteCommands.Seek;
@@ -1130,6 +1164,36 @@ namespace Emby.Plugins.WatchTogether
                     winner = pauseChanges[0];
                 }
 
+                if (winner.paused)
+                {
+                    // Defer alignment of the other side to the paused anchor's
+                    // position (borrowed from syncplay's pause-snap idea); the
+                    // target is stable because the anchor is paused.
+                    long anchorPositionTicks = snapshots.TryGetValue(winner.userId, out var winnerSnapshot) &&
+                        winnerSnapshot != null
+                            ? winnerSnapshot.PositionTicks
+                            : 0;
+                    foreach (var user in members)
+                    {
+                        if (user != winner.userId &&
+                            !runtime.PauseAlign.ContainsKey(user) &&
+                            snapshots.TryGetValue(user, out _))
+                        {
+                            runtime.PauseAlign[user] = new PauseAlignState
+                            {
+                                AnchorUserId = winner.userId,
+                                TargetPositionTicks = anchorPositionTicks,
+                                CreatedAtUtc = now,
+                            };
+                        }
+                    }
+                }
+                else
+                {
+                    // A resume invalidates any pending paused-position target.
+                    runtime.PauseAlign.Clear();
+                }
+
                 string command = winner.paused ? RemoteCommands.Pause : RemoteCommands.Unpause;
                 foreach (var user in members)
                 {
@@ -1143,6 +1207,8 @@ namespace Emby.Plugins.WatchTogether
                     $"Room {room.Id}: pause change from {winner.userId} ({winner.paused}) propagated");
             }
 
+            AlignPausedPeers(runtime, room, snapshots, now);
+
             runtime.Previous.Clear();
             foreach (var pair in snapshots)
             {
@@ -1150,6 +1216,62 @@ namespace Emby.Plugins.WatchTogether
             }
 
             runtime.PreviousAtUtc = now;
+        }
+
+        private void AlignPausedPeers(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            foreach (var pair in runtime.PauseAlign.ToList())
+            {
+                string userId = pair.Key;
+                var align = pair.Value;
+
+                if ((now - align.CreatedAtUtc).TotalSeconds >= SyncConstants.PauseAlignTimeoutSeconds)
+                {
+                    runtime.PauseAlign.Remove(userId);
+                    continue;
+                }
+
+                // Only seek while the anchor is still paused; a moving target
+                // would make the follower miss by the command latency.
+                if (!snapshots.TryGetValue(align.AnchorUserId, out var anchor) ||
+                    anchor == null ||
+                    !anchor.IsPaused)
+                {
+                    runtime.PauseAlign.Remove(userId);
+                    continue;
+                }
+
+                if (!snapshots.TryGetValue(userId, out var follower) ||
+                    follower == null ||
+                    !follower.IsPaused)
+                {
+                    // Wait for the propagated pause to land before seeking.
+                    continue;
+                }
+
+                if (runtime.Pending.ContainsKey(userId))
+                {
+                    // Wait for the pause acknowledgement (or an earlier seek)
+                    // before issuing another command.
+                    continue;
+                }
+
+                if (Math.Abs(follower.PositionTicks - align.TargetPositionTicks) <= SyncConstants.SeekToleranceTicks)
+                {
+                    runtime.PauseAlign.Remove(userId);
+                    continue;
+                }
+
+                Issue(runtime, room, userId, follower, RemoteCommands.Seek, align.TargetPositionTicks, now);
+                runtime.PauseAlign.Remove(userId);
+                _logger?.Info(
+                    $"Room {room.Id}: aligned paused follower {userId} to " +
+                    $"{FormatPosition(align.TargetPositionTicks)}s (anchor {align.AnchorUserId})");
+            }
         }
 
         private static string FormatPosition(long? positionTicks)

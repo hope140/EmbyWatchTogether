@@ -18,6 +18,22 @@ namespace Emby.Plugins.WatchTogether
         public Dictionary<string, SuppressedCommand> Suppressed { get; } = new Dictionary<string, SuppressedCommand>();
 
         /// <summary>
+        /// Rolling exponential moving average (seconds) of the time between a
+        /// remote command being issued and its acknowledgement appearing in a
+        /// SessionInfo snapshot, per user. Used to raise the manual-seek
+        /// detection threshold for clients whose snapshots lag. Retained across
+        /// resets because it describes the client, not the room state.
+        /// </summary>
+        public Dictionary<string, double> AckLatencySeconds { get; } =
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Pending pause-alignment targets per user (see <see cref="PauseAlignState"/>).
+        /// </summary>
+        public Dictionary<string, PauseAlignState> PauseAlign { get; } =
+            new Dictionary<string, PauseAlignState>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
         /// Last time a Seek command was issued to each user. Used to ignore the
         /// small position rewind some players report shortly after a remote seek
         /// lands (clock re-basing) without ignoring real user seeks.
@@ -44,6 +60,7 @@ namespace Emby.Plugins.WatchTogether
             Barrier = null;
             Pending.Clear();
             Suppressed.Clear();
+            PauseAlign.Clear();
             LastSeekAtUtc.Clear();
             Previous.Clear();
             PreviousAtUtc = null;

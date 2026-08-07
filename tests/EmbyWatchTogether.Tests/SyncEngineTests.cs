@@ -985,6 +985,145 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.True(_issuer.Issued.Count > issuedBefore);
         }
 
+        [Fact]
+        public void AckLatency_IsRecordedWhenPendingCommandIsAcknowledged()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.True(runtime.AckLatencySeconds["u1"] > 0);
+            Assert.True(runtime.AckLatencySeconds["u2"] > 0);
+        }
+
+        [Fact]
+        public void WatchingTick_SlowAckLatency_RaisesSeekDetectionThreshold()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _rooms.GetRuntime(room.Id).AckLatencySeconds["u2"] = 6.0;
+
+            // A 4s out-of-band jump (55 vs expected 51) is below the raised 6s
+            // threshold, so the slow client's stale snapshot is not treated as
+            // a manual seek.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 55 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+
+            // A jump at or above the raised threshold is still a manual seek.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 63 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Equal("u2", runtime.Barrier.AnchorUserId);
+        }
+
+        [Fact]
+        public void WatchingTick_PausePropagation_AlignsFollower()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _rooms.GetRuntime(room.Id).AckLatencySeconds["u2"] = 10.0;
+
+            // Primary pauses at 51s while the secondary is 8s ahead; the gap is
+            // below the raised threshold so it is not mistaken for a seek.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 59 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Contains(_issuer.Issued, i => i.userId == "u2" && i.command == RemoteCommands.Pause);
+
+            // Once the secondary confirms the pause, it is seeked back to the
+            // paused primary's position while the room stays Watching.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 59 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var seek = _issuer.Issued.Single(i => i.command == RemoteCommands.Seek);
+            Assert.Equal("u2", seek.userId);
+            Assert.Equal(51 * SessionSnapshot.TicksPerSecond, seek.positionTicks);
+            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+
+            // The seek lands without being reinterpreted as a manual seek.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+        }
+
+        [Fact]
+        public void WatchingTick_PausePropagation_SmallDifference_DoesNotSeek()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            // Both pause; the follower is within the 2s seek tolerance of the
+            // paused anchor, so no alignment seek is needed.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Contains(_issuer.Issued, i => i.userId == "u2" && i.command == RemoteCommands.Pause);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingTick_PauseAlign_AbortsWhenAnchorResumes()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _rooms.GetRuntime(room.Id).AckLatencySeconds["u2"] = 10.0;
+
+            // Primary pauses; alignment is deferred until the secondary
+            // confirms its pause.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 55 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Contains(_issuer.Issued, i => i.userId == "u2" && i.command == RemoteCommands.Pause);
+            Assert.Single(_rooms.GetRuntime(room.Id).PauseAlign);
+
+            // The anchor resumes before the secondary pauses: the stale target
+            // must be dropped and no seek may be issued.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 56 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+            Assert.Empty(_rooms.GetRuntime(room.Id).PauseAlign);
+        }
+
         private SyncEngine CreateEngine(
             string serverId = "server-1",
             bool pauseOtherOnPlaybackStop = true,
