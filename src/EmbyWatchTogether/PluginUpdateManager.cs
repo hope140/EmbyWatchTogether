@@ -309,39 +309,29 @@ namespace Emby.Plugins.WatchTogether
 
             try
             {
-                var release = await _releaseClient.GetLatestReleaseAsync(cancellationToken).ConfigureAwait(false);
-                if (release == null || release.Version == null)
+                var verifiedRelease = await _releaseClient
+                    .CheckForLatestAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                if (verifiedRelease == null || verifiedRelease.Release == null ||
+                    verifiedRelease.Release.Version == null || verifiedRelease.Asset == null ||
+                    string.IsNullOrWhiteSpace(verifiedRelease.Md5Checksum))
                 {
-                    throw new ReleaseValidationException("GitHub 正式版信息无效。");
+                    throw new ReleaseValidationException("正式版插件校验结果无效。");
                 }
 
+                var release = verifiedRelease.Release;
                 var currentVersion = ReadCurrentVersion();
                 lock (_stateLock)
                 {
                     _status.LatestVersion = FormatVersion(release.Version);
                     _status.ReleaseUrl = release.HtmlUrl;
                     _status.UpdateAvailable = IsNewer(release.Version, currentVersion);
-                    _verifiedRelease = null;
+                    _verifiedRelease = verifiedRelease;
                 }
 
                 if (!IsNewer(release.Version, currentVersion))
                 {
                     return GetStatus();
-                }
-
-                var verifiedRelease = await _releaseClient
-                    .DownloadAndVerifyAsync(release, cancellationToken)
-                    .ConfigureAwait(false);
-                if (verifiedRelease == null || verifiedRelease.Release == null ||
-                    verifiedRelease.Asset == null || string.IsNullOrWhiteSpace(verifiedRelease.Md5Checksum))
-                {
-                    throw new ReleaseValidationException("正式版插件校验结果无效。");
-                }
-
-                lock (_stateLock)
-                {
-                    _verifiedRelease = verifiedRelease;
-                    _status.UpdateAvailable = true;
                 }
 
                 // A configuration save may disable automatic updates while a

@@ -36,7 +36,7 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件。�
 
 设置页底部的“插件更新”区域默认关闭自动更新。管理员可启用自动检测，并将间隔设置为 1 到 720 个整数小时（默认 24 小时）。启用后插件会立即异步检查一次，之后按上次检查时间和该间隔执行；保存设置会动态重排任务，关闭后会取消后台调度。
 
-更新只读取公开的 GitHub `releases/latest` 端点，并且只接受非 draft、非 prerelease 的正式版 tag（可带 `v`/`V` 前缀）。正式版必须同时提供名称严格为 `Emby.Plugins.WatchTogether.dll` 的 HTTPS release asset；插件会在安装前核对 API 声明的大小、SHA-256、程序集名称和程序集版本，并将预检得到的 MD5 交给 Emby 安装器。手动“检查更新”不会自动安装，只有后台自动检查发现新版本时才会安装。
+更新通过 GitHub 的公开下载地址 `releases/latest/download/Emby.Plugins.WatchTogether.dll` 获取最新正式版，不调用 GitHub REST API，因此不会受匿名 API 速率限制影响（该配额与 Emby 自身的更新检查共享）。下载后插件会校验文件是名称严格为 `Emby.Plugins.WatchTogether` 的有效程序集并读取其程序集版本作为最新版本，同时计算 MD5 交给 Emby 安装器做二次校验。手动“检查更新”不会自动安装，只有后台自动检查发现新版本时才会安装。
 
 安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后页面会提示“重启 Emby 后生效”，并在重启前避免重复安装同一版本。发布正式版时，GitHub release 必须同时附带版本 tag 和固定名称的 DLL asset，且 tag 版本必须与程序集版本一致。
 

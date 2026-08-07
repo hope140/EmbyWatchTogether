@@ -179,19 +179,13 @@ namespace Emby.Plugins.WatchTogether.Tests
                 _release = release;
             }
 
-            public Task<GitHubReleaseInfo> GetLatestReleaseAsync(CancellationToken cancellationToken)
-            {
-                return Task.FromResult(_release);
-            }
-
-            public Task<VerifiedPluginRelease> DownloadAndVerifyAsync(
-                GitHubReleaseInfo release,
+            public Task<VerifiedPluginRelease> CheckForLatestAsync(
                 CancellationToken cancellationToken)
             {
                 return Task.FromResult(new VerifiedPluginRelease
                 {
-                    Release = release,
-                    Asset = release.Assets[0],
+                    Release = _release,
+                    Asset = _release.Assets[0],
                     Md5Checksum = "md5-checksum",
                 });
             }
@@ -212,22 +206,17 @@ namespace Emby.Plugins.WatchTogether.Tests
             public TaskCompletionSource<GitHubReleaseInfo> ReleaseMetadata { get; } =
                 new TaskCompletionSource<GitHubReleaseInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            public async Task<GitHubReleaseInfo> GetLatestReleaseAsync(CancellationToken cancellationToken)
-            {
-                MetadataStarted.TrySetResult(true);
-                return await ReleaseMetadata.Task.ConfigureAwait(false);
-            }
-
-            public Task<VerifiedPluginRelease> DownloadAndVerifyAsync(
-                GitHubReleaseInfo release,
+            public async Task<VerifiedPluginRelease> CheckForLatestAsync(
                 CancellationToken cancellationToken)
             {
-                return Task.FromResult(new VerifiedPluginRelease
+                MetadataStarted.TrySetResult(true);
+                var release = await ReleaseMetadata.Task.ConfigureAwait(false);
+                return new VerifiedPluginRelease
                 {
-                    Release = _release,
-                    Asset = _release.Assets[0],
+                    Release = release,
+                    Asset = release.Assets[0],
                     Md5Checksum = "md5-checksum",
-                });
+                };
             }
         }
     }

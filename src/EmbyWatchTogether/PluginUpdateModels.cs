@@ -38,8 +38,8 @@ namespace Emby.Plugins.WatchTogether
 
     /// <summary>
     /// A release after the fixed DLL has been downloaded and independently
-    /// verified. The installer receives the MD5 checksum while SHA-256 is
-    /// used for the stronger pre-install validation.
+    /// verified. The installer receives the MD5 checksum for Emby's own
+    /// validation pass.
     /// </summary>
     public sealed class VerifiedPluginRelease
     {
@@ -52,10 +52,13 @@ namespace Emby.Plugins.WatchTogether
 
     public interface IPluginReleaseClient
     {
-        Task<GitHubReleaseInfo> GetLatestReleaseAsync(CancellationToken cancellationToken);
-
-        Task<VerifiedPluginRelease> DownloadAndVerifyAsync(
-            GitHubReleaseInfo release,
+        /// <summary>
+        /// Downloads and verifies the latest release asset in one pass.
+        /// The latest-version download URL is a plain GitHub web endpoint,
+        /// so checks do not consume the anonymous REST API rate limit that
+        /// is shared with Emby's own update checks.
+        /// </summary>
+        Task<VerifiedPluginRelease> CheckForLatestAsync(
             CancellationToken cancellationToken);
     }
 
