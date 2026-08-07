@@ -32,6 +32,14 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件。�
 
 插件是单 DLL 交付，不需要复制源码、NuGet 包或其他旁车进程。升级时停止 Emby、替换 DLL 后再启动；回滚时恢复备份的旧 DLL。
 
+## 插件正式版更新
+
+设置页底部的“插件更新”区域默认关闭自动更新。管理员可启用自动检测，并将间隔设置为 1 到 720 个整数小时（默认 24 小时）。启用后插件会立即异步检查一次，之后按上次检查时间和该间隔执行；保存设置会动态重排任务，关闭后会取消后台调度。
+
+更新只读取公开的 GitHub `releases/latest` 端点，并且只接受非 draft、非 prerelease 的正式版 tag（可带 `v`/`V` 前缀）。正式版必须同时提供名称严格为 `Emby.Plugins.WatchTogether.dll` 的 HTTPS release asset；插件会在安装前核对 API 声明的大小、SHA-256、程序集名称和程序集版本，并将预检得到的 MD5 交给 Emby 安装器。手动“检查更新”不会自动安装，只有后台自动检查发现新版本时才会安装。
+
+安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后页面会提示“重启 Emby 后生效”，并在重启前避免重复安装同一版本。发布正式版时，GitHub release 必须同时附带版本 tag 和固定名称的 DLL asset，且 tag 版本必须与程序集版本一致。
+
 ## 使用方法
 
 ### 创建房间
@@ -108,6 +116,9 @@ docs/                          当前实现说明、排错和协作流程
 | `POST` | `/WatchTogether/Rooms/{id}/Leave` | 参与者退出房间 |
 | `POST` | `/WatchTogether/Rooms/{id}/Action` | 管理员执行 `pause`、`resume` 或 `resync` |
 | `POST` | `/WatchTogether/Rooms/{id}/Message` | 管理员向在线参与者发送提示 |
+| `GET` | `/WatchTogether/Update` | 管理员读取缓存的更新状态 |
+| `POST` | `/WatchTogether/Update/Check` | 管理员手动检查正式版（不会自动安装） |
+| `POST` | `/WatchTogether/Update/Install` | 管理员安装已校验的正式版，等待重启生效 |
 
 服务端会再次校验管理员和参与者权限，不能仅依赖管理页隐藏按钮作为安全边界。
 
