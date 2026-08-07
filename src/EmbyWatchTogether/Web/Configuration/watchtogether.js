@@ -34,7 +34,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             url: apiUrl(path),
             type: method,
             data: body === undefined ? null : JSON.stringify(body),
-            contentType: 'application/json'
+            contentType: 'application/json',
+            dataType: 'json'
         });
     }
 
