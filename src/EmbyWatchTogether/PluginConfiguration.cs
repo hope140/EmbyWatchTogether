@@ -3,8 +3,8 @@ using MediaBrowser.Model.Plugins;
 namespace Emby.Plugins.WatchTogether
 {
     /// <summary>
-    /// Plugin configuration persisted by Emby. Values are the porting defaults
-    /// taken from the Python reference implementation (see reference/README.md).
+    /// Plugin configuration persisted by Emby. Defaults match the current
+    /// Watch Together synchronization policy.
     /// </summary>
     public class PluginConfiguration : BasePluginConfiguration
     {
