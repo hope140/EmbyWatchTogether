@@ -162,7 +162,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void Barrier_FinalAlignsSecondaryAfterRestore()
+        public void Barrier_EntersWatchingAfterRestore_WithoutSecondSeek()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -194,60 +194,12 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s2", "u2", paused: false, position: 49 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
-            Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(room.Id).State);
-
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-            var finalAlign = _issuer.Issued.Last();
-            Assert.Equal(RemoteCommands.Seek, finalAlign.command);
-            Assert.Equal("u2", finalAlign.userId);
-            Assert.Equal(53 * SessionSnapshot.TicksPerSecond, finalAlign.positionTicks);
-
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-
-            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
-        }
-
-        [Fact]
-        public void Barrier_SkipsFinalAlignWhenRestoreDriftIsWithinStartupTolerance()
-        {
-            var room = CreateRoom();
-            var engine = CreateEngine();
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
-            engine.PollOnce(_clock.Now);
-
-            SetCandidates(
-                Snapshot("s1", "u1", paused: true, position: 53 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: true, position: 0));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-
-            SetCandidates(
-                Snapshot("s1", "u1", paused: true, position: 53 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: true, position: 53 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 53 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 52 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
             Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
             Assert.Equal(5, _issuer.Issued.Count);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
         }
 
         [Fact]
@@ -818,6 +770,26 @@ namespace Emby.Plugins.WatchTogether.Tests
             // on the player) is a real manual seek.
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 44 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Equal("u1", runtime.Barrier.AnchorUserId);
+        }
+
+        [Fact]
+        public void WatchingTick_ForwardFiveSecondJump_StartsAlignBarrier()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            // Pressing the +5s button is a real user seek and must trigger the
+            // same align barrier as dragging.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 55 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);

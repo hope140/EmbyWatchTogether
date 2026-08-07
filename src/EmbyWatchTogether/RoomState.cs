@@ -20,7 +20,6 @@ namespace Emby.Plugins.WatchTogether
         Pause = 0,
         Seek = 1,
         Restore = 2,
-        FinalAlign = 3,
     }
 
     public sealed class BarrierState
@@ -46,10 +45,6 @@ namespace Emby.Plugins.WatchTogether
         public bool SeekSent { get; set; }
 
         public bool RestoreSent { get; set; }
-
-        public bool FinalAlignSent { get; set; }
-
-        public long FinalAlignPositionTicks { get; set; }
     }
 
     public sealed class PendingCommand
