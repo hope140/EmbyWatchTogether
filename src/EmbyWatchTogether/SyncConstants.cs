@@ -18,9 +18,13 @@ namespace Emby.Plugins.WatchTogether
         public const long DriftThresholdTicks = 5 * TicksPerSecond;
 
         // External players often report a small position rewind (a few seconds)
-        // shortly after a seek lands while re-basing their clock. Only backward
-        // jumps beyond this are treated as user seeks.
+        // shortly after a seek lands while re-basing their clock. A backward
+        // jump smaller than this is ignored only while the user is inside the
+        // seek calibration window (see SeekCalibrationWindowSeconds); outside
+        // that window any backward jump is a real user seek.
         public const long ManualSeekBackwardToleranceTicks = 15 * TicksPerSecond;
+
+        public const double SeekCalibrationWindowSeconds = 15.0;
 
         public const double PlaybackRateTolerance = 0.010000001;
 

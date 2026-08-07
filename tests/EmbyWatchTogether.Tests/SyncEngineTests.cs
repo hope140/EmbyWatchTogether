@@ -787,14 +787,15 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void WatchingTick_SmallBackwardJumpIsNotManualSeek()
+        public void WatchingTick_SmallBackwardJump_WithinSeekWindow_IsIgnored()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
             EnterWatching(engine, room);
 
-            // External player clock re-basing reports a small rewind (~6s); it
-            // must not start an align barrier.
+            // A remote seek was just issued to u1, so a small rewind is the
+            // player's clock re-basing, not a user action.
+            _rooms.GetRuntime(room.Id).LastSeekAtUtc["u1"] = _clock.Now;
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 44 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
@@ -804,6 +805,26 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
             Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
             Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void WatchingTick_SmallBackwardJump_OutsideSeekWindow_StartsAlignBarrier()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            // No recent remote seek: a small rewind (e.g. the user presses -5s
+            // on the player) is a real manual seek.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 44 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Equal("u1", runtime.Barrier.AnchorUserId);
         }
 
         [Fact]
