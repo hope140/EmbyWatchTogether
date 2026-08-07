@@ -17,6 +17,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData(typeof(LeaveRoomRequest), "/WatchTogether/Rooms/{Id}/Leave", "POST")]
         [InlineData(typeof(SendRoomMessageRequest), "/WatchTogether/Rooms/{Id}/Message", "POST")]
         [InlineData(typeof(GetUsersRequest), "/WatchTogether/Users", "GET")]
+        [InlineData(typeof(GetPluginInfoRequest), "/WatchTogether/Info", "GET")]
         public void RequestDto_DeclaresExpectedRoute(Type dto, string path, string verbs)
         {
             var route = (RouteAttribute)dto.GetCustomAttributes(typeof(RouteAttribute), false).Single();

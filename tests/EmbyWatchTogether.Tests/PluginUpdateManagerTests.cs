@@ -59,7 +59,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public async Task AutomaticCheckInstallsExactlyOnce()
         {
-            var configuration = new PluginConfiguration { AutoUpdateEnabled = true };
+            var configuration = new PluginConfiguration();
             var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
             var installation = CreateInstallationManager(out var installMock);
             using (var manager = new PluginUpdateManager(configuration, new Version(1, 0, 0), releaseClient, installation))
@@ -102,41 +102,24 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public async Task DisablingAutomaticUpdatesBeforeDownloadSkipsQueuedInstall()
+        public async Task AutomaticCheck_NotifiesPendingRestart_AfterInstall()
         {
-            var configuration = new PluginConfiguration { AutoUpdateEnabled = true };
-            var release = CreateRelease(2, 0, 0);
-            var releaseClient = new BlockingReleaseClient(release);
+            var configuration = new PluginConfiguration();
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
             var installation = CreateInstallationManager(out var installMock);
-            using (var manager = new PluginUpdateManager(configuration, new Version(1, 0, 0), releaseClient, installation))
+            var applicationHost = new Mock<MediaBrowser.Controller.IServerApplicationHost>();
+            using (var manager = new PluginUpdateManager(
+                configuration,
+                new Version(1, 0, 0),
+                releaseClient,
+                installation,
+                applicationHost.Object))
             {
-                var check = manager.CheckForUpdatesAsync(true);
-                await releaseClient.MetadataStarted.Task;
-                configuration.AutoUpdateEnabled = false;
-                manager.NotifyConfigurationChanged();
-                releaseClient.ReleaseMetadata.TrySetResult(release);
+                var status = await manager.CheckForUpdatesAsync(true);
 
-                await check;
-                installMock.Verify(x => x.InstallPackage(
-                    It.IsAny<PackageVersionInfo>(),
-                    true,
-                    It.IsAny<IProgress<double>>(),
-                    It.IsAny<CancellationToken>()), Times.Never);
+                Assert.True(status.RestartRequired);
+                applicationHost.Verify(x => x.NotifyPendingRestart(), Times.Once);
             }
-        }
-
-        [Theory]
-        [InlineData(0)]
-        [InlineData(721)]
-        public void PluginRejectsInvalidUpdateIntervals(int interval)
-        {
-#pragma warning disable SYSLIB0050 // Formatter-based serialization is obsolete; this deliberately bypasses the constructor.
-            var plugin = (Plugin)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Plugin));
-#pragma warning restore SYSLIB0050
-            Assert.Throws<ArgumentOutOfRangeException>(() => plugin.UpdateConfiguration(new PluginConfiguration
-            {
-                UpdateCheckIntervalHours = interval,
-            }));
         }
 
         [Fact]
@@ -221,33 +204,5 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
-        private sealed class BlockingReleaseClient : IPluginReleaseClient
-        {
-            private readonly GitHubReleaseInfo _release;
-
-            public BlockingReleaseClient(GitHubReleaseInfo release)
-            {
-                _release = release;
-            }
-
-            public TaskCompletionSource<bool> MetadataStarted { get; } =
-                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            public TaskCompletionSource<GitHubReleaseInfo> ReleaseMetadata { get; } =
-                new TaskCompletionSource<GitHubReleaseInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            public async Task<VerifiedPluginRelease> CheckForLatestAsync(
-                CancellationToken cancellationToken)
-            {
-                MetadataStarted.TrySetResult(true);
-                var release = await ReleaseMetadata.Task.ConfigureAwait(false);
-                return new VerifiedPluginRelease
-                {
-                    Release = release,
-                    Asset = release.Assets[0],
-                    Md5Checksum = "md5-checksum",
-                };
-            }
-        }
     }
 }

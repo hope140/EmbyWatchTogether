@@ -4,15 +4,16 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Emby.Plugins.WatchTogether</RootNamespace>
     <AssemblyName>Emby.Plugins.WatchTogether</AssemblyName>
-    <Version>1.1.0.5</Version>
-    <FileVersion>1.1.0.5</FileVersion>
-    <AssemblyVersion>1.1.0.5</AssemblyVersion>
+    <Version>1.2.0.1</Version>
+    <FileVersion>1.2.0.1</FileVersion>
+    <AssemblyVersion>1.2.0.1</AssemblyVersion>
     <Description>Emby server plugin for two-person synchronized watching (Watch Together).</Description>
     <Nullable>disable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.0.52-beta" />
+    <PackageReference Include="System.Memory" Version="4.6.0" />
   </ItemGroup>
 
   <ItemGroup>
