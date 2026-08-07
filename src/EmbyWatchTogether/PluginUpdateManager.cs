@@ -166,10 +166,25 @@ namespace Emby.Plugins.WatchTogether
                 await _operationGate.WaitAsync(linked.Token).ConfigureAwait(false);
                 try
                 {
-                    return await CheckCoreAsync(automatic, linked.Token).ConfigureAwait(false);
+                    // Resolve the check result first, then clear the in-flight
+                    // flag and snapshot again. Returning GetStatus() from inside
+                    // CheckCoreAsync would clone IsChecking=true because its
+                    // finally block runs after the value is captured.
+                    await CheckCoreAsync(automatic, linked.Token).ConfigureAwait(false);
+                    lock (_stateLock)
+                    {
+                        _status.IsChecking = false;
+                    }
+
+                    return GetStatus();
                 }
                 finally
                 {
+                    lock (_stateLock)
+                    {
+                        _status.IsChecking = false;
+                    }
+
                     _operationGate.Release();
                 }
             }
@@ -199,26 +214,29 @@ namespace Emby.Plugins.WatchTogether
                     if (_verifiedRelease == null)
                     {
                         SetError("请先检查更新，再安装正式版插件。", null);
-                        return GetStatus();
                     }
-
-                    var currentVersion = ReadCurrentVersion();
-                    if (!IsNewer(_verifiedRelease.Release.Version, currentVersion))
+                    else
                     {
-                        SetError("当前已经是最新正式版。", null);
-                        return GetStatus();
+                        var currentVersion = ReadCurrentVersion();
+                        if (!IsNewer(_verifiedRelease.Release.Version, currentVersion))
+                        {
+                            SetError("当前已经是最新正式版。", null);
+                        }
+                        else
+                        {
+                            var configuration = ReadConfiguration();
+                            if (!string.IsNullOrWhiteSpace(configuration.PendingUpdateVersion) &&
+                                VersionsEqual(configuration.PendingUpdateVersion, _verifiedRelease.Release.Version))
+                            {
+                                SetError("该版本已等待重启生效。", null);
+                            }
+                            else
+                            {
+                                await InstallVerifiedReleaseAsync(_verifiedRelease, linked.Token).ConfigureAwait(false);
+                            }
+                        }
                     }
 
-                    var configuration = ReadConfiguration();
-                    if (!string.IsNullOrWhiteSpace(configuration.PendingUpdateVersion) &&
-                        VersionsEqual(configuration.PendingUpdateVersion, _verifiedRelease.Release.Version))
-                    {
-                        SetError("该版本已等待重启生效。", null);
-                        return GetStatus();
-                    }
-
-                    await InstallVerifiedReleaseAsync(_verifiedRelease, linked.Token).ConfigureAwait(false);
-                    return GetStatus();
                 }
                 catch (OperationCanceledException)
                 {
@@ -227,7 +245,6 @@ namespace Emby.Plugins.WatchTogether
                 catch (Exception ex)
                 {
                     SetError("安装更新失败，请稍后重试。", ex);
-                    return GetStatus();
                 }
                 finally
                 {
@@ -238,6 +255,11 @@ namespace Emby.Plugins.WatchTogether
 
                     _operationGate.Release();
                 }
+
+                // Snapshot again so the returned status never reports
+                // IsInstalling=true; the finally block runs after the value
+                // captured above was cloned.
+                return GetStatus();
             }
         }
 

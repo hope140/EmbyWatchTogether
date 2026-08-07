@@ -281,10 +281,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return Promise.resolve(null);
         }
 
+        var epoch = page._wtUpdateEpoch || 0;
         return apiGet('WatchTogether/Update').then(function (status) {
-            if (page._wtUpdateBusy) {
-                // A manual check/install is in progress; discard stale
-                // polled status so it cannot overwrite the operation text.
+            if (page._wtUpdateBusy || epoch !== (page._wtUpdateEpoch || 0)) {
+                // A manual check/install started after this poll was sent.
+                // Discard the stale response so it cannot overwrite the
+                // operation text with pre-check state.
                 return null;
             }
             page._wtUpdateAdmin = true;
@@ -292,7 +294,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             renderUpdateStatus(page, page._wtUpdateStatus);
             return status;
         }).catch(function (error) {
-            if (page._wtUpdateBusy) {
+            if (page._wtUpdateBusy || epoch !== (page._wtUpdateEpoch || 0)) {
                 return null;
             }
             page._wtUpdateAdmin = false;
@@ -351,6 +353,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         setButtonBusy(button, true, '检查中…');
         setUpdateStatus(page, '正在检查 GitHub 正式版…');
         page._wtUpdateBusy = true;
+        page._wtUpdateEpoch = (page._wtUpdateEpoch || 0) + 1;
         return apiSend('WatchTogether/Update/Check', 'POST').then(function (status) {
             page._wtUpdateStatus = status || {};
             renderUpdateStatus(page, page._wtUpdateStatus);
@@ -368,6 +371,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         setButtonBusy(button, true, '安装中…');
         setUpdateStatus(page, '正在安装正式版更新…');
         page._wtUpdateBusy = true;
+        page._wtUpdateEpoch = (page._wtUpdateEpoch || 0) + 1;
         return apiSend('WatchTogether/Update/Install', 'POST').then(function (status) {
             page._wtUpdateStatus = status || {};
             renderUpdateStatus(page, page._wtUpdateStatus);
