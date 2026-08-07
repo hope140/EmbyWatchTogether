@@ -74,6 +74,8 @@ namespace Emby.Plugins.WatchTogether
 
         public bool IsInstalling { get; set; }
 
+        public bool StartingUp { get; set; }
+
         public bool RestartRequired { get; set; }
 
         public string PendingVersion { get; set; }
@@ -101,6 +103,7 @@ namespace Emby.Plugins.WatchTogether
                 UpdateAvailable = UpdateAvailable,
                 IsChecking = IsChecking,
                 IsInstalling = IsInstalling,
+                StartingUp = StartingUp,
                 RestartRequired = RestartRequired,
                 PendingVersion = PendingVersion,
                 LastCheckedAtUtc = LastCheckedAtUtc,

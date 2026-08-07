@@ -358,7 +358,7 @@ namespace Emby.Plugins.WatchTogether
             {
                 CurrentVersion = plugin?.Version?.ToString(),
                 RepositoryUrl = GitHubReleaseClient.RepositoryUrl,
-                LastError = "更新服务尚未初始化，请重启 Emby 后重试。",
+                StartingUp = true,
             };
         }
 
