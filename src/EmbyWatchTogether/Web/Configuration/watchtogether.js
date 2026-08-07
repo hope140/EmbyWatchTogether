@@ -282,11 +282,19 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
 
         return apiGet('WatchTogether/Update').then(function (status) {
+            if (page._wtUpdateBusy) {
+                // A manual check/install is in progress; discard stale
+                // polled status so it cannot overwrite the operation text.
+                return null;
+            }
             page._wtUpdateAdmin = true;
             page._wtUpdateStatus = status || {};
             renderUpdateStatus(page, page._wtUpdateStatus);
             return status;
         }).catch(function (error) {
+            if (page._wtUpdateBusy) {
+                return null;
+            }
             page._wtUpdateAdmin = false;
             var checkButton = page.querySelector('#wtCheckUpdate');
             var installButton = page.querySelector('#wtInstallUpdate');
