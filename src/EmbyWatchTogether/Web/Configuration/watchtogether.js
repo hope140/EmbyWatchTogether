@@ -265,6 +265,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             text = '正在检查 GitHub 正式版…';
         } else if (status.IsInstalling) {
             text = '正在安装更新…';
+        } else if (status.StartingUp) {
+            text = '服务器启动中，更新功能稍后自动就绪。';
         } else if (status.RestartRequired) {
             text = '更新已安装，重启 Emby 后生效。';
         } else if (status.LastError) {
