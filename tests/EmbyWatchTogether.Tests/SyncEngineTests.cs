@@ -790,6 +790,159 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void WatchingTick_SeekerStuck_PausesPeerWhenAhead_ThenResumesWhenSeekerStarts()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+            _messageIssuer.Issued.Clear();
+
+            // t0: u1 drags from 50s to 60s; seek is issued to u2 and the wait starts.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+            Assert.Equal("u2", _issuer.Issued.Last(i => i.command == RemoteCommands.Seek).userId);
+
+            // t1: u2 acknowledges the seek; u1 is still frozen at the target.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 61 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Pause);
+
+            // t2: u2 loads fast and leads by 3s while u1 is still buffering:
+            // pause u2 and notify instead of letting it run ahead indefinitely.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 64 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(_issuer.Issued, i => i.userId == "u2" && i.command == RemoteCommands.Pause);
+            Assert.Single(_messageIssuer.Issued);
+            // The engine-driven pause must not be echoed back to the seeker.
+            Assert.DoesNotContain(_issuer.Issued, i => i.userId == "u1" && i.command == RemoteCommands.Pause);
+
+            // t3: u2 acknowledges the pause; u1 still frozen. No further commands.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 64 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+
+            // t4: u1 finally starts playing (moved past the anchor) -> resume u2, wait cleared.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 62 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 64 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(_issuer.Issued, i => i.userId == "u2" && i.command == RemoteCommands.Unpause);
+            Assert.Null(_rooms.GetRuntime(room.Id).Realign);
+        }
+
+        [Fact]
+        public void WatchingTick_SeekerStuck_TimeoutAdvisoryAfterLongWait()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+            _messageIssuer.Issued.Clear();
+
+            // t0: drag -> seek issued, wait starts.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            // t1: u2 acknowledges and plays ahead; t2: paused because seeker is stuck.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 61 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 64 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Single(_messageIssuer.Issued);
+
+            // Long after the 60s timeout the seeker is still stuck: advisory only,
+            // no repeated seek or unpause while the peer stays paused.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 64 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(60);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, _messageIssuer.Issued.Count);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Unpause);
+        }
+
+        [Fact]
+        public void WatchingTick_PeerStuck_PausesSeeker_ThenResumesWhenPeerStarts()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+            _messageIssuer.Issued.Clear();
+
+            // t0: u1 drags to 60s; seek is issued to u2 and the wait starts.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            // t1: u2 acknowledges the seek but stays frozen while loading; u1 is
+            // already playing from the target.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 61 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 61 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Pause);
+
+            // t2: u1 leads by 3s while u2 is still stuck -> pause u1 (the dragger).
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 64 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 61 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(_issuer.Issued, i => i.userId == "u1" && i.command == RemoteCommands.Pause);
+            Assert.Single(_messageIssuer.Issued);
+            Assert.DoesNotContain(_issuer.Issued, i => i.userId == "u2" && i.command == RemoteCommands.Pause);
+
+            // t3: u1 acknowledges the pause; u2 still stuck. No further commands.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 64 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 61 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.Equal(1, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+
+            // t4: u2 finally starts playing -> resume u1, wait cleared.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 64 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 63 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(_issuer.Issued, i => i.userId == "u1" && i.command == RemoteCommands.Unpause);
+            Assert.Null(_rooms.GetRuntime(room.Id).Realign);
+        }
+
+        [Fact]
         public void WatchingTick_PendingSeekRetriesThenFailsToWaiting()
         {
             var room = CreateRoom();
