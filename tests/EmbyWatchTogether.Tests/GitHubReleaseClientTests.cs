@@ -131,11 +131,12 @@ namespace Emby.Plugins.WatchTogether.Tests
 
         private static GitHubReleaseInfo CreateRelease(bool draft, bool prerelease)
         {
+            var version = typeof(Plugin).Assembly.GetName().Version ?? new Version(1, 0, 0);
             return new GitHubReleaseInfo
             {
-                TagName = "v1.0.0",
-                Version = new Version(1, 0, 0),
-                HtmlUrl = "https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.0.0",
+                TagName = "v" + version,
+                Version = version,
+                HtmlUrl = "https://github.com/hope140/EmbyWatchTogether/releases/tag/v" + version,
                 Draft = draft,
                 Prerelease = prerelease,
                 Assets = new System.Collections.Generic.List<GitHubReleaseAsset>
@@ -143,7 +144,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                     new GitHubReleaseAsset
                     {
                         Name = GitHubReleaseClient.AssetName,
-                        BrowserDownloadUrl = "https://github.com/hope140/EmbyWatchTogether/releases/download/v1.0.0/Emby.Plugins.WatchTogether.dll",
+                        BrowserDownloadUrl = "https://github.com/hope140/EmbyWatchTogether/releases/download/v" + version + "/Emby.Plugins.WatchTogether.dll",
                     },
                 },
             };
