@@ -35,6 +35,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("updatePluginConfiguration", javascript);
             Assert.Contains("更新配置已读取", javascript);
             Assert.Contains("_wtUpdateBusy", javascript);
+            Assert.Contains("dataType: 'json'", javascript);
 
             var roomsIndex = html.IndexOf("id=\"wtRooms\"", System.StringComparison.Ordinal);
             var configIndex = html.IndexOf("id=\"wtConfigSection\"", System.StringComparison.Ordinal);
