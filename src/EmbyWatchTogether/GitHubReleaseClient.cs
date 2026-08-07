@@ -59,6 +59,7 @@ namespace Emby.Plugins.WatchTogether
                     UserAgent = _userAgent,
                     CancellationToken = cancellationToken,
                     ThrowOnErrorResponse = false,
+                    Progress = new Progress<double>(),
                 };
 
                 response = await _httpClient.GetTempFileResponse(options).ConfigureAwait(false);

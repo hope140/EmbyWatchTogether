@@ -43,7 +43,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             var client = CreateClient(out var httpClient);
             var tempPath = CopyPluginAssembly();
-            httpClient.Setup(x => x.GetTempFileResponse(It.IsAny<HttpRequestOptions>()))
+            httpClient.Setup(x => x.GetTempFileResponse(
+                    It.Is<HttpRequestOptions>(o => o.Progress != null)))
                 .ReturnsAsync(new HttpResponseInfo { StatusCode = HttpStatusCode.OK, TempFilePath = tempPath });
 
             var verified = await client.CheckForLatestAsync(CancellationToken.None);
