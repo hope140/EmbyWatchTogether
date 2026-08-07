@@ -21,6 +21,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 var checkedStatus = await manager.CheckForUpdatesAsync(false);
 
                 Assert.True(checkedStatus.UpdateAvailable);
+                Assert.False(checkedStatus.IsChecking);
                 installMock.Verify(x => x.InstallPackage(
                     It.IsAny<PackageVersionInfo>(),
                     true,
@@ -29,6 +30,7 @@ namespace Emby.Plugins.WatchTogether.Tests
 
                 var installedStatus = await manager.InstallAsync();
                 Assert.True(installedStatus.RestartRequired);
+                Assert.False(installedStatus.IsInstalling);
                 Assert.Equal("2.0.0", configuration.PendingUpdateVersion);
                 installMock.Verify(x => x.InstallPackage(
                     It.Is<PackageVersionInfo>(p =>
@@ -64,6 +66,8 @@ namespace Emby.Plugins.WatchTogether.Tests
                 var status = await manager.CheckForUpdatesAsync(true);
 
                 Assert.True(status.RestartRequired);
+                Assert.False(status.IsChecking);
+                Assert.False(status.IsInstalling);
                 Assert.Equal("2.0.0", status.PendingVersion);
                 installMock.Verify(x => x.InstallPackage(
                     It.IsAny<PackageVersionInfo>(),
