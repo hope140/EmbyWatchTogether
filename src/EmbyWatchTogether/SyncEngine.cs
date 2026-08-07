@@ -592,7 +592,8 @@ namespace Emby.Plugins.WatchTogether
             SessionSnapshot previous,
             SessionSnapshot current,
             DateTimeOffset previousAtUtc,
-            DateTimeOffset now)
+            DateTimeOffset now,
+            DateTimeOffset? lastSeekAtUtc = null)
         {
             if (previous == null || current == null)
             {
@@ -609,10 +610,13 @@ namespace Emby.Plugins.WatchTogether
             }
 
             // External players often report a small position rewind (a few
-            // seconds) shortly after a seek lands while re-basing their clock.
-            // Only large backward jumps are treated as user seeks.
+            // seconds) shortly after a remote seek lands while re-basing their
+            // clock. Ignore such small rewinds only inside the seek calibration
+            // window; outside it a backward jump is a real user seek.
             if (current.PositionTicks < previous.PositionTicks &&
-                previous.PositionTicks - current.PositionTicks < SyncConstants.ManualSeekBackwardToleranceTicks)
+                previous.PositionTicks - current.PositionTicks < SyncConstants.ManualSeekBackwardToleranceTicks &&
+                lastSeekAtUtc.HasValue &&
+                (now - lastSeekAtUtc.Value).TotalSeconds < SyncConstants.SeekCalibrationWindowSeconds)
             {
                 return false;
             }
@@ -784,6 +788,11 @@ namespace Emby.Plugins.WatchTogether
                 IssuedAtUtc = now,
                 Retries = 0,
             };
+            if (string.Equals(command, RemoteCommands.Seek, StringComparison.Ordinal))
+            {
+                runtime.LastSeekAtUtc[userId] = now;
+            }
+
             _logger?.Info(
                 $"Room {room.Id}: issue {command} to {userId} (position {FormatPosition(positionTicks)}s)");
             return true;
@@ -1129,7 +1138,8 @@ namespace Emby.Plugins.WatchTogether
                 // snapshot or a long poll interval could look like a manual seek.
                 // Normal playback drift is intentionally not corrected here; only a
                 // single, clearly out-of-band position jump is propagated.
-                if (IsManualSeek(old, current, runtime.PreviousAtUtc.Value, now))
+                runtime.LastSeekAtUtc.TryGetValue(user, out var lastSeekAtUtc);
+                if (IsManualSeek(old, current, runtime.PreviousAtUtc.Value, now, lastSeekAtUtc))
                 {
                     bool pendingSeek = pending != null &&
                         pending.Command == RemoteCommands.Seek;

@@ -17,6 +17,14 @@ namespace Emby.Plugins.WatchTogether
 
         public Dictionary<string, SuppressedCommand> Suppressed { get; } = new Dictionary<string, SuppressedCommand>();
 
+        /// <summary>
+        /// Last time a Seek command was issued to each user. Used to ignore the
+        /// small position rewind some players report shortly after a remote seek
+        /// lands (clock re-basing) without ignoring real user seeks.
+        /// </summary>
+        public Dictionary<string, DateTimeOffset> LastSeekAtUtc { get; } =
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+
         public Dictionary<string, SessionSnapshot> Previous { get; } = new Dictionary<string, SessionSnapshot>();
 
         public DateTimeOffset? PreviousAtUtc { get; set; }
@@ -36,6 +44,7 @@ namespace Emby.Plugins.WatchTogether
             Barrier = null;
             Pending.Clear();
             Suppressed.Clear();
+            LastSeekAtUtc.Clear();
             Previous.Clear();
             PreviousAtUtc = null;
             DriftRounds = 0;
