@@ -99,6 +99,31 @@ function Get-ManifestValues {
     return $values
 }
 
+function Get-DifferentCanonicalTag {
+    param(
+        [Parameter(Mandatory = $true)]
+        [Version]$Version
+    )
+
+    $build = if ($Version.Build -lt 0) { 0 } else { $Version.Build }
+    $revision = if ($Version.Revision -lt 0) { 0 } else { $Version.Revision }
+    $parts = @($Version.Major, $Version.Minor, $build, $revision)
+    $changed = $false
+    for ($index = $parts.Length - 1; $index -ge 0; $index--) {
+        if ($parts[$index] -lt 65535) {
+            $parts[$index] = $parts[$index] + 1
+            $changed = $true
+            break
+        }
+    }
+
+    if (-not $changed) {
+        $parts[$parts.Length - 1] = 65534
+    }
+
+    return 'v' + ($parts -join '.')
+}
+
 function Import-PublicKeyXml {
     param(
         [Parameter(Mandatory = $true)]
@@ -143,6 +168,13 @@ $repositoryPrivateKeyPath = $null
 $verificationKey = $null
 $runtimeKey = $null
 $privateKeyBytes = $null
+$environmentManifestPath = $null
+$environmentSignaturePath = $null
+$signingKeyEnvironmentName = 'WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64'
+$originalSigningKeyEnvironmentValue = [System.Environment]::GetEnvironmentVariable(
+    $signingKeyEnvironmentName,
+    [System.EnvironmentVariableTarget]::Process)
+$signingKeyEnvironmentCaptured = $true
 
 try {
     $tempDirectory = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath (
@@ -165,7 +197,7 @@ try {
     Assert-True -Condition ($keySummary.Contains('keyId=release-test-1')) -Message 'Key summary omitted keyId.'
     Assert-True -Condition ($keySummary.Contains($privateKeyPath)) -Message 'Key summary omitted private key path.'
     Assert-True -Condition ($keySummary.Contains($publicKeyPath)) -Message 'Key summary omitted public key path.'
-    Assert-True -Condition ($keySummary.Contains('secret name hint')) -Message 'Key summary omitted the secret name hint.'
+    Assert-True -Condition ($keySummary.Contains('GitHub secret name hint: WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64')) -Message 'Key summary omitted the fixed secret name hint.'
     Assert-True -Condition (-not $keySummary.Contains($privateKeyText)) -Message 'Key summary exposed private key content.'
 
     $privateKeyBytes = [System.Convert]::FromBase64String($privateKeyText)
@@ -188,6 +220,54 @@ try {
     Assert-True -Condition ($signSummary.Contains('tag=' + $tag)) -Message 'Sign summary omitted tag.'
     Assert-True -Condition ($signSummary.Contains('keyId=release-test-1')) -Message 'Sign summary omitted keyId.'
     Assert-True -Condition ($signSummary.Contains('assetPath=' + $dllPath)) -Message 'Sign summary omitted asset path.'
+
+    $environmentManifestPath = Join-Path $tempDirectory 'environment.manifest'
+    $environmentSignaturePath = Join-Path $tempDirectory 'environment.sig'
+    [System.Environment]::SetEnvironmentVariable(
+        $signingKeyEnvironmentName,
+        $privateKeyText,
+        [System.EnvironmentVariableTarget]::Process)
+    $environmentSummary = & $signManifestScript `
+        -DllPath $dllPath `
+        -Tag $tag `
+        -KeyId 'release-test-1' `
+        -ManifestOutputPath $environmentManifestPath `
+        -SignatureOutputPath $environmentSignaturePath | Out-String
+    Assert-True -Condition ($environmentSummary.Contains('tag=' + $tag)) -Message 'Environment fallback summary omitted tag.'
+    Assert-True -Condition (-not $environmentSummary.Contains($privateKeyText)) -Message 'Environment fallback output exposed private key content.'
+    Assert-True -Condition ([System.IO.File]::Exists($environmentManifestPath)) -Message 'Environment fallback did not create a manifest.'
+    Assert-True -Condition ([System.IO.File]::Exists($environmentSignaturePath)) -Message 'Environment fallback did not create a signature.'
+    $environmentManifestBytes = [System.IO.File]::ReadAllBytes($environmentManifestPath)
+    $environmentSignatureText = [System.IO.File]::ReadAllText($environmentSignaturePath)
+    $environmentSignatureBytes = [System.Convert]::FromBase64String($environmentSignatureText)
+    Assert-True -Condition ($verificationKey.VerifyData(
+        $environmentManifestBytes,
+        $environmentSignatureBytes,
+        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+        [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)) -Message 'Environment fallback signature verification failed.'
+
+    Remove-Item -LiteralPath ('Env:\{0}' -f $signingKeyEnvironmentName) -ErrorAction SilentlyContinue
+    Assert-Throws -Action {
+        & $signManifestScript `
+            -DllPath $dllPath `
+            -Tag $tag `
+            -KeyId 'release-test-1' `
+            -ManifestOutputPath (Join-Path $tempDirectory 'missing-key.manifest') `
+            -SignatureOutputPath (Join-Path $tempDirectory 'missing-key.sig')
+    } -Message 'Signer did not reject a missing signing key.'
+
+    [System.Environment]::SetEnvironmentVariable(
+        $signingKeyEnvironmentName,
+        'not-a-private-key',
+        [System.EnvironmentVariableTarget]::Process)
+    Assert-Throws -Action {
+        & $signManifestScript `
+            -DllPath $dllPath `
+            -Tag $tag `
+            -KeyId 'release-test-1' `
+            -ManifestOutputPath (Join-Path $tempDirectory 'invalid-env-key.manifest') `
+            -SignatureOutputPath (Join-Path $tempDirectory 'invalid-env-key.sig')
+    } -Message 'Signer did not reject an invalid environment signing key.'
 
     $manifestBytes = [System.IO.File]::ReadAllBytes($manifestPath)
     $signatureFileBytes = [System.IO.File]::ReadAllBytes($signaturePath)
@@ -268,10 +348,12 @@ try {
             -SignatureOutputPath (Join-Path $tempDirectory 'invalid-tag.sig')
     } -Message 'Signer accepted a non-canonical tag.'
 
+    $mismatchedTag = Get-DifferentCanonicalTag -Version $assemblyVersion
+    Assert-True -Condition ($mismatchedTag -ne $tag) -Message 'Generated mismatch tag unexpectedly equals the current tag.'
     Assert-Throws -Action {
         & $signManifestScript `
             -DllPath $dllPath `
-            -Tag ('v' + $assemblyVersion.Major + '.' + $assemblyVersion.Minor + '.' + $assemblyVersion.Build + '.8') `
+            -Tag $mismatchedTag `
             -KeyId 'release-test-1' `
             -PrivateKeyPkcs8Base64 $privateKeyText `
             -ManifestOutputPath (Join-Path $tempDirectory 'mismatch.manifest') `
@@ -302,6 +384,24 @@ try {
     Write-Output 'release signing tests passed'
 }
 finally {
+    if ($signingKeyEnvironmentCaptured) {
+        if ($null -eq $originalSigningKeyEnvironmentValue) {
+            Remove-Item -LiteralPath ('Env:\{0}' -f $signingKeyEnvironmentName) -ErrorAction SilentlyContinue
+            $restoredEnvironmentVariableExists = Test-Path -LiteralPath ('Env:\{0}' -f $signingKeyEnvironmentName)
+            Assert-True -Condition (-not $restoredEnvironmentVariableExists) -Message 'Signing key environment variable was not restored.'
+        }
+        else {
+            [System.Environment]::SetEnvironmentVariable(
+                $signingKeyEnvironmentName,
+                $originalSigningKeyEnvironmentValue,
+                [System.EnvironmentVariableTarget]::Process)
+            $restoredSigningKeyEnvironmentValue = [System.Environment]::GetEnvironmentVariable(
+                $signingKeyEnvironmentName,
+                [System.EnvironmentVariableTarget]::Process)
+            Assert-True -Condition ($restoredSigningKeyEnvironmentValue -ceq $originalSigningKeyEnvironmentValue) -Message 'Signing key environment variable was not restored.'
+        }
+    }
+
     if ($null -ne $verificationKey) {
         $verificationKey.Dispose()
     }

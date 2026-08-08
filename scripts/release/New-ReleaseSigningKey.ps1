@@ -166,7 +166,7 @@ finally {
     $rsa.Dispose()
 }
 
-$secretNameHint = 'EMBY_WATCH_TOGETHER_RELEASE_PRIVATE_KEY_' + $KeyId
+$secretNameHint = 'WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64'
 Write-Output ('keyId={0}' -f $KeyId)
 Write-Output ('publicKeyPath={0}' -f $publicKeyPath)
 Write-Output ('privateKeyPath={0}' -f $privateKeyPath)
