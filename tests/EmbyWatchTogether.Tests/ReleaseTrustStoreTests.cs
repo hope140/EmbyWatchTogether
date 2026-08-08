@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Xml.Linq;
 using Emby.Plugins.WatchTogether;
 using Xunit;
 
@@ -9,13 +10,21 @@ namespace Emby.Plugins.WatchTogether.Tests
     public sealed class ReleaseTrustStoreTests
     {
         [Fact]
-        public void PublicKeys_StartEmptyAndAreReadOnly()
+        public void PublicKeys_ContainsReviewedProductionKeyAndIsReadOnly()
         {
-            Assert.Empty(ReleaseTrustStore.PublicKeys);
+            Assert.Single(ReleaseTrustStore.PublicKeys);
+            Assert.True(ReleaseTrustStore.PublicKeys.ContainsKey("prod-2026-08"));
+            var publicKeyXml = ReleaseTrustStore.PublicKeys["prod-2026-08"];
+            Assert.False(string.IsNullOrWhiteSpace(publicKeyXml));
+            var document = XDocument.Parse(publicKeyXml);
+            Assert.Equal("RSAKeyValue", document.Root.Name.LocalName);
+            Assert.False(string.IsNullOrWhiteSpace(document.Root.Element("Modulus")?.Value));
+            Assert.Equal("AQAB", document.Root.Element("Exponent")?.Value);
+
             var dictionary = Assert.IsAssignableFrom<IDictionary<string, string>>(
                 ReleaseTrustStore.PublicKeys);
             Assert.Throws<NotSupportedException>(() => dictionary.Add("test-key", "test-key"));
-            Assert.Empty(ReleaseTrustStore.PublicKeys);
+            Assert.Single(ReleaseTrustStore.PublicKeys);
         }
 
         [Fact]
