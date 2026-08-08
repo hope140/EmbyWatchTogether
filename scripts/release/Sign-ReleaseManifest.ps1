@@ -11,7 +11,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$KeyId,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
+    [AllowEmptyString()]
     [string]$PrivateKeyPkcs8Base64,
 
     [Parameter(Mandatory = $true)]
@@ -23,6 +24,16 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$privateKeyEnvironmentVariableName = 'WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64'
+if (-not $PSBoundParameters.ContainsKey('PrivateKeyPkcs8Base64')) {
+    $PrivateKeyPkcs8Base64 = [System.Environment]::GetEnvironmentVariable(
+        $privateKeyEnvironmentVariableName)
+}
+
+if ([string]::IsNullOrWhiteSpace($PrivateKeyPkcs8Base64)) {
+    throw ('No private signing key was supplied. Pass -PrivateKeyPkcs8Base64 for tests or set environment variable {0}.' -f $privateKeyEnvironmentVariableName)
+}
 
 $assetName = 'Emby.Plugins.WatchTogether.dll'
 $maxAssetBytes = 50MB
