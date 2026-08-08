@@ -46,7 +46,7 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 
 安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示；重启前同一版本不会重复安装。正式版 Release 必须包含固定的四个资产：DLL、`EmbyWatchTogether.zip`、发布清单和 detached signature，并且 tag 与三项程序集版本一致。
 
-当前 `ReleaseTrustStore` 默认为空并 fail closed。首次生产发布前，运营必须使用 `scripts/release/New-ReleaseSigningKey.ps1` 生成并审核公钥，将 `keyId => RSAKeyValue` 映射提交到 `ReleaseTrustStore`，再把匹配的 PKCS#8 base64 私钥放入 GitHub Environment `release` 的 `WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64` secret。当前生产 key bootstrap 尚未完成，因此**发布 workflow 会安全失败**；这不代表已经可以进行生产发布。文档和仓库不得保存真实私钥、公钥内容、token 或本机服务器信息。
+当前 `ReleaseTrustStore` 默认为空并 fail closed。首次生产发布前，运营必须使用 `scripts/release/New-ReleaseSigningKey.ps1` 生成并审核公钥，将 `keyId => RSAKeyValue` 映射提交到 `ReleaseTrustStore`；公钥是用于验签的公开材料，不需要保密。再把匹配的 PKCS#8 base64 私钥放入 GitHub Environment `release` 的 `WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64` secret。禁止在文档或仓库写入或提交真实私钥、GitHub secret 值、token、本机服务器信息或私人路径；示例不得包含真实生产私钥或 secret 值。当前生产 key bootstrap 尚未完成，因此**发布 workflow 会安全失败**；这不代表已经可以进行生产发布。
 
 ## 使用方法
 
