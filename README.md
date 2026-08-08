@@ -1,6 +1,6 @@
 # Emby Watch Together 插件
 
-Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，当前项目版本为 `1.2.0.9`。它读取同一台服务器上的会话快照，并通过 Emby 远程控制命令协调起播、暂停/继续、用户手动拖动进度、切换视频和停止播放。
+Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，当前项目版本为 `1.2.0.10`。它读取同一台服务器上的会话快照，并通过 Emby 远程控制命令协调起播、暂停/继续、用户手动拖动进度、切换视频和停止播放。
 
 插件只负责房间内的协调，不会修改媒体库、转码设置或播放器客户端。正常播放期间不做周期性 Seek：网络延迟、SessionInfo 更新延迟和小幅播放速度差不会被反复纠正。
 
@@ -46,7 +46,7 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 
 安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示；重启前同一版本不会重复安装。正式版 Release 必须包含固定的四个资产：DLL、`EmbyWatchTogether.zip`、发布清单和 detached signature，并且 tag 与三项程序集版本一致。
 
-当前 `ReleaseTrustStore` 已完成生产 bootstrap，包含已审核的公开 `keyId` `prod-2026-08`，并通过不可变的 Ordinal 映射提供验签信任根。匹配 Secret 缺失或错误、未知 key 或签名失败时仍然 fail closed。`1.2.0.9` 必须先由运营人工部署并完成信任引导；完成后版本方可使用签名自动更新。禁止在文档或仓库写入或提交真实生产私钥、GitHub secret 值、token、本机服务器信息或私人路径；示例不得包含真实生产私钥或 secret 值。
+当前 `ReleaseTrustStore` 已完成生产 bootstrap，包含已审核的公开 `keyId` `prod-2026-08`，并通过不可变的 Ordinal 映射提供验签信任根。匹配 Secret 缺失或错误、未知 key 或签名失败时仍然 fail closed。首次信任引导版本 `1.2.0.9` 必须由运营人工部署；完成后版本方可使用签名自动更新。禁止在文档或仓库写入或提交真实生产私钥、GitHub secret 值、token、本机服务器信息或私人路径；示例不得包含真实生产私钥或 secret 值。
 
 ## 使用方法
 
