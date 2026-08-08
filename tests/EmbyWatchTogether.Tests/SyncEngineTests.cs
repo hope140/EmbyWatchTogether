@@ -792,21 +792,20 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void PlaybackStoppedSignal_FromBarrier_IsIgnoredAfterEnteringWatching()
+        public void PlaybackStoppedSignal_ContradictoryOnlineSnapshot_IsIgnored()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
             EnterWatching(engine, room);
 
-            // A position change starts a fresh barrier. The stop event is
-            // captured while that barrier is issuing pause/restore commands,
-            // but is delivered only after the room returns to Watching.
+            // Complete a fresh barrier, then reproduce the production sequence:
+            // the callback timestamp is after Watching while the current
+            // session/item remains online and not stopped.
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
-            var barrierSignalAtUtc = _clock.Now;
 
             SetCandidates(
                 Snapshot("s1", "u1", paused: true, position: 60 * SessionSnapshot.TicksPerSecond),
@@ -832,28 +831,17 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Null(result.Error);
             Assert.Empty(_messageIssuer.Issued);
 
-            // These events were produced during the barrier but arrive after
-            // Watching starts. Both must be consumed without repeating the
-            // stop side effects while the suppression window is active.
-            var pauseCountBeforeLateStops = _issuer.Issued.Count(i => i.command == RemoteCommands.Pause);
-            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal("u1", "s1", "i1", barrierSignalAtUtc));
-            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal("u1", "s1", "i1", barrierSignalAtUtc));
+            var pauseCountBeforeContradictoryStops = _issuer.Issued.Count(i => i.command == RemoteCommands.Pause);
+            _clock.Advance(1);
+            var postWatchingEventAtUtc = _clock.Now;
+            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal("u1", "s1", "i1", postWatchingEventAtUtc));
+            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal("u1", "s1", "i1", postWatchingEventAtUtc));
             result = engine.PollOnce(_clock.Now).Single();
 
             Assert.Equal(RoomState.Watching, result.State);
             Assert.Null(result.Error);
-            Assert.Equal(pauseCountBeforeLateStops, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.Equal(pauseCountBeforeContradictoryStops, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
             Assert.Empty(_messageIssuer.Issued);
-
-            // A stop produced after Watching starts must not be swallowed by
-            // the still-active grace window.
-            _clock.Advance(1);
-            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal("u1", "s1", "i1", _clock.Now));
-            result = engine.PollOnce(_clock.Now).Single();
-
-            Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Equal("播放已停止，等待双方重新打开同一视频", result.Error);
-            Assert.Contains(_issuer.Issued, i => i.userId == "u2" && i.command == RemoteCommands.Pause);
         }
 
         [Fact]
