@@ -2,7 +2,7 @@
 
 ## 目的与适用条件
 
-本流程用于复杂、可拆分的软件变更。主线程掌握设计、依赖、审核和集成；`luna_worker` 只实现已设计好的窄任务。简单单文件修改不必强行拆 Stack，但仍须遵守仓库检查、最小修改和验证要求。
+本流程用于复杂、可拆分的软件变更。主线程掌握设计、依赖、审核和集成；分级 Luna worker 只实现已设计好的窄任务。`luna_worker` 是 Medium（Level 1）默认入口，另有 `luna_high_worker`（High，Level 2）和受限的 `luna_max_worker`（Max，Level 3）。简单单文件修改不必强行拆 Stack，但仍须遵守仓库检查、最小修改和验证要求。
 
 PR Stack 是一组按依赖关系排列、可独立审核和回滚的本地分支/commit。创建、push 或合并远端 PR 必须另获用户明确授权。
 
@@ -37,7 +37,8 @@ Stack: S<n> - <名称>
 测试命令: <可直接运行的命令>
 回滚方式: <通常为 revert 当前 Stack commit>
 允许并行: <是/否及依据>
-子代理: <luna_worker | deepseek_worker | 主线程>
+子代理: <luna_worker | luna_high_worker | luna_max_worker | deepseek_worker | 主线程>
+Max 选择理由: <仅使用 luna_max_worker 时必填；其他情况填“不适用”>
 ```
 
 主线程绘制依赖顺序：无依赖且所有权不重叠的 Stack 可从共同基础并行；有依赖的 Stack 从直接前置 Stack 的已审核 commit 创建。相同文件、共享生成文件、数据库迁移、锁文件、公共接口先后变更或同一可变测试环境均视为冲突，必须串行。
@@ -59,9 +60,15 @@ Windows PowerShell 中必须把 `<worktree-path>` 替换为已核验的绝对路
 
 ## 阶段四：派发 Luna
 
-每个写 Stack 使用独立代理线程，并向 `luna_worker` 发送完整契约：
+### Luna 分级派发
 
-当主线程环境只有 DeepSeek v4 可用（OpenAI 额度用完或 `gpt-5.6-luna` 不可用）时，改派 `deepseek_worker`（DeepSeek V4 Flash）。契约字段、派发纪律与审核门禁完全相同，仅代理角色和模型不同。
+agent TOML 是固定入口，不提供单个 worker 内自动动态升级；主代理必须显式选择 `luna_worker`、`luna_high_worker` 或 `luna_max_worker`。默认使用 Medium；任务复杂度超出 Medium 且仍可独立审核时使用 High。Max 仅用于跨模块高复杂度、疑难 Bug、大范围重构、高风险核心逻辑、大量上下文联合推理，或 High 因推理复杂度失败后的重派，“任务重要”不能单独作为理由。若选择 Max，派发契约必须填写明确复杂度理由。Medium/High 因环境、测试、依赖、权限、输入不足或需求不清失败时，不升级 reasoning，而应修复阻塞、补充输入或重新规划。
+
+优先并行拆成多个独立、可验证、可回滚的 Medium/High Stack，不把可拆任务合成一个 Max。每个 Stack 仍必须有独立线程、分支、worktree、基础分支、文件所有权、实现边界、验收标准、测试命令、报告和主线程真实 diff 审核。若当前运行时仍只展示旧 `luna_worker`，需重新加载或重启配置后才会看到新增入口，具体操作以实际运行时为准。
+
+每个写 Stack 使用独立代理线程，并向所选 Luna worker 发送完整契约：
+
+当主线程环境只有 DeepSeek v4 可用（OpenAI 额度用完或 `gpt-5.6-luna` 不可用）时，改派 `deepseek_worker`（DeepSeek V4 Flash）。契约字段、派发纪律与审核门禁完全相同，仅代理角色和模型不同；现有备用 agent 的 model/effort 是固定配置，不宣称与三个 Luna 等级自动一一映射。
 
 ```text
 执行 Stack: S<n> - <名称>
@@ -75,14 +82,14 @@ worktree: <绝对路径>
 验收标准: <列表>
 测试命令: <列表>
 提交要求: 允许创建一个或多个仅包含本 Stack 的本地 commit
-完成报告: worktree、分支、commit SHA、修改文件、已执行测试、未执行测试及原因、残余风险
+完成报告: model、reasoning level、worktree、分支、commit SHA、修改文件、已执行测试、未执行测试及原因、未解决问题、残余风险
 ```
 
-主线程不得用模糊任务替代上述字段。代理报告边界不清、冲突或架构问题后，主线程先修订计划和契约再继续。
+主线程不得用模糊任务替代上述字段。代理收到完整任务、文件范围、方案和验收标准后，应只读取相关代码及直接依赖，避免全仓扫描、重做架构设计和长篇计划，尽快完成“读取相关代码 -> 实现 -> 最小相关测试 -> 报告”。代理报告边界不清、冲突或架构问题后，主线程先修订计划和契约再继续。
 
 ## 阶段五：主线程实证审核
 
-Luna 返回后，主线程进入该 worktree，实际执行：
+分级 worker 返回后，主线程进入该 worktree，实际执行：
 
 ```bash
 git worktree list
@@ -126,7 +133,8 @@ git diff <基础分支>...HEAD
 
 ## 能力边界
 
-- 项目配置可以启用多代理、限制并发，并定义 `luna_worker` 的模型、推理等级、沙箱和持久指令，以及仅有 DeepSeek v4 可用时的备用代理 `deepseek_worker`（DeepSeek V4 Flash）。
+- 项目配置可以启用多代理、限制并发，并定义三个固定 Luna 入口的模型、推理等级、沙箱和持久指令，以及仅有 DeepSeek v4 可用时的备用代理 `deepseek_worker`（DeepSeek V4 Flash）。
+- 三个 Luna 入口均使用 `gpt-5.6-luna`，推理等级分别为 Medium、High、Max；Max 不是默认实现入口，也不会由 worker 自动升级。
 - 模型可用性回退由主线程依据 `AGENTS.md` 判断并选择 `deepseek_worker`，Codex 不会自动探测 `gpt-5.6-luna` 是否可用。
 - Codex 桌面端和 Git 均支持 worktree；主线程也可以显式运行 `git worktree add`。
 - agent 配置不能声明文件级写权限、自动分支、自动 worktree、PR Stack 依赖图或禁止 push 的机械策略；这些由本文件、`AGENTS.md`、派发契约和主线程实证审核执行。
