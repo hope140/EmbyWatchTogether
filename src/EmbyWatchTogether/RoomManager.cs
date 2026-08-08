@@ -17,9 +17,25 @@ namespace Emby.Plugins.WatchTogether
         public string Error { get; set; }
     }
 
+    public sealed class ParticipantStateChangeResult
+    {
+        public string RoomId { get; set; }
+
+        public string UserId { get; set; }
+
+        public bool Joined { get; set; }
+
+        public bool Changed { get; set; }
+
+        public RoomState PreviousState { get; set; }
+
+        public string ServerId { get; set; }
+    }
+
     /// <summary>
-    /// In-memory room registry and lifecycle. Persistence is added by the S5
-    /// stack; runtime state is intentionally not persisted.
+    /// In-memory room registry and lifecycle. Runtime state is intentionally not
+    /// persisted; metadata changes are committed to the store before the
+    /// corresponding in-memory transition.
     /// </summary>
     public sealed class RoomManager
     {
@@ -87,7 +103,7 @@ namespace Emby.Plugins.WatchTogether
                     }
                 }
 
-                    var room = new Room(
+                var room = new Room(
                     id: Guid.NewGuid().ToString("N"),
                     serverId: serverId,
                     serverUrl: serverUrl ?? string.Empty,
@@ -98,9 +114,9 @@ namespace Emby.Plugins.WatchTogether
                     joinedParticipantUserIds: members,
                     createdAtUtc: now ?? DateTimeOffset.UtcNow);
 
+                _store?.Create(room);
                 _rooms[room.Id] = room;
                 _runtimes[room.Id] = new RoomRuntime();
-                _store?.Create(room);
                 return room;
             }
         }
@@ -114,14 +130,19 @@ namespace Emby.Plugins.WatchTogether
 
             lock (_lock)
             {
-                bool removed = _rooms.Remove(roomId);
-                _runtimes.Remove(roomId);
-                if (removed)
+                if (!_rooms.ContainsKey(roomId))
                 {
-                    _store?.Delete(roomId);
+                    return false;
                 }
 
-                return removed;
+                if (_store != null && !_store.Delete(roomId))
+                {
+                    return false;
+                }
+
+                _rooms.Remove(roomId);
+                _runtimes.Remove(roomId);
+                return true;
             }
         }
 
@@ -149,19 +170,39 @@ namespace Emby.Plugins.WatchTogether
 
         public RoomRuntime GetRuntime(string roomId)
         {
+            if (string.IsNullOrEmpty(roomId))
+            {
+                return null;
+            }
+
             lock (_lock)
             {
-                if (!_runtimes.TryGetValue(roomId, out var runtime))
+                if (!_rooms.ContainsKey(roomId))
                 {
-                    runtime = new RoomRuntime();
-                    _runtimes[roomId] = runtime;
+                    return null;
                 }
 
+                _runtimes.TryGetValue(roomId, out var runtime);
                 return runtime;
             }
         }
 
         public bool SetParticipantJoined(string roomId, string userId, bool joined)
+        {
+            return SetParticipantJoinedResult(roomId, userId, joined).Changed;
+        }
+
+        public bool LeaveParticipant(string roomId, string userId)
+        {
+            return LeaveParticipantResult(roomId, userId).Changed;
+        }
+
+        public ParticipantStateChangeResult LeaveParticipantResult(string roomId, string userId)
+        {
+            return SetParticipantJoinedResult(roomId, userId, joined: false);
+        }
+
+        public ParticipantStateChangeResult SetParticipantJoinedResult(string roomId, string userId, bool joined)
         {
             lock (_lock)
             {
@@ -170,10 +211,58 @@ namespace Emby.Plugins.WatchTogether
                     throw new KeyNotFoundException("room participant not found");
                 }
 
-                if (!room.SetJoined(userId, joined)) return false;
-                GetRuntime(roomId).ResetToWaiting();
-                _store?.Update(room);
-                return true;
+                if (!_runtimes.TryGetValue(room.Id, out var runtime))
+                {
+                    throw new KeyNotFoundException("room runtime not found");
+                }
+
+                var result = new ParticipantStateChangeResult
+                {
+                    RoomId = room.Id,
+                    UserId = userId,
+                    Joined = joined,
+                    Changed = room.IsJoined(userId) != joined,
+                    PreviousState = runtime.State,
+                    ServerId = room.ServerId,
+                };
+
+                if (!result.Changed)
+                {
+                    return result;
+                }
+
+                if (_store != null)
+                {
+                    var joinedUsers = room.JoinedParticipantUserIds.ToList();
+                    if (joined)
+                    {
+                        joinedUsers.Add(userId);
+                    }
+                    else
+                    {
+                        joinedUsers.RemoveAll(u => string.Equals(u, userId, StringComparison.OrdinalIgnoreCase));
+                    }
+
+                    var candidate = new Room(
+                        room.Id,
+                        room.ServerId,
+                        room.ServerUrl,
+                        room.Name,
+                        room.AdminUserId,
+                        room.PrimaryUserId,
+                        room.ParticipantUserIds,
+                        joinedUsers,
+                        room.CreatedAtUtc);
+                    _store.Update(candidate);
+                }
+
+                if (!room.SetJoined(userId, joined))
+                {
+                    throw new InvalidOperationException("room participant state changed unexpectedly");
+                }
+
+                runtime.ResetToWaiting();
+                return result;
             }
         }
 
@@ -202,6 +291,11 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var runtime = GetRuntime(roomId);
+            if (runtime == null)
+            {
+                throw new KeyNotFoundException("room not found");
+            }
+
             lock (_lock)
             {
                 if (action == "resync")
