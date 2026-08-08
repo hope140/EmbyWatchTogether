@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Emby.Plugins.WatchTogether;
 using Xunit;
@@ -11,8 +12,10 @@ namespace Emby.Plugins.WatchTogether.Tests
         public void PublicKeys_StartEmptyAndAreReadOnly()
         {
             Assert.Empty(ReleaseTrustStore.PublicKeys);
-            Assert.IsAssignableFrom<System.Collections.Generic.IReadOnlyDictionary<string, string>>(
+            var dictionary = Assert.IsAssignableFrom<IDictionary<string, string>>(
                 ReleaseTrustStore.PublicKeys);
+            Assert.Throws<NotSupportedException>(() => dictionary.Add("test-key", "test-key"));
+            Assert.Empty(ReleaseTrustStore.PublicKeys);
         }
 
         [Fact]
