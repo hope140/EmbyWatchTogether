@@ -173,10 +173,29 @@ Assert-Matches -Text $workflowText -Pattern '(?m)^\s{4}runs-on:\s*windows-latest
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{6}RELEASE_TAG:\s*\$\{\{\s*inputs\.tag\s*\}\}\s*$' -Message 'The tag input must be passed to PowerShell through an environment variable.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{6}RELEASE_KEY_ID:\s*\$\{\{\s*inputs\.key_id\s*\}\}\s*$' -Message 'The key_id input must be passed to PowerShell through an environment variable.'
 
-Assert-Matches -Text $workflowText -Pattern 'actions/checkout@v4' -Message 'The workflow checkout action is missing.'
+$checkoutActionSha = '11d5960a326750d5838078e36cf38b85af677262'
+$setupDotnetActionSha = '67a3573c9a986a3f9c594539f4ab511d57bb3ce9'
+$actionReferenceMatches = @([System.Text.RegularExpressions.Regex]::Matches(
+        $workflowText,
+        '(?m)^[ \t]*uses:[ \t]*actions/(?<action>checkout|setup-dotnet)@(?<reference>[^\s#]+)'))
+Assert-Equal -Expected 2 -Actual $actionReferenceMatches.Count -Message 'The workflow must contain exactly one checkout and one setup-dotnet action reference.'
+foreach ($actionReferenceMatch in $actionReferenceMatches) {
+    $actionName = $actionReferenceMatch.Groups['action'].Value
+    $actionReference = $actionReferenceMatch.Groups['reference'].Value
+    Assert-Matches -Text $actionReference -Pattern '\A[0-9a-fA-F]{40}\z' `
+        -Message ('The {0} action must use a complete 40-character SHA reference.' -f $actionName)
+}
+Assert-NotMatches -Text $workflowText `
+    -Pattern '(?m)^[ \t]*uses:[ \t]*actions/(?:checkout|setup-dotnet)@v4(?:[ \t]+#.*)?[ \t]*$' `
+    -Message 'The release workflow must not use the movable v4 action tag.'
+Assert-Matches -Text $workflowText `
+    -Pattern ('(?m)^[ \t]*uses:[ \t]*actions/checkout@{0}[ \t]+#[ \t]*v4[ \t]*$' -f [System.Text.RegularExpressions.Regex]::Escape($checkoutActionSha)) `
+    -Message 'The workflow checkout action is not pinned to the approved v4 SHA.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{10}ref:\s*\$\{\{\s*inputs\.tag\s*\}\}\s*$' -Message 'Checkout must use the requested tag as ref.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{10}fetch-depth:\s*0\s*$' -Message 'Checkout must use fetch-depth 0.'
-Assert-Matches -Text $workflowText -Pattern 'actions/setup-dotnet@v4' -Message 'The .NET setup action is missing.'
+Assert-Matches -Text $workflowText `
+    -Pattern ('(?m)^[ \t]*uses:[ \t]*actions/setup-dotnet@{0}[ \t]+#[ \t]*v4[ \t]*$' -f [System.Text.RegularExpressions.Regex]::Escape($setupDotnetActionSha)) `
+    -Message 'The .NET setup action is not pinned to the approved v4 SHA.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{10}dotnet-version:\s*[\x27\"]?10\.0\.x[\x27\"]?\s*$' -Message 'The workflow must use the .NET 10 SDK.'
 
 $runBlocks = @(Get-RunBlocks -Text $workflowText)
