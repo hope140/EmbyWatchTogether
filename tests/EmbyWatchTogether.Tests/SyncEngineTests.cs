@@ -57,6 +57,110 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void UpdateOptions_WakesLoopImmediately_WithNormalizedInterval()
+        {
+            var rooms = new RoomManager();
+            rooms.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { "u1", "u2" }, "u1");
+            var provider = new CountingSnapshotProvider();
+            var engine = new SyncEngine(
+                rooms,
+                provider,
+                new RecordingIssuer(),
+                () => "server-1",
+                pollIntervalSeconds: 60.0);
+
+            try
+            {
+                engine.Start();
+                Assert.True(provider.WaitForCount(1, TimeSpan.FromSeconds(2)));
+                var countBeforeUpdate = provider.Count;
+
+                engine.UpdateOptions(new SyncEngineOptions(0.01, true, true));
+
+                Assert.True(provider.WaitForCount(
+                    countBeforeUpdate + 1,
+                    TimeSpan.FromSeconds(2)));
+            }
+            finally
+            {
+                engine.Dispose();
+            }
+        }
+
+        [Fact]
+        public void UpdateOptions_ChangesStopBehaviorOnTheNextPoll()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            try
+            {
+                EnterWatching(engine, room);
+                engine.UpdateOptions(new SyncEngineOptions(1.0, false, false));
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
+                    Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+
+                _clock.Advance(1);
+                var result = engine.PollOnce(_clock.Now).Single();
+
+                Assert.Equal(RoomState.Waiting, result.State);
+                Assert.Equal("播放已停止，等待双方重新打开同一视频", result.Error);
+                Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Pause);
+                Assert.Empty(_messageIssuer.Issued);
+            }
+            finally
+            {
+                engine.Dispose();
+            }
+        }
+
+        [Fact]
+        public void PollOnce_IsolatesRoomExceptionAndContinuesWithOtherRooms()
+        {
+            var rooms = new RoomManager();
+            var first = rooms.CreateRoom(
+                "server-1", "http://emby", "first", "admin-1",
+                new[] { "u1", "u2" }, "u1");
+            var second = rooms.CreateRoom(
+                "server-1", "http://emby", "second", "admin-2",
+                new[] { "u3", "u4" }, "u3");
+            var provider = new FakeSnapshotProvider
+            {
+                Snapshots = new List<SessionSnapshot>
+                {
+                    Snapshot("s1", "u1", paused: false, position: 0),
+                    Snapshot("s2", "u2", paused: false, position: 0),
+                    Snapshot("s3", "u3", paused: false, position: 0),
+                    Snapshot("s4", "u4", paused: false, position: 0),
+                },
+            };
+            var issuer = new ThrowOnceIssuer();
+            var engine = new SyncEngine(
+                rooms,
+                provider,
+                issuer,
+                () => "server-1",
+                () => _clock.Now);
+
+            try
+            {
+                var results = engine.PollOnce(_clock.Now);
+
+                Assert.NotNull(issuer.FailedRoomId);
+                Assert.Contains(results, result =>
+                    result.RoomId != issuer.FailedRoomId &&
+                    (result.RoomId == first.Id || result.RoomId == second.Id));
+                Assert.Contains(issuer.Issued, issue => issue.roomId != issuer.FailedRoomId);
+            }
+            finally
+            {
+                engine.Dispose();
+            }
+        }
+
+        [Fact]
         public void PollOnce_NoRooms_ReturnsEmpty()
         {
             var engine = CreateEngine();
@@ -1526,6 +1630,35 @@ namespace Emby.Plugins.WatchTogether.Tests
                     FailuresRemaining--;
                     error = "command delivery failed";
                     return false;
+                }
+
+                error = null;
+                return true;
+            }
+        }
+
+        private sealed class ThrowOnceIssuer : ICommandIssuer
+        {
+            public List<(string roomId, string userId, string command)> Issued { get; } =
+                new List<(string, string, string)>();
+
+            public string FailedRoomId { get; private set; }
+
+            public bool TryIssue(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string command,
+                long? positionTicks,
+                DateTimeOffset now,
+                out string error)
+            {
+                Issued.Add((roomId, userId, command));
+                if (FailedRoomId == null)
+                {
+                    FailedRoomId = roomId;
+                    throw new InvalidOperationException("room command failed");
                 }
 
                 error = null;
