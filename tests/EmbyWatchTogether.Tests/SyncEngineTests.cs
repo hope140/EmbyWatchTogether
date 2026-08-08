@@ -681,6 +681,38 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void OldStoppedCandidate_IsIgnoredWhenCurrentCommonItemIsSelected()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var baseActivity = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+            // The old stopped session is newer than u1's current snapshot, but
+            // it belongs to another item. SessionSelector must retain the
+            // current common item i1 for both participants.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
+                    itemId: "i1", lastActivityDateUtc: baseActivity),
+                Snapshot("old-s1", "u1", paused: false, position: 0,
+                    itemId: "i2", stopped: true, lastActivityDateUtc: baseActivity.AddSeconds(10)),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
+                    itemId: "i1", lastActivityDateUtc: baseActivity));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Empty(_issuer.Issued);
+            Assert.Empty(_messageIssuer.Issued);
+
+            _clock.Advance(3);
+            result = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Empty(_issuer.Issued);
+            Assert.Empty(_messageIssuer.Issued);
+        }
+
+        [Fact]
         public void TransientMissingParticipant_RecoversBeforeDebounceWithoutBarrier()
         {
             var room = CreateRoom();
@@ -1540,14 +1572,15 @@ namespace Emby.Plugins.WatchTogether.Tests
             long position,
             string itemId = "i1",
             bool stopped = false,
-            double playbackRate = 1.0)
+            double playbackRate = 1.0,
+            DateTimeOffset? lastActivityDateUtc = null)
         {
             return new SessionSnapshot(
                 sessionId, userId, itemId, "m1",
                 position, 100 * SessionSnapshot.TicksPerSecond, paused, playbackRate,
                 stopped: stopped, supportsRemoteControl: true,
                 new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek" }),
-                new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+                lastActivityDateUtc ?? new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         }
 
         private sealed class TestClock
