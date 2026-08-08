@@ -45,6 +45,8 @@ namespace Emby.Plugins.WatchTogether
 
         public DateTimeOffset? PreviousAtUtc { get; set; }
 
+        public DateTimeOffset? MissingSessionSinceUtc { get; set; }
+
         public int DriftRounds { get; set; }
 
         public string SyncItemId { get; set; }

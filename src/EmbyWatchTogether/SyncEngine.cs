@@ -31,6 +31,7 @@ namespace Emby.Plugins.WatchTogether
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
         private const int NotificationTimeoutMs = 3000;
         private const double AckLatencyEmaAlpha = 0.3;
+        private const double MissingSessionDebounceSeconds = 2;
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -204,6 +205,14 @@ namespace Emby.Plugins.WatchTogether
                 return results;
             }
 
+            var explicitStopped = candidates
+                .Where(s => s != null && s.Stopped)
+                .GroupBy(s => s.UserId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(s => s.LastActivityDateUtc).First(),
+                    StringComparer.OrdinalIgnoreCase);
+
             foreach (var roomId in validRoomIds)
             {
                 using (var access = _roomManager.TryEnterRoom(roomId))
@@ -231,7 +240,7 @@ namespace Emby.Plugins.WatchTogether
                     // ItemId after a player is closed while reporting
                     // PositionTicks = 0. Treat that transition as a stop, not as
                     // a user-issued seek, before observing pending commands.
-                    if (TryGetStoppedUsers(runtime, room, snapshots, out var stoppedUsers))
+                    if (TryGetStoppedUsers(runtime, room, snapshots, explicitStopped, now, out var stoppedUsers))
                     {
                         // SessionSelector omits stopped/offline sessions, so the
                         // same stop condition can be observed on every poll until
@@ -471,11 +480,13 @@ namespace Emby.Plugins.WatchTogether
             RoomRuntime runtime,
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            IReadOnlyDictionary<string, SessionSnapshot> explicitStopped,
+            DateTimeOffset now,
             out HashSet<string> stoppedUsers)
         {
             stoppedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (runtime == null || room == null || snapshots == null ||
-                runtime.State != RoomState.Watching ||
+                (runtime.State != RoomState.Watching && !runtime.MissingSessionSinceUtc.HasValue) ||
                 room.JoinedParticipantUserIds.Count != 2)
             {
                 // A barrier is only the pause/seek/restore handshake. A
@@ -486,38 +497,47 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var members = room.JoinedParticipantUserIds;
+            bool missingSession = false;
+            bool explicitStop = false;
             foreach (var userId in members)
             {
-                if (!snapshots.TryGetValue(userId, out var current) || current == null ||
-                    !current.Online || current.Stopped)
+                if (explicitStopped != null && explicitStopped.ContainsKey(userId))
                 {
                     stoppedUsers.Add(userId);
-                }
-            }
-
-            if (stoppedUsers.Count > 0)
-            {
-                return true;
-            }
-
-            foreach (var userId in members)
-            {
-                if (!snapshots.TryGetValue(userId, out var current) || current == null ||
-                    !runtime.Previous.TryGetValue(userId, out var previous) || previous == null ||
-                    !string.Equals(previous.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(previous.SessionId, current.SessionId, StringComparison.OrdinalIgnoreCase))
-                {
+                    explicitStop = true;
                     continue;
                 }
 
-                if (IsPositionReset(previous.PositionTicks, current.PositionTicks))
+                if (!snapshots.TryGetValue(userId, out var current) || current == null || !current.Online)
                 {
                     stoppedUsers.Add(userId);
-                    return true;
+                    missingSession = true;
+                }
+                else if (current.Stopped)
+                {
+                    stoppedUsers.Add(userId);
                 }
             }
 
-            return false;
+            if (explicitStop)
+            {
+                runtime.MissingSessionSinceUtc = null;
+                return true;
+            }
+
+            if (!missingSession)
+            {
+                runtime.MissingSessionSinceUtc = null;
+                return stoppedUsers.Count > 0;
+            }
+
+            if (!runtime.MissingSessionSinceUtc.HasValue)
+            {
+                runtime.MissingSessionSinceUtc = now;
+                return false;
+            }
+
+            return (now - runtime.MissingSessionSinceUtc.Value).TotalSeconds >= MissingSessionDebounceSeconds;
         }
 
         private void PauseOtherAfterPlaybackStopped(
@@ -693,13 +713,6 @@ namespace Emby.Plugins.WatchTogether
 
             double difference = Math.Abs(current.PositionTicks - expectedPosition);
             return difference >= seekDetectionThresholdTicks;
-        }
-
-        private static bool IsPositionReset(long previousPositionTicks, long currentPositionTicks)
-        {
-            return previousPositionTicks > 2 * SyncConstants.TicksPerSecond &&
-                currentPositionTicks <= SyncConstants.TicksPerSecond &&
-                previousPositionTicks - currentPositionTicks >= SyncConstants.DriftThresholdTicks;
         }
 
         private static bool HasLargePositionGap(IReadOnlyDictionary<string, SessionSnapshot> snapshots)
