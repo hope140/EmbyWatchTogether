@@ -8,8 +8,13 @@ namespace Emby.Plugins.WatchTogether
     /// snapshot's capability report so unsupported clients are never targeted
     /// (same gate as the Python reference session selection).
     /// </summary>
-    public sealed class SessionBridgeCommandIssuer : ICommandIssuer, IMessageIssuer
+    public sealed class SessionBridgeCommandIssuer :
+        ICommandIssuer,
+        IMessageIssuer,
+        ICancellableCommandIssuer,
+        ICancellableMessageIssuer
     {
+        private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
         private readonly SessionBridge _bridge;
 
         public SessionBridgeCommandIssuer(SessionBridge bridge)
@@ -25,6 +30,55 @@ namespace Emby.Plugins.WatchTogether
             string command,
             long? positionTicks,
             DateTimeOffset now,
+            out string error)
+        {
+            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            {
+                return TryIssueWithCancellation(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    command,
+                    positionTicks,
+                    now,
+                    timeout.Token,
+                    out error);
+            }
+        }
+
+        bool ICancellableCommandIssuer.TryIssue(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string command,
+            long? positionTicks,
+            DateTimeOffset now,
+            CancellationToken cancellationToken,
+            out string error)
+        {
+            return TryIssueWithCancellation(
+                roomId,
+                controllingUserId,
+                userId,
+                snapshot,
+                command,
+                positionTicks,
+                now,
+                cancellationToken,
+                out error);
+        }
+
+        private bool TryIssueWithCancellation(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string command,
+            long? positionTicks,
+            DateTimeOffset now,
+            CancellationToken cancellationToken,
             out string error)
         {
             if (snapshot == null || !snapshot.Online)
@@ -44,15 +98,15 @@ namespace Emby.Plugins.WatchTogether
                 switch (command)
                 {
                     case RemoteCommands.Pause:
-                        _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, CancellationToken.None)
+                        _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, cancellationToken)
                             .GetAwaiter().GetResult();
                         break;
                     case RemoteCommands.Unpause:
-                        _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, CancellationToken.None)
+                        _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, cancellationToken)
                             .GetAwaiter().GetResult();
                         break;
                     case RemoteCommands.Seek:
-                        _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, CancellationToken.None)
+                        _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, cancellationToken)
                             .GetAwaiter().GetResult();
                         break;
                     default:
@@ -81,6 +135,59 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now,
             out string error)
         {
+            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            {
+                return TryIssueMessageWithCancellation(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    header,
+                    text,
+                    timeoutMs,
+                    now,
+                    timeout.Token,
+                    out error);
+            }
+        }
+
+        bool ICancellableMessageIssuer.TryIssueMessage(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string header,
+            string text,
+            int? timeoutMs,
+            DateTimeOffset now,
+            CancellationToken cancellationToken,
+            out string error)
+        {
+            return TryIssueMessageWithCancellation(
+                roomId,
+                controllingUserId,
+                userId,
+                snapshot,
+                header,
+                text,
+                timeoutMs,
+                now,
+                cancellationToken,
+                out error);
+        }
+
+        private bool TryIssueMessageWithCancellation(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string header,
+            string text,
+            int? timeoutMs,
+            DateTimeOffset now,
+            CancellationToken cancellationToken,
+            out string error)
+        {
             if (snapshot == null || !snapshot.Online)
             {
                 error = "session is not online";
@@ -101,7 +208,7 @@ namespace Emby.Plugins.WatchTogether
                     header,
                     text,
                     timeoutMs,
-                    CancellationToken.None)
+                    cancellationToken)
                     .GetAwaiter().GetResult();
                 error = null;
                 return true;

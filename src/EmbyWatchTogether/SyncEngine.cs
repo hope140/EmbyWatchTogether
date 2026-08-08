@@ -31,6 +31,9 @@ namespace Emby.Plugins.WatchTogether
         private const string AutomaticResyncMessageHeader = "一起观看";
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
         private const int NotificationTimeoutMs = 3000;
+        private const double RoomPollErrorLogIntervalSeconds = 30.0;
+        private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
         private const double AckLatencyEmaAlpha = 0.3;
         private const double MissingSessionDebounceSeconds = 2;
 
@@ -41,16 +44,21 @@ namespace Emby.Plugins.WatchTogether
         private readonly ILogger _logger;
         private readonly Func<string> _serverIdProvider;
         private readonly Func<DateTimeOffset> _clock;
-        private readonly double _pollIntervalSeconds;
-        private readonly bool _pauseOtherOnPlaybackStop;
-        private readonly bool _notifyOtherOnPlaybackStop;
+        private double _pollIntervalSeconds;
+        private bool _pauseOtherOnPlaybackStop;
+        private bool _notifyOtherOnPlaybackStop;
         private readonly object _lock = new object();
+        private readonly object _roomPollLogLock = new object();
+        private readonly Dictionary<string, DateTimeOffset> _lastRoomPollErrorAtUtc =
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentQueue<PlaybackStoppedSignal> _playbackStoppedSignals =
             new ConcurrentQueue<PlaybackStoppedSignal>();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
         private Thread _thread;
         private bool _disposed;
+        private bool _resourcesDisposed;
+        private bool _threadExited;
 
         public SyncEngine(
             RoomManager roomManager,
@@ -79,9 +87,13 @@ namespace Emby.Plugins.WatchTogether
 
             _serverIdProvider = serverIdProvider ?? (() => string.Empty);
             _clock = clock ?? (() => DateTimeOffset.UtcNow);
-            _pollIntervalSeconds = Math.Max(0.05, pollIntervalSeconds);
-            _pauseOtherOnPlaybackStop = pauseOtherOnPlaybackStop;
-            _notifyOtherOnPlaybackStop = notifyOtherOnPlaybackStop;
+            var options = new SyncEngineOptions(
+                pollIntervalSeconds,
+                pauseOtherOnPlaybackStop,
+                notifyOtherOnPlaybackStop);
+            _pollIntervalSeconds = options.PollIntervalSeconds;
+            _pauseOtherOnPlaybackStop = options.PauseOtherOnPlaybackStop;
+            _notifyOtherOnPlaybackStop = options.NotifyOtherOnPlaybackStop;
         }
 
         public void Start()
@@ -106,6 +118,32 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        /// <summary>
+        /// Applies the live synchronization settings and wakes a sleeping loop
+        /// so the next poll observes them without waiting for the old interval.
+        /// </summary>
+        public void UpdateOptions(SyncEngineOptions options)
+        {
+            if (options == null)
+            {
+                throw new ArgumentNullException(nameof(options));
+            }
+
+            lock (_lock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _pollIntervalSeconds = SyncEngineOptions.NormalizePollIntervalSeconds(
+                    options.PollIntervalSeconds);
+                _pauseOtherOnPlaybackStop = options.PauseOtherOnPlaybackStop;
+                _notifyOtherOnPlaybackStop = options.NotifyOtherOnPlaybackStop;
+                SignalWakeLocked();
+            }
+        }
+
         public void Stop()
         {
             Thread thread;
@@ -116,12 +154,14 @@ namespace Emby.Plugins.WatchTogether
                     return;
                 }
 
-                _cts.Cancel();
-                _wakeEvent.Set();
+                CancelLocked();
                 thread = _thread;
             }
 
-            JoinThread(thread);
+            if (!JoinThread(thread))
+            {
+                _logger?.Warn("WatchTogether sync engine stop timed out after 10s");
+            }
         }
 
         /// <summary>
@@ -137,15 +177,7 @@ namespace Emby.Plugins.WatchTogether
                     return;
                 }
 
-                try
-                {
-                    _wakeEvent.Set();
-                }
-                catch (ObjectDisposedException)
-                {
-                    // A concurrent disposal has already completed the wake-up
-                    // path; callers must not observe a disposal race.
-                }
+                SignalWakeLocked();
             }
         }
 
@@ -169,20 +201,13 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 _playbackStoppedSignals.Enqueue(signal);
-                try
-                {
-                    _wakeEvent.Set();
-                }
-                catch (ObjectDisposedException)
-                {
-                    // A concurrent disposal has already completed the wake-up
-                    // path; the signal must not escape into caller code.
-                }
+                SignalWakeLocked();
             }
         }
 
         public IReadOnlyList<RoomPollResult> PollOnce(DateTimeOffset now)
         {
+            var options = GetOptionsSnapshot();
             var results = new List<RoomPollResult>();
             var rooms = _roomManager.ListRooms();
             if (rooms.Count == 0)
@@ -194,34 +219,41 @@ namespace Emby.Plugins.WatchTogether
             var validRoomIds = new List<string>();
             foreach (var listedRoom in rooms)
             {
-                using (var access = _roomManager.TryEnterRoom(listedRoom.Id))
+                try
                 {
-                    if (access == null)
+                    using (var access = _roomManager.TryEnterRoom(listedRoom.Id))
                     {
-                        continue;
-                    }
-
-                    var room = access.Room;
-                    var runtime = access.Runtime;
-                    if (!string.Equals(room.ServerId, currentServerId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        runtime.State = RoomState.Unavailable;
-                        runtime.Error = "room server is unavailable";
-                        runtime.Barrier = null;
-                        runtime.Pending.Clear();
-                        _logger?.Info($"Room {room.Id}: marked unavailable (server mismatch)");
-                        results.Add(new RoomPollResult
+                        if (access == null)
                         {
-                            RoomId = room.Id,
-                            State = RoomState.Unavailable,
-                            Eligible = false,
-                            Error = runtime.Error,
-                        });
+                            continue;
+                        }
+
+                        var room = access.Room;
+                        var runtime = access.Runtime;
+                        if (!string.Equals(room.ServerId, currentServerId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            runtime.State = RoomState.Unavailable;
+                            runtime.Error = "room server is unavailable";
+                            runtime.Barrier = null;
+                            runtime.Pending.Clear();
+                            _logger?.Info($"Room {room.Id}: marked unavailable (server mismatch)");
+                            results.Add(new RoomPollResult
+                            {
+                                RoomId = room.Id,
+                                State = RoomState.Unavailable,
+                                Eligible = false,
+                                Error = runtime.Error,
+                            });
+                        }
+                        else
+                        {
+                            validRoomIds.Add(room.Id);
+                        }
                     }
-                    else
-                    {
-                        validRoomIds.Add(room.Id);
-                    }
+                }
+                catch (Exception ex)
+                {
+                    LogRoomPollException(listedRoom?.Id, now, ex);
                 }
             }
 
@@ -253,12 +285,14 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var roomId in validRoomIds)
             {
-                using (var access = _roomManager.TryEnterRoom(roomId))
+                try
                 {
-                    if (access == null)
+                    using (var access = _roomManager.TryEnterRoom(roomId))
                     {
-                        continue;
-                    }
+                        if (access == null)
+                        {
+                            continue;
+                        }
 
                     var room = access.Room;
                     var runtime = access.Runtime;
@@ -283,6 +317,7 @@ namespace Emby.Plugins.WatchTogether
                         room,
                         snapshots,
                         playbackStoppedSignals,
+                        options,
                         now))
                     {
                         results.Add(Result(room, runtime, eligible));
@@ -301,19 +336,19 @@ namespace Emby.Plugins.WatchTogether
                             StringComparison.Ordinal);
                         if (!stopAlreadyHandled)
                         {
-                            if (_pauseOtherOnPlaybackStop)
+                            if (options.PauseOtherOnPlaybackStop)
                             {
                                 PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
                             }
 
-                            if (_notifyOtherOnPlaybackStop)
+                            if (options.NotifyOtherOnPlaybackStop)
                             {
                                 NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
                             }
 
                             _logger?.Info(
                                 $"Room {room.Id}: playback stopped by {string.Join(",", stoppedUsers)}; " +
-                                $"pausedOther={_pauseOtherOnPlaybackStop}, notifiedOther={_notifyOtherOnPlaybackStop}");
+                                $"pausedOther={options.PauseOtherOnPlaybackStop}, notifiedOther={options.NotifyOtherOnPlaybackStop}");
                         }
 
                         runtime.ResetToWaiting();
@@ -444,7 +479,16 @@ namespace Emby.Plugins.WatchTogether
                         runtime.Previous.Clear();
                     }
 
-                    results.Add(Result(room, runtime, eligible));
+                        results.Add(Result(room, runtime, eligible));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // A broken room must not prevent the remaining rooms from
+                    // being polled in this cycle. The per-room logger is
+                    // rate-limited so a persistent client failure is visible
+                    // without flooding the server log.
+                    LogRoomPollException(roomId, now, ex);
                 }
             }
 
@@ -456,53 +500,83 @@ namespace Emby.Plugins.WatchTogether
             Thread thread;
             lock (_lock)
             {
-                if (_disposed)
+                if (_resourcesDisposed)
                 {
                     return;
                 }
 
                 _disposed = true;
-                _cts.Cancel();
-                _wakeEvent.Set();
+                CancelLocked();
                 thread = _thread;
             }
 
-            JoinThread(thread);
-            _wakeEvent.Dispose();
-            _cts.Dispose();
+            if (!JoinThread(thread))
+            {
+                _logger?.Warn("WatchTogether sync engine dispose timed out after 10s");
+                return;
+            }
+
+            DisposeResources();
         }
 
         private void Loop()
         {
             var token = _cts.Token;
             var waitHandles = new WaitHandle[] { token.WaitHandle, _wakeEvent };
-            var timeoutMilliseconds = GetPollTimeoutMilliseconds();
-
-            while (!token.IsCancellationRequested)
+            try
             {
-                try
+                while (!token.IsCancellationRequested)
                 {
-                    PollOnce(_clock());
+                    try
+                    {
+                        PollOnce(_clock());
+                    }
+                    catch
+                    {
+                        // Polling must never kill the background thread. Room
+                        // failures are isolated and logged by PollOnce; this
+                        // guard remains for failures outside a room context.
+                    }
+
+                    try
+                    {
+                        WaitHandle.WaitAny(waitHandles, GetPollTimeoutMilliseconds());
+                    }
+                    catch
+                    {
+                        return;
+                    }
                 }
-                catch
+            }
+            finally
+            {
+                bool disposeResources;
+                lock (_lock)
                 {
-                    // Polling must never kill the background thread.
+                    _threadExited = true;
+                    disposeResources = _disposed && !_resourcesDisposed;
+                    if (disposeResources)
+                    {
+                        _resourcesDisposed = true;
+                    }
                 }
 
-                try
+                if (disposeResources)
                 {
-                    WaitHandle.WaitAny(waitHandles, timeoutMilliseconds);
-                }
-                catch
-                {
-                    return;
+                    DisposeWaitHandles();
                 }
             }
         }
 
         private int GetPollTimeoutMilliseconds()
         {
-            var milliseconds = _pollIntervalSeconds * 1000.0;
+            double pollIntervalSeconds;
+            lock (_lock)
+            {
+                pollIntervalSeconds = _pollIntervalSeconds;
+            }
+
+            var milliseconds = pollIntervalSeconds * 1000.0;
             if (milliseconds >= int.MaxValue)
             {
                 return int.MaxValue;
@@ -511,20 +585,125 @@ namespace Emby.Plugins.WatchTogether
             return Math.Max(1, (int)Math.Ceiling(milliseconds));
         }
 
-        private static void JoinThread(Thread thread)
+        private bool JoinThread(Thread thread)
         {
-            if (thread == null || thread == Thread.CurrentThread)
+            if (thread == null)
             {
-                return;
+                return true;
+            }
+
+            if (thread == Thread.CurrentThread)
+            {
+                return false;
             }
 
             try
             {
-                thread.Join();
+                return thread.Join(StopTimeout);
             }
             catch
             {
                 // A stopping/disposal path must not surface thread races.
+                return false;
+            }
+        }
+
+        private void CancelLocked()
+        {
+            try
+            {
+                _cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Disposal has already completed the cancellation path.
+            }
+
+            SignalWakeLocked();
+        }
+
+        private void SignalWakeLocked()
+        {
+            try
+            {
+                _wakeEvent.Set();
+            }
+            catch (ObjectDisposedException)
+            {
+                // A completed disposal must not escape into an event callback.
+            }
+        }
+
+        private SyncEngineOptions GetOptionsSnapshot()
+        {
+            lock (_lock)
+            {
+                return new SyncEngineOptions(
+                    _pollIntervalSeconds,
+                    _pauseOtherOnPlaybackStop,
+                    _notifyOtherOnPlaybackStop);
+            }
+        }
+
+        private void DisposeResources()
+        {
+            lock (_lock)
+            {
+                if (_resourcesDisposed || (_thread != null && !_threadExited))
+                {
+                    return;
+                }
+
+                _resourcesDisposed = true;
+            }
+
+            DisposeWaitHandles();
+        }
+
+        private void DisposeWaitHandles()
+        {
+            try
+            {
+                _wakeEvent.Dispose();
+            }
+            catch
+            {
+                // Dispose is best effort after the thread has exited.
+            }
+
+            try
+            {
+                _cts.Dispose();
+            }
+            catch
+            {
+                // Dispose is best effort after the thread has exited.
+            }
+        }
+
+        private void LogRoomPollException(string roomId, DateTimeOffset now, Exception exception)
+        {
+            string key = roomId ?? "<unknown>";
+            bool shouldLog;
+            lock (_roomPollLogLock)
+            {
+                if (!_lastRoomPollErrorAtUtc.TryGetValue(key, out var lastLoggedAt) ||
+                    (now - lastLoggedAt).TotalSeconds >= RoomPollErrorLogIntervalSeconds)
+                {
+                    _lastRoomPollErrorAtUtc[key] = now;
+                    shouldLog = true;
+                }
+                else
+                {
+                    shouldLog = false;
+                }
+            }
+
+            if (shouldLog)
+            {
+                _logger?.Warn(
+                    $"Room {key}: poll failed ({exception?.GetType().Name ?? "unknown"}): " +
+                    $"{exception?.Message ?? "unknown error"}");
             }
         }
 
@@ -547,6 +726,7 @@ namespace Emby.Plugins.WatchTogether
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             IReadOnlyList<PlaybackStoppedSignal> signals,
+            SyncEngineOptions options,
             DateTimeOffset now)
         {
             if (signals == null || signals.Count == 0)
@@ -579,19 +759,19 @@ namespace Emby.Plugins.WatchTogether
                 StringComparison.Ordinal);
             if (!stopAlreadyHandled)
             {
-                if (_pauseOtherOnPlaybackStop)
+                if (options.PauseOtherOnPlaybackStop)
                 {
                     PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
                 }
 
-                if (_notifyOtherOnPlaybackStop)
+                if (options.NotifyOtherOnPlaybackStop)
                 {
                     NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
                 }
 
                 _logger?.Info(
                     $"Room {room.Id}: playback stopped by {matchingSignal.UserId}; " +
-                    $"pausedOther={_pauseOtherOnPlaybackStop}, notifiedOther={_notifyOtherOnPlaybackStop}");
+                    $"pausedOther={options.PauseOtherOnPlaybackStop}, notifiedOther={options.NotifyOtherOnPlaybackStop}");
             }
 
             runtime.ResetToWaiting();
@@ -765,7 +945,7 @@ namespace Emby.Plugins.WatchTogether
                     // Display messages are advisory: a client that rejects the
                     // capability or fails to receive the message must not alter
                     // the stop transition or its existing pause behavior.
-                    _messageIssuer.TryIssueMessage(
+                    TryIssueMessage(
                         room.Id,
                         room.AdminUserId,
                         pair.Key,
@@ -805,7 +985,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Automatic retry notices are advisory. Delivery failures
                     // must not prevent the new barrier from being started.
-                    _messageIssuer.TryIssueMessage(
+                    TryIssueMessage(
                         room.Id,
                         room.AdminUserId,
                         userId,
@@ -1124,6 +1304,105 @@ namespace Emby.Plugins.WatchTogether
             _logger?.Info($"Room {roomId}: barrier retry scheduled: {error}");
         }
 
+        private bool TryIssueCommand(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string command,
+            long? positionTicks,
+            DateTimeOffset now,
+            out string error)
+        {
+            if (_issuer == null)
+            {
+                error = "no command issuer configured";
+                return false;
+            }
+
+            var cancellable = _issuer as ICancellableCommandIssuer;
+            if (cancellable == null)
+            {
+                // Keep legacy test doubles and third-party implementations
+                // source-compatible while the built-in issuer uses the
+                // cancellation-aware path below.
+                return _issuer.TryIssue(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    command,
+                    positionTicks,
+                    now,
+                    out error);
+            }
+
+            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            {
+                return cancellable.TryIssue(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    command,
+                    positionTicks,
+                    now,
+                    timeout.Token,
+                    out error);
+            }
+        }
+
+        private bool TryIssueMessage(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string header,
+            string text,
+            int? timeoutMs,
+            DateTimeOffset now,
+            out string error)
+        {
+            if (_messageIssuer == null)
+            {
+                error = "no message issuer configured";
+                return false;
+            }
+
+            var cancellable = _messageIssuer as ICancellableMessageIssuer;
+            if (cancellable == null)
+            {
+                // Keep legacy test doubles and third-party implementations
+                // source-compatible while the built-in issuer uses the
+                // cancellation-aware path below.
+                return _messageIssuer.TryIssueMessage(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    header,
+                    text,
+                    timeoutMs,
+                    now,
+                    out error);
+            }
+
+            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            {
+                return cancellable.TryIssueMessage(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    header,
+                    text,
+                    timeoutMs,
+                    now,
+                    timeout.Token,
+                    out error);
+            }
+        }
+
         private bool Issue(
             RoomRuntime runtime,
             Room room,
@@ -1160,17 +1439,15 @@ namespace Emby.Plugins.WatchTogether
                 runtime.Pending.Remove(userId);
             }
 
-            bool ok;
-            string error;
-            if (_issuer == null)
-            {
-                ok = false;
-                error = "no command issuer configured";
-            }
-            else
-            {
-                ok = _issuer.TryIssue(room.Id, room.AdminUserId, userId, snapshot, command, positionTicks, now, out error);
-            }
+            bool ok = TryIssueCommand(
+                room.Id,
+                room.AdminUserId,
+                userId,
+                snapshot,
+                command,
+                positionTicks,
+                now,
+                out var error);
 
             if (!ok)
             {
