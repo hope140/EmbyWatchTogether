@@ -245,14 +245,6 @@ namespace Emby.Plugins.WatchTogether
                 return results;
             }
 
-            var explicitStopped = candidates
-                .Where(s => s != null && s.Stopped)
-                .GroupBy(s => s.UserId, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.OrderByDescending(s => s.LastActivityDateUtc).First(),
-                    StringComparer.OrdinalIgnoreCase);
-
             foreach (var roomId in validRoomIds)
             {
                 try
@@ -278,7 +270,7 @@ namespace Emby.Plugins.WatchTogether
                         snapshots.Values.All(s => s != null) &&
                         snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
 
-                    if (TryGetStoppedUsers(runtime, room, snapshots, explicitStopped, now, out var stoppedUsers))
+                    if (TryGetStoppedUsers(runtime, room, snapshots, now, out var stoppedUsers))
                     {
                         // SessionSelector omits stopped/offline sessions, so the
                         // same stop condition can be observed on every poll until
@@ -679,7 +671,6 @@ namespace Emby.Plugins.WatchTogether
             RoomRuntime runtime,
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
-            IReadOnlyDictionary<string, SessionSnapshot> explicitStopped,
             DateTimeOffset now,
             out HashSet<string> stoppedUsers)
         {
@@ -699,13 +690,6 @@ namespace Emby.Plugins.WatchTogether
             bool stopObserved = false;
             foreach (var userId in members)
             {
-                if (explicitStopped != null && explicitStopped.ContainsKey(userId))
-                {
-                    stoppedUsers.Add(userId);
-                    stopObserved = true;
-                    continue;
-                }
-
                 if (!snapshots.TryGetValue(userId, out var current) || current == null || !current.Online)
                 {
                     stoppedUsers.Add(userId);
