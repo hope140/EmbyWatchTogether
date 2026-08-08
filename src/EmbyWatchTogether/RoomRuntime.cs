@@ -31,19 +31,6 @@ namespace Emby.Plugins.WatchTogether
         public DateTimeOffset OccurredAtUtc { get; }
     }
 
-    public sealed class PlaybackStopSuppression
-    {
-        public string SessionId { get; set; }
-
-        public string ItemId { get; set; }
-
-        public DateTimeOffset BarrierStartedAtUtc { get; set; }
-
-        public DateTimeOffset? WatchingEnteredAtUtc { get; set; }
-
-        public DateTimeOffset UntilUtc { get; set; }
-    }
-
     /// <summary>
     /// Mutable per-room runtime state held in memory (persisted room metadata is
     /// the Room entity; runtime is rebuilt on restart).
@@ -87,9 +74,6 @@ namespace Emby.Plugins.WatchTogether
         public Dictionary<string, string> LastWatchingSessionIds { get; } =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        public Dictionary<string, PlaybackStopSuppression> PlaybackStopSuppressions { get; } =
-            new Dictionary<string, PlaybackStopSuppression>(StringComparer.OrdinalIgnoreCase);
-
         public DateTimeOffset? PreviousAtUtc { get; set; }
 
         public DateTimeOffset? MissingSessionSinceUtc { get; set; }
@@ -112,7 +96,6 @@ namespace Emby.Plugins.WatchTogether
             Suppressed.Clear();
             PauseAlign.Clear();
             LastSeekAtUtc.Clear();
-            PlaybackStopSuppressions.Clear();
             if (!preserveStopIdentity)
             {
                 Previous.Clear();
