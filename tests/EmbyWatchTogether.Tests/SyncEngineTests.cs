@@ -688,14 +688,15 @@ namespace Emby.Plugins.WatchTogether.Tests
             EnterWatching(engine, room);
             var baseActivity = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-            // The old stopped session is newer than u1's current snapshot, but
-            // it belongs to another item. SessionSelector must retain the
-            // current common item i1 for both participants.
+            // The old stopped session is newer than u1's current snapshot and
+            // has the same item, but its stale session lacks remote control.
+            // SessionSelector must still retain the current s1 session.
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
                     itemId: "i1", lastActivityDateUtc: baseActivity),
                 Snapshot("old-s1", "u1", paused: false, position: 0,
-                    itemId: "i2", stopped: true, lastActivityDateUtc: baseActivity.AddSeconds(10)),
+                    itemId: "i1", stopped: true, supportsRemoteControl: false,
+                    lastActivityDateUtc: baseActivity.AddSeconds(10)),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
                     itemId: "i1", lastActivityDateUtc: baseActivity));
             _clock.Advance(1);
@@ -1573,13 +1574,18 @@ namespace Emby.Plugins.WatchTogether.Tests
             string itemId = "i1",
             bool stopped = false,
             double playbackRate = 1.0,
-            DateTimeOffset? lastActivityDateUtc = null)
+            DateTimeOffset? lastActivityDateUtc = null,
+            bool supportsRemoteControl = true)
         {
             return new SessionSnapshot(
                 sessionId, userId, itemId, "m1",
                 position, 100 * SessionSnapshot.TicksPerSecond, paused, playbackRate,
-                stopped: stopped, supportsRemoteControl: true,
-                new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek" }),
+                stopped: stopped, supportsRemoteControl: supportsRemoteControl,
+                new SessionCapabilityReport(
+                    supportsRemoteControl,
+                    supportsRemoteControl
+                        ? new[] { "Pause", "Unpause", "Seek" }
+                        : Array.Empty<string>()),
                 lastActivityDateUtc ?? new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         }
 
