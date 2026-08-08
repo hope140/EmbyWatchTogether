@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using MediaBrowser.Model.Serialization;
@@ -77,9 +78,11 @@ namespace Emby.Plugins.WatchTogether
                     throw new RoomStoreException($"room id already exists: {room.Id}");
                 }
 
+                ValidateRoom(room);
                 ValidateMemberOverlap(room);
+                var candidate = _rooms.Values.Concat(new[] { room }).ToList();
+                Write(candidate);
                 _rooms[room.Id] = room;
-                Write();
             }
         }
 
@@ -92,12 +95,16 @@ namespace Emby.Plugins.WatchTogether
 
             lock (_lock)
             {
-                if (!_rooms.Remove(roomId))
+                if (!_rooms.ContainsKey(roomId))
                 {
                     return false;
                 }
 
-                Write();
+                var candidate = _rooms.Values
+                    .Where(room => !string.Equals(room.Id, roomId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                Write(candidate);
+                _rooms.Remove(roomId);
                 return true;
             }
         }
@@ -108,8 +115,15 @@ namespace Emby.Plugins.WatchTogether
             lock (_lock)
             {
                 if (!_rooms.ContainsKey(room.Id)) throw new RoomStoreException($"room not found: {room.Id}");
+                ValidateRoom(room);
+                ValidateMemberOverlap(room);
+                var candidate = _rooms.Values
+                    .Select(existing => string.Equals(existing.Id, room.Id, StringComparison.OrdinalIgnoreCase)
+                        ? room
+                        : existing)
+                    .ToList();
+                Write(candidate);
                 _rooms[room.Id] = room;
-                Write();
             }
         }
 
@@ -125,13 +139,15 @@ namespace Emby.Plugins.WatchTogether
                 var dtos = _serializer.DeserializeFromString<List<RoomDto>>(File.ReadAllText(_filePath));
                 if (dtos == null)
                 {
-                    return;
+                    throw new RoomStoreException("rooms file must contain a JSON array");
                 }
 
                 var loaded = new Dictionary<string, Room>(StringComparer.OrdinalIgnoreCase);
                 foreach (var dto in dtos)
                 {
+                    ValidateDto(dto);
                     var room = dto.ToRoom();
+                    ValidateRoom(room);
                     if (loaded.ContainsKey(room.Id))
                     {
                         throw new RoomStoreException($"duplicate room id in store: {room.Id}");
@@ -157,23 +173,56 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private void Write()
+        private void Write(IEnumerable<Room> rooms)
         {
-            var directory = Path.GetDirectoryName(_filePath);
-            if (!string.IsNullOrEmpty(directory))
+            string payload;
+            try
             {
-                Directory.CreateDirectory(directory);
+                var snapshot = rooms.Select(RoomDto.From).ToList();
+                payload = _serializer.SerializeToString(snapshot);
+            }
+            catch (Exception ex)
+            {
+                throw new RoomStoreException($"failed to serialize rooms file: {_filePath}", ex);
             }
 
-            var payload = _serializer.SerializeToString(_rooms.Values.Select(RoomDto.From).ToList());
-            var tempPath = _filePath + ".tmp";
-            File.WriteAllText(tempPath, payload);
-            if (File.Exists(_filePath))
+            var tempPath = _filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
             {
-                File.Delete(_filePath);
-            }
+                var directory = Path.GetDirectoryName(_filePath);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
 
-            File.Move(tempPath, _filePath);
+                File.WriteAllText(tempPath, payload);
+                if (File.Exists(_filePath))
+                {
+                    File.Replace(tempPath, _filePath, _filePath + ".bak", ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(tempPath, _filePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new RoomStoreException($"failed to persist rooms file: {_filePath}", ex);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tempPath))
+                    {
+                        File.Delete(tempPath);
+                    }
+                }
+                catch
+                {
+                    // A failed cleanup must not hide the original persistence error.
+                }
+            }
         }
 
         private void ValidateMemberOverlap(Room candidate, IEnumerable<Room> existing = null)
@@ -187,6 +236,96 @@ namespace Emby.Plugins.WatchTogether
                     throw new RoomStoreException($"user {member} is already a member of another room");
                 }
             }
+        }
+
+        private static void ValidateDto(RoomDto dto)
+        {
+            if (dto == null)
+            {
+                throw new RoomStoreException("room entry must not be null");
+            }
+
+            ValidateRequired(dto.Id, "id");
+            ValidateRequired(dto.ServerId, "serverId", dto.Id);
+            ValidateRequired(dto.AdminUserId, "adminUserId", dto.Id);
+            ValidateRequired(dto.PrimaryUserId, "primaryUserId", dto.Id);
+
+            if (dto.ParticipantUserIds == null || dto.ParticipantUserIds.Count != 2 ||
+                dto.ParticipantUserIds.Any(string.IsNullOrWhiteSpace) ||
+                dto.ParticipantUserIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 2)
+            {
+                throw new RoomStoreException($"room {dto.Id} must contain exactly two distinct participants");
+            }
+
+            if (!dto.ParticipantUserIds.Contains(dto.PrimaryUserId, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new RoomStoreException($"room {dto.Id} primary user must be a participant");
+            }
+
+            if (dto.JoinedParticipantUserIds != null &&
+                (dto.JoinedParticipantUserIds.Any(string.IsNullOrWhiteSpace) ||
+                 dto.JoinedParticipantUserIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
+                 dto.JoinedParticipantUserIds.Count ||
+                 dto.JoinedParticipantUserIds.Any(user =>
+                     !dto.ParticipantUserIds.Contains(user, StringComparer.OrdinalIgnoreCase))))
+            {
+                throw new RoomStoreException($"room {dto.Id} has invalid joined participants");
+            }
+
+            if (!DateTimeOffset.TryParse(
+                dto.CreatedAtUtc,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out _))
+            {
+                throw new RoomStoreException($"room {dto.Id} has invalid createdAtUtc");
+            }
+        }
+
+        private static void ValidateRoom(Room room)
+        {
+            ValidateRequired(room.Id, "id");
+            ValidateRequired(room.ServerId, "serverId", room.Id);
+            ValidateRequired(room.AdminUserId, "adminUserId", room.Id);
+            ValidateRequired(room.PrimaryUserId, "primaryUserId", room.Id);
+
+            if (room.ParticipantUserIds == null || room.ParticipantUserIds.Count != 2 ||
+                room.ParticipantUserIds.Any(string.IsNullOrWhiteSpace) ||
+                room.ParticipantUserIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 2)
+            {
+                throw new RoomStoreException($"room {room.Id} must contain exactly two distinct participants");
+            }
+
+            if (!room.ParticipantUserIds.Contains(room.PrimaryUserId, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new RoomStoreException($"room {room.Id} primary user must be a participant");
+            }
+
+            if (room.JoinedParticipantUserIds == null ||
+                room.JoinedParticipantUserIds.Any(string.IsNullOrWhiteSpace) ||
+                room.JoinedParticipantUserIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
+                room.JoinedParticipantUserIds.Count ||
+                room.JoinedParticipantUserIds.Any(user =>
+                    !room.ParticipantUserIds.Contains(user, StringComparer.OrdinalIgnoreCase)))
+            {
+                throw new RoomStoreException($"room {room.Id} has invalid joined participants");
+            }
+
+            if (room.CreatedAtUtc == default(DateTimeOffset))
+            {
+                throw new RoomStoreException($"room {room.Id} has invalid createdAtUtc");
+            }
+        }
+
+        private static void ValidateRequired(string value, string field, string roomId = null)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            string prefix = string.IsNullOrWhiteSpace(roomId) ? "room" : $"room {roomId}";
+            throw new RoomStoreException($"{prefix} {field} is required");
         }
     }
 
@@ -222,7 +361,7 @@ namespace Emby.Plugins.WatchTogether
                 PrimaryUserId = room.PrimaryUserId,
                 ParticipantUserIds = room.ParticipantUserIds.ToList(),
                 JoinedParticipantUserIds = room.JoinedParticipantUserIds.ToList(),
-                CreatedAtUtc = room.CreatedAtUtc.ToString("o"),
+                CreatedAtUtc = room.CreatedAtUtc.ToString("o", CultureInfo.InvariantCulture),
             };
         }
 
@@ -237,7 +376,7 @@ namespace Emby.Plugins.WatchTogether
                 PrimaryUserId,
                 ParticipantUserIds ?? new List<string>(),
                 JoinedParticipantUserIds ?? ParticipantUserIds,
-                DateTimeOffset.Parse(CreatedAtUtc));
+                DateTimeOffset.Parse(CreatedAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
         }
     }
 }

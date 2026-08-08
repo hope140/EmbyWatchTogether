@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
@@ -86,6 +88,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.True(manager.DeleteRoom(room.Id));
             Assert.Null(manager.GetRoom(room.Id));
+            Assert.Null(manager.GetRuntime(room.Id));
+            Assert.Null(manager.GetRuntime("missing"));
             Assert.False(manager.DeleteRoom(room.Id));
         }
 
@@ -125,6 +129,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(new[] { "u1" }, result.Users);
             Assert.Single(issuer.Issued);
             Assert.Equal("u1", issuer.Issued[0].userId);
+            var pending = manager.GetRuntime(room.Id).Pending["u1"];
+            Assert.Equal("session-u1", pending.SessionId);
+            Assert.Equal("i1", pending.ItemId);
         }
 
         [Fact]
@@ -183,6 +190,41 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task Action_CommandIoDoesNotHoldManagerLock()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var issuer = new BlockingIssuer();
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = TestSnapshots.Online("u1"),
+                ["u2"] = TestSnapshots.Offline("u2"),
+            };
+
+            var actionTask = Task.Run(() => manager.Action(
+                room.Id,
+                "pause",
+                snapshots,
+                issuer,
+                DateTimeOffset.UtcNow));
+
+            try
+            {
+                await issuer.EnteredTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+                var getRoomTask = Task.Run(() => manager.GetRoom(room.Id));
+                Assert.Same(room, await getRoomTask.WaitAsync(TimeSpan.FromSeconds(2)));
+            }
+            finally
+            {
+                issuer.Release.Set();
+            }
+
+            var result = await actionTask;
+            Assert.Equal(new[] { "u1" }, result.Users);
+        }
+
+        [Fact]
         public void SetParticipantJoined_TogglesMembershipAndResetsRuntime()
         {
             var manager = new RoomManager();
@@ -204,6 +246,33 @@ namespace Emby.Plugins.WatchTogether.Tests
             var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
 
             Assert.Throws<KeyNotFoundException>(() => manager.SetParticipantJoined(room.Id, "u3", false));
+        }
+
+        [Fact]
+        public void LeaveParticipant_ReturnsAtomicTransition_AndRepeatedLeaveIsNoOp()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Barrier;
+
+            var first = manager.LeaveParticipantResult(room.Id, "u2");
+
+            Assert.True(first.Changed);
+            Assert.False(first.Joined);
+            Assert.Equal(RoomState.Barrier, first.PreviousState);
+            Assert.False(room.IsJoined("u2"));
+            Assert.Equal(RoomState.Waiting, runtime.State);
+
+            runtime.State = RoomState.Watching;
+            runtime.Error = "keep this state on an idempotent retry";
+            var repeated = manager.LeaveParticipantResult(room.Id, "u2");
+
+            Assert.False(repeated.Changed);
+            Assert.False(repeated.Joined);
+            Assert.Equal(RoomState.Watching, repeated.PreviousState);
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Equal("keep this state on an idempotent retry", runtime.Error);
         }
 
         private sealed class FakeIssuer : ICommandIssuer
@@ -230,6 +299,37 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
 
                 Issued.Add((userId, command, positionTicks));
+                error = null;
+                return true;
+            }
+        }
+
+        private sealed class BlockingIssuer : ICommandIssuer
+        {
+            private readonly TaskCompletionSource<bool> _entered =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public Task EnteredTask => _entered.Task;
+
+            public ManualResetEventSlim Release { get; } = new ManualResetEventSlim(false);
+
+            public bool TryIssue(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string command,
+                long? positionTicks,
+                DateTimeOffset now,
+                out string error)
+            {
+                _entered.TrySetResult(true);
+                if (!Release.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    error = "issuer release timed out";
+                    return false;
+                }
+
                 error = null;
                 return true;
             }

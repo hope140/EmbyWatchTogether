@@ -1,0 +1,585 @@
+name: Signed manual release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Canonical release tag, for example v1.2.3.4
+        required: true
+        type: string
+      key_id:
+        description: ReleaseTrustStore key identifier
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish signed release
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_KEY_ID: ${{ inputs.key_id }}
+    steps:
+      - name: Checkout requested tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Validate release inputs and trust store
+        shell: pwsh
+        env:
+          WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64: ${{ secrets.WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64 }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $tag = $env:RELEASE_TAG
+          $keyId = $env:RELEASE_KEY_ID
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+              throw 'The release tag input is required.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($keyId)) {
+              throw 'The release key_id input is required.'
+          }
+
+          $canonicalVersionPattern = '\Av(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*))?\z'
+          if (-not [System.Text.RegularExpressions.Regex]::IsMatch(
+                  $tag,
+                  $canonicalVersionPattern,
+                  [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
+              throw 'The tag must be a canonical v<3 or 4 numeric-part> version.'
+          }
+
+          $versionText = $tag.Substring(1)
+          try {
+              $tagVersion = [Version]::Parse($versionText)
+          }
+          catch {
+              throw 'The tag version is outside the supported .NET version range.'
+          }
+
+          if (-not [string]::Equals(
+                  $tagVersion.ToString(),
+                  $versionText,
+                  [System.StringComparison]::Ordinal)) {
+              throw 'The tag version is not canonical.'
+          }
+
+          if (-not [System.Text.RegularExpressions.Regex]::IsMatch(
+                  $keyId,
+                  '\A[A-Za-z0-9._-]{1,64}\z',
+                  [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
+              throw 'The key_id must contain only safe ASCII key-id characters and be 1-64 characters long.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64)) {
+              throw 'The WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64 secret is empty.'
+          }
+
+          $tagRef = 'refs/tags/{0}' -f $tag
+          git show-ref --verify --quiet $tagRef
+          if ($LASTEXITCODE -ne 0) {
+              throw ('The requested tag ref does not exist: {0}' -f $tagRef)
+          }
+
+          $tagCommit = (& git rev-parse --verify --quiet ("{0}^{{commit}}" -f $tagRef) 2>$null | Out-String).Trim()
+          $tagCommitExitCode = $LASTEXITCODE
+          if ($tagCommitExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($tagCommit)) {
+              throw ('The requested tag does not resolve to a commit: {0}' -f $tagRef)
+          }
+
+          $headCommit = (& git rev-parse --verify HEAD 2>$null | Out-String).Trim()
+          $headCommitExitCode = $LASTEXITCODE
+          if ($headCommitExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($headCommit)) {
+              throw 'The checkout HEAD commit could not be resolved.'
+          }
+
+          if (-not [string]::Equals(
+                  $headCommit,
+                  $tagCommit,
+                  [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw 'The checkout HEAD does not equal the requested tag commit.'
+          }
+
+          $projectPath = Join-Path $env:GITHUB_WORKSPACE 'src/EmbyWatchTogether/EmbyWatchTogether.csproj'
+          if (-not [System.IO.File]::Exists($projectPath)) {
+              throw 'The plugin project file is missing.'
+          }
+
+          $projectDocument = [System.Xml.XmlDocument]::new()
+          $projectDocument.XmlResolver = $null
+          $projectDocument.Load($projectPath)
+          foreach ($propertyName in @('Version', 'FileVersion', 'AssemblyVersion')) {
+              $propertyNodes = @($projectDocument.SelectNodes(
+                  ("/*[local-name()='Project']/*[local-name()='PropertyGroup']/*[local-name()='{0}']" -f $propertyName)))
+              if ($propertyNodes.Count -ne 1) {
+                  throw ('The project must contain exactly one {0} property.' -f $propertyName)
+              }
+
+              $propertyValue = $propertyNodes[0].InnerText
+              if ([string]::IsNullOrWhiteSpace($propertyValue) -or
+                  -not [string]::Equals(
+                      $propertyValue,
+                      $versionText,
+                      [System.StringComparison]::Ordinal)) {
+                  throw ('The project {0} property does not equal the tag version.' -f $propertyName)
+              }
+          }
+
+          $trustStorePath = Join-Path $env:GITHUB_WORKSPACE 'src/EmbyWatchTogether/ReleaseTrustStore.cs'
+          if (-not [System.IO.File]::Exists($trustStorePath)) {
+              throw 'ReleaseTrustStore.cs is missing.'
+          }
+
+          $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+          $trustStoreText = [System.IO.File]::ReadAllText($trustStorePath, $strictUtf8)
+          $escapedKeyId = [System.Text.RegularExpressions.Regex]::Escape($keyId)
+          $mappingPattern = '\[\s*"' + $escapedKeyId + '"\s*\]\s*=\s*"(?<publicKey><RSAKeyValue>.*?</RSAKeyValue>)"\s*,?'
+          $mappingRegexOptions = [System.Text.RegularExpressions.RegexOptions]::Singleline -bor
+              [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+          $mappingMatches = [System.Text.RegularExpressions.Regex]::Matches(
+              $trustStoreText,
+              $mappingPattern,
+              $mappingRegexOptions)
+          if ($mappingMatches.Count -ne 1) {
+              throw ('ReleaseTrustStore.cs must contain exactly one RSAKeyValue mapping for key_id: {0}' -f $keyId)
+          }
+
+          $publicKeyXml = $mappingMatches[0].Groups['publicKey'].Value
+          if ([string]::IsNullOrWhiteSpace($publicKeyXml)) {
+              throw 'The mapped ReleaseTrustStore public key is empty.'
+          }
+
+          $publicKeyPath = Join-Path $env:RUNNER_TEMP 'EmbyWatchTogether.release.public-key.xml'
+          $publicKeyUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+          if ([System.IO.File]::Exists($publicKeyPath)) {
+              [System.IO.File]::Delete($publicKeyPath)
+          }
+
+          [System.IO.File]::WriteAllText($publicKeyPath, $publicKeyXml, $publicKeyUtf8)
+
+          Write-Output ('Release input validation passed for tag {0} and keyId {1}.' -f $tag, $keyId)
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          dotnet build src/EmbyWatchTogether.sln -c Release --nologo
+          if ($LASTEXITCODE -ne 0) {
+              throw 'Release solution build failed.'
+          }
+
+      - name: Run complete .NET tests
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          dotnet test tests/EmbyWatchTogether.Tests/EmbyWatchTogether.Tests.csproj -c Release --nologo -v minimal
+          if ($LASTEXITCODE -ne 0) {
+              throw 'Complete .NET test suite failed.'
+          }
+
+      - name: Build packaged release assets
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          pwsh scripts/build.ps1 -Configuration Release
+          if ($LASTEXITCODE -ne 0) {
+              throw 'Release packaging failed.'
+          }
+
+      - name: Run release signing tests
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          pwsh tests/release-signing.tests.ps1
+          if ($LASTEXITCODE -ne 0) {
+              throw 'Release signing tests failed.'
+          }
+
+      - name: Sign release manifest from environment secret
+        shell: pwsh
+        env:
+          WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64: ${{ secrets.WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64 }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $dllRelativePath = 'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll'
+          $manifestRelativePath = 'dist/EmbyWatchTogether.release.manifest'
+          $signatureRelativePath = 'dist/EmbyWatchTogether.release.manifest.sig'
+          $dllPath = Join-Path $env:GITHUB_WORKSPACE $dllRelativePath
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE $manifestRelativePath
+          $signaturePath = Join-Path $env:GITHUB_WORKSPACE $signatureRelativePath
+
+          if (-not [System.IO.File]::Exists($dllPath)) {
+              throw 'The packaged release DLL is missing before signing.'
+          }
+
+          pwsh scripts/release/Sign-ReleaseManifest.ps1 `
+              -DllPath $dllPath `
+              -Tag $env:RELEASE_TAG `
+              -KeyId $env:RELEASE_KEY_ID `
+              -ManifestOutputPath $manifestPath `
+              -SignatureOutputPath $signaturePath
+          if ($LASTEXITCODE -ne 0) {
+              throw 'Release manifest signing failed.'
+          }
+
+      - name: Verify release assets and canonical metadata
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+
+          $dllRelativePath = 'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll'
+          $archiveRelativePath = 'dist/EmbyWatchTogether.zip'
+          $manifestRelativePath = 'dist/EmbyWatchTogether.release.manifest'
+          $signatureRelativePath = 'dist/EmbyWatchTogether.release.manifest.sig'
+          $dllPath = Join-Path $env:GITHUB_WORKSPACE $dllRelativePath
+          $archivePath = Join-Path $env:GITHUB_WORKSPACE $archiveRelativePath
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE $manifestRelativePath
+          $signaturePath = Join-Path $env:GITHUB_WORKSPACE $signatureRelativePath
+
+          $assetDefinitions = @(
+              [pscustomobject]@{ RelativePath = $dllRelativePath; Path = $dllPath; MaximumBytes = 50MB },
+              [pscustomobject]@{ RelativePath = $archiveRelativePath; Path = $archivePath; MaximumBytes = 100MB },
+              [pscustomobject]@{ RelativePath = $manifestRelativePath; Path = $manifestPath; MaximumBytes = 16KB },
+              [pscustomobject]@{ RelativePath = $signatureRelativePath; Path = $signaturePath; MaximumBytes = 8KB }
+          )
+
+          foreach ($asset in $assetDefinitions) {
+              $assetInfo = [System.IO.FileInfo]::new($asset.Path)
+              if (-not $assetInfo.Exists -or $assetInfo.Length -le 0) {
+                  throw ('Release asset is missing or empty: {0}' -f $asset.RelativePath)
+              }
+
+              if ($assetInfo.Length -gt $asset.MaximumBytes) {
+                  throw ('Release asset exceeds its size limit: {0}' -f $asset.RelativePath)
+              }
+
+              Write-Output ('Validated release asset: {0} ({1} bytes).' -f $asset.RelativePath, $assetInfo.Length)
+          }
+
+          $manifestBytes = [System.IO.File]::ReadAllBytes($manifestPath)
+          if ($manifestBytes.Length -lt 1) {
+              throw 'The release manifest is empty.'
+          }
+
+          if ($manifestBytes.Length -ge 3 -and
+              $manifestBytes[0] -eq 0xEF -and
+              $manifestBytes[1] -eq 0xBB -and
+              $manifestBytes[2] -eq 0xBF) {
+              throw 'The release manifest must not contain a UTF-8 BOM.'
+          }
+
+          if ($manifestBytes -contains [byte]0x0D) {
+              throw 'The release manifest must use strict LF line endings.'
+          }
+
+          try {
+              $manifestText = $strictUtf8.GetString($manifestBytes)
+          }
+          catch {
+              throw 'The release manifest is not strict UTF-8.'
+          }
+
+          if ($manifestText.EndsWith("`n", [System.StringComparison]::Ordinal)) {
+              throw 'The release manifest must not have a trailing newline.'
+          }
+
+          $manifestLines = $manifestText.Split("`n")
+          if ($manifestLines.Count -ne 7) {
+              throw 'The release manifest does not have the canonical field count.'
+          }
+
+          $expectedPrefix = @(
+              'schema=1'
+              ('keyId={0}' -f $env:RELEASE_KEY_ID)
+              ('tag={0}' -f $env:RELEASE_TAG)
+              ('version={0}' -f $env:RELEASE_TAG.Substring(1))
+              'assetName=Emby.Plugins.WatchTogether.dll'
+          )
+          for ($index = 0; $index -lt $expectedPrefix.Count; $index++) {
+              if (-not [string]::Equals(
+                      $manifestLines[$index],
+                      $expectedPrefix[$index],
+                      [System.StringComparison]::Ordinal)) {
+                  throw 'The release manifest tag, keyId, version, or assetName is not canonical.'
+              }
+          }
+
+          if (-not $manifestLines[5].StartsWith('size=', [System.StringComparison]::Ordinal) -or
+              -not $manifestLines[6].StartsWith('sha256=', [System.StringComparison]::Ordinal)) {
+              throw 'The release manifest size or sha256 field is missing.'
+          }
+
+          [long]$manifestSize = 0
+          if (-not [long]::TryParse(
+                  $manifestLines[5].Substring(5),
+                  [System.Globalization.NumberStyles]::None,
+                  [System.Globalization.CultureInfo]::InvariantCulture,
+                  [ref]$manifestSize)) {
+              throw 'The release manifest size is invalid.'
+          }
+
+          $dllInfo = [System.IO.FileInfo]::new($dllPath)
+          if ($manifestSize -ne $dllInfo.Length) {
+              throw 'The release manifest size does not match the DLL.'
+          }
+
+          $dllStream = $null
+          $sha256 = $null
+          $hashBytes = $null
+          try {
+              $dllStream = [System.IO.File]::OpenRead($dllPath)
+              $sha256 = [System.Security.Cryptography.SHA256]::Create()
+              $hashBytes = $sha256.ComputeHash($dllStream)
+          }
+          finally {
+              if ($null -ne $sha256) {
+                  $sha256.Dispose()
+              }
+
+              if ($null -ne $dllStream) {
+                  $dllStream.Dispose()
+              }
+          }
+
+          $actualHash = [System.Convert]::ToHexString($hashBytes).ToLowerInvariant()
+          $manifestHash = $manifestLines[6].Substring(7)
+          if (-not [System.Text.RegularExpressions.Regex]::IsMatch(
+                  $manifestHash,
+                  '\A[0-9a-f]{64}\z',
+                  [System.Text.RegularExpressions.RegexOptions]::CultureInvariant) -or
+              -not [string]::Equals(
+                  $manifestHash,
+                  $actualHash,
+                  [System.StringComparison]::Ordinal)) {
+              throw 'The release manifest sha256 does not match the DLL.'
+          }
+
+          $signatureBytes = [System.IO.File]::ReadAllBytes($signaturePath)
+          $signatureText = [System.Text.Encoding]::ASCII.GetString($signatureBytes)
+          $signatureAsciiBytes = [System.Text.Encoding]::ASCII.GetBytes($signatureText)
+          if (-not [string]::Equals(
+                  [System.Convert]::ToBase64String($signatureBytes),
+                  [System.Convert]::ToBase64String($signatureAsciiBytes),
+                  [System.StringComparison]::Ordinal) -or
+              $signatureText.Length -eq 0 -or
+              ($signatureText.Length % 4) -ne 0 -or
+              -not [System.Text.RegularExpressions.Regex]::IsMatch(
+                  $signatureText,
+                  '\A[A-Za-z0-9+/]*={0,2}\z',
+                  [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
+              throw 'The release signature is not strict base64.'
+          }
+
+          try {
+              $decodedSignature = [System.Convert]::FromBase64String($signatureText)
+          }
+          catch {
+              throw 'The release signature is not decodable base64.'
+          }
+
+          if ($decodedSignature.Length -eq 0) {
+              throw 'The release signature is empty.'
+          }
+
+          $publicKeyPath = Join-Path $env:RUNNER_TEMP 'EmbyWatchTogether.release.public-key.xml'
+          $publicKeyInfo = [System.IO.FileInfo]::new($publicKeyPath)
+          if (-not $publicKeyInfo.Exists -or $publicKeyInfo.Length -le 0 -or $publicKeyInfo.Length -gt 16KB) {
+              throw 'The temporary release public key file is missing, empty, or too large.'
+          }
+
+          $publicKeyBytes = [System.IO.File]::ReadAllBytes($publicKeyPath)
+          if ($publicKeyBytes.Length -ge 3 -and
+              $publicKeyBytes[0] -eq 0xEF -and
+              $publicKeyBytes[1] -eq 0xBB -and
+              $publicKeyBytes[2] -eq 0xBF) {
+              throw 'The temporary release public key must not contain a UTF-8 BOM.'
+          }
+
+          try {
+              $publicKeyXml = $strictUtf8.GetString($publicKeyBytes)
+          }
+          catch {
+              throw 'The temporary release public key is not strict UTF-8.'
+          }
+
+          $xmlSettings = [System.Xml.XmlReaderSettings]::new()
+          $xmlSettings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+          $xmlSettings.XmlResolver = $null
+          $publicKeyDocument = [System.Xml.XmlDocument]::new()
+          $publicKeyDocument.XmlResolver = $null
+          $publicKeyStringReader = $null
+          $publicKeyReader = $null
+          try {
+              $publicKeyStringReader = [System.IO.StringReader]::new($publicKeyXml)
+              $publicKeyReader = [System.Xml.XmlReader]::Create($publicKeyStringReader, $xmlSettings)
+              $publicKeyDocument.Load($publicKeyReader)
+          }
+          catch {
+              throw 'The temporary release public key XML is invalid.'
+          }
+          finally {
+              if ($null -ne $publicKeyReader) {
+                  $publicKeyReader.Dispose()
+              }
+
+              if ($null -ne $publicKeyStringReader) {
+                  $publicKeyStringReader.Dispose()
+              }
+          }
+
+          $publicKeyRoot = $publicKeyDocument.DocumentElement
+          if ($null -eq $publicKeyRoot -or
+              $publicKeyRoot.Name -cne 'RSAKeyValue' -or
+              $publicKeyRoot.NamespaceURI -cne '') {
+              throw 'The release public key root must be RSAKeyValue without a namespace.'
+          }
+
+          $publicKeyChildren = @($publicKeyRoot.SelectNodes('./*'))
+          $modulusNodes = @($publicKeyRoot.SelectNodes('./Modulus'))
+          $exponentNodes = @($publicKeyRoot.SelectNodes('./Exponent'))
+          if ($publicKeyChildren.Count -ne 2 -or
+              $modulusNodes.Count -ne 1 -or
+              $exponentNodes.Count -ne 1) {
+              throw 'The release public key must contain exactly one Modulus and one Exponent.'
+          }
+
+          if ($publicKeyChildren[0].Name -cne 'Modulus' -or
+              $publicKeyChildren[1].Name -cne 'Exponent') {
+              throw 'The release public key contains unexpected child elements.'
+          }
+
+          function ConvertFrom-StrictBase64 {
+              param(
+                  [string]$Value,
+                  [string]$Description
+              )
+
+              if ([string]::IsNullOrEmpty($Value) -or
+                  ($Value.Length % 4) -ne 0 -or
+                  -not [System.Text.RegularExpressions.Regex]::IsMatch(
+                      $Value,
+                      '\A[A-Za-z0-9+/]+={0,2}\z',
+                      [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
+                  throw ('{0} must be strict base64.' -f $Description)
+              }
+
+              try {
+                  $bytes = [System.Convert]::FromBase64String($Value)
+              }
+              catch {
+                  throw ('{0} must be decodable base64.' -f $Description)
+              }
+
+              if ($bytes.Length -eq 0) {
+                  throw ('{0} must not be empty.' -f $Description)
+              }
+
+              return ,$bytes
+          }
+
+          $modulusBytes = ConvertFrom-StrictBase64 `
+              -Value $modulusNodes[0].InnerText `
+              -Description 'The RSA modulus'
+          $exponentBytes = ConvertFrom-StrictBase64 `
+              -Value $exponentNodes[0].InnerText `
+              -Description 'The RSA exponent'
+
+          $rsaParameters = [System.Security.Cryptography.RSAParameters]::new()
+          $rsaParameters.Modulus = $modulusBytes
+          $rsaParameters.Exponent = $exponentBytes
+          $releaseRsa = $null
+          $signatureIsValid = $false
+          try {
+              $releaseRsa = [System.Security.Cryptography.RSA]::Create()
+              $releaseRsa.ImportParameters($rsaParameters)
+              $signatureIsValid = $releaseRsa.VerifyData(
+                  $manifestBytes,
+                  $decodedSignature,
+                  [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                  [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+          }
+          catch {
+              throw 'The release signature could not be verified with the trusted RSA public key.'
+          }
+          finally {
+              if ($null -ne $releaseRsa) {
+                  $releaseRsa.Dispose()
+              }
+          }
+
+          if (-not $signatureIsValid) {
+              throw 'The release signature verification failed.'
+          }
+
+          Write-Output ('Release metadata validated for tag {0}, keyId {1}, and version {2}.' -f
+              $env:RELEASE_TAG,
+              $env:RELEASE_KEY_ID,
+              $env:RELEASE_TAG.Substring(1))
+
+      - name: Create GitHub Release without overwriting an existing release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          gh release view $env:RELEASE_TAG --json tagName 2>$null
+          $releaseViewExitCode = $LASTEXITCODE
+          if ($releaseViewExitCode -eq 0) {
+              throw ('A GitHub Release already exists for tag {0}; refusing to update or overwrite it.' -f $env:RELEASE_TAG)
+          }
+
+          if ($releaseViewExitCode -ne 1) {
+              throw 'Could not verify that the GitHub Release does not already exist.'
+          }
+
+          gh release create $env:RELEASE_TAG `
+              'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll' `
+              'dist/EmbyWatchTogether.zip' `
+              'dist/EmbyWatchTogether.release.manifest' `
+              'dist/EmbyWatchTogether.release.manifest.sig' `
+              --verify-tag `
+              --generate-notes `
+              --title ('Release ' + $env:RELEASE_TAG)
+          if ($LASTEXITCODE -ne 0) {
+              throw 'GitHub Release creation failed.'
+          }
+
+      - name: Remove temporary release public key
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $publicKeyPath = Join-Path $env:RUNNER_TEMP 'EmbyWatchTogether.release.public-key.xml'
+          try {
+              if (Test-Path -LiteralPath $publicKeyPath) {
+                  Remove-Item -LiteralPath $publicKeyPath -Force -ErrorAction Stop
+              }
+          }
+          catch {
+              Write-Warning 'Best-effort cleanup of the temporary release public key failed.'
+          }

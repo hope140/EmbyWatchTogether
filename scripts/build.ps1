@@ -1,23 +1,101 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [switch]$ValidatePathsOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$root = Split-Path -Parent $PSScriptRoot
-if (-not $OutputDirectory) {
+function ConvertTo-NormalizedAbsolutePath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw 'A path is required and cannot be empty or whitespace.'
+    }
+
+    try {
+        $providerPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+        $fullPath = [System.IO.Path]::GetFullPath($providerPath)
+        $pathRoot = [System.IO.Path]::GetPathRoot($fullPath)
+    }
+    catch {
+        throw "Unable to resolve path '$Path' as an absolute filesystem path: $($_.Exception.Message)"
+    }
+
+    if ([string]::IsNullOrEmpty($pathRoot)) {
+        throw "Unable to resolve path '$Path' to a filesystem root."
+    }
+
+    if ($fullPath.Length -gt $pathRoot.Length) {
+        $fullPath = $fullPath.TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar
+        )
+    }
+
+    return $fullPath
+}
+
+function Test-SameOrAncestorPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Ancestor,
+        [Parameter(Mandatory)]
+        [string]$Candidate
+    )
+
+    if ($Candidate.Equals($Ancestor, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+
+    $ancestorPrefix = $Ancestor
+    if (-not ($ancestorPrefix.EndsWith([System.IO.Path]::DirectorySeparatorChar) -or
+            $ancestorPrefix.EndsWith([System.IO.Path]::AltDirectorySeparatorChar))) {
+        $ancestorPrefix += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    return $Candidate.StartsWith($ancestorPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+$root = ConvertTo-NormalizedAbsolutePath -Path (Split-Path -Parent $PSScriptRoot)
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $root 'dist'
 }
 
-$solution = Join-Path $root 'src\EmbyWatchTogether.sln'
-$project = Join-Path $root 'src\EmbyWatchTogether\EmbyWatchTogether.csproj'
-$testProject = Join-Path $root 'tests\EmbyWatchTogether.Tests\EmbyWatchTogether.Tests.csproj'
-$publishDir = Join-Path $root '.publish'
-$pluginDir = Join-Path $OutputDirectory 'EmbyWatchTogether'
-$archivePath = Join-Path $OutputDirectory 'EmbyWatchTogether.zip'
+$outputDirectoryPath = ConvertTo-NormalizedAbsolutePath -Path $OutputDirectory
+$volumeRoot = [System.IO.Path]::GetPathRoot($outputDirectoryPath)
+$pluginDir = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $outputDirectoryPath 'EmbyWatchTogether')
+
+if ($outputDirectoryPath.Equals($volumeRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing OutputDirectory '$OutputDirectory': resolved path '$outputDirectoryPath' is the volume root '$volumeRoot'. Choose a dedicated output directory below the repository or another non-root directory."
+}
+
+if (Test-SameOrAncestorPath -Ancestor $outputDirectoryPath -Candidate $root) {
+    throw "Refusing OutputDirectory '$OutputDirectory': resolved path '$outputDirectoryPath' is the repository root or an ancestor of '$root'. Choose a dedicated output directory such as '$root\dist' or a temporary directory outside the repository ancestors."
+}
+
+if (Test-SameOrAncestorPath -Ancestor $pluginDir -Candidate $root) {
+    throw "Refusing OutputDirectory '$OutputDirectory': the EmbyWatchTogether target '$pluginDir' is the repository root or an ancestor of '$root'. Choose a different dedicated output directory."
+}
+
+$solution = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $root 'src\EmbyWatchTogether.sln')
+$project = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $root 'src\EmbyWatchTogether\EmbyWatchTogether.csproj')
+$testProject = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $root 'tests\EmbyWatchTogether.Tests\EmbyWatchTogether.Tests.csproj')
+$publishDir = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $root '.publish')
+$archivePath = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $outputDirectoryPath 'EmbyWatchTogether.zip')
+
+if ($ValidatePathsOnly) {
+    Write-Output 'Path validation passed.'
+    Write-Output "==> output directory: $outputDirectoryPath"
+    Write-Output "==> plugin folder: $pluginDir"
+    Write-Output "==> archive: $archivePath"
+    return
+}
 
 Write-Output "==> dotnet build $solution"
 dotnet build $solution -c $Configuration --nologo

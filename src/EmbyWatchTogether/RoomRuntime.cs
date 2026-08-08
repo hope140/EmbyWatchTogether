@@ -4,6 +4,34 @@ using System.Collections.Generic;
 namespace Emby.Plugins.WatchTogether
 {
     /// <summary>
+    /// Strongly typed playback-stop notification captured from Emby's
+    /// PlaybackStopped event. The session and item identities are required to
+    /// distinguish a current stop from a late notification for an old client.
+    /// </summary>
+    public sealed class PlaybackStoppedSignal
+    {
+        public PlaybackStoppedSignal(
+            string userId,
+            string sessionId,
+            string itemId,
+            DateTimeOffset occurredAtUtc)
+        {
+            UserId = userId ?? string.Empty;
+            SessionId = sessionId ?? string.Empty;
+            ItemId = itemId ?? string.Empty;
+            OccurredAtUtc = occurredAtUtc;
+        }
+
+        public string UserId { get; }
+
+        public string SessionId { get; }
+
+        public string ItemId { get; }
+
+        public DateTimeOffset OccurredAtUtc { get; }
+    }
+
+    /// <summary>
     /// Mutable per-room runtime state held in memory (persisted room metadata is
     /// the Room entity; runtime is rebuilt on restart).
     /// </summary>
@@ -43,7 +71,12 @@ namespace Emby.Plugins.WatchTogether
 
         public Dictionary<string, SessionSnapshot> Previous { get; } = new Dictionary<string, SessionSnapshot>();
 
+        public Dictionary<string, string> LastWatchingSessionIds { get; } =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         public DateTimeOffset? PreviousAtUtc { get; set; }
+
+        public DateTimeOffset? MissingSessionSinceUtc { get; set; }
 
         public int DriftRounds { get; set; }
 
@@ -55,6 +88,7 @@ namespace Emby.Plugins.WatchTogether
 
         public void ResetToWaiting()
         {
+            bool preserveStopIdentity = MissingSessionSinceUtc.HasValue;
             State = RoomState.Waiting;
             Error = null;
             Barrier = null;
@@ -62,10 +96,17 @@ namespace Emby.Plugins.WatchTogether
             Suppressed.Clear();
             PauseAlign.Clear();
             LastSeekAtUtc.Clear();
-            Previous.Clear();
-            PreviousAtUtc = null;
+            if (!preserveStopIdentity)
+            {
+                Previous.Clear();
+                PreviousAtUtc = null;
+                LastWatchingSessionIds.Clear();
+            }
             DriftRounds = 0;
-            SyncItemId = null;
+            if (!preserveStopIdentity)
+            {
+                SyncItemId = null;
+            }
             BarrierRetryAtUtc = null;
         }
     }

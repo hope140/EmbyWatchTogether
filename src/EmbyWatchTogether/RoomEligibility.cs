@@ -27,6 +27,12 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
+            if (values[0].SupportsRemoteControl != values[1].SupportsRemoteControl ||
+                !values[0].SupportsRemoteControl)
+            {
+                return false;
+            }
+
             if (string.IsNullOrEmpty(values[0].ItemId) ||
                 !string.Equals(values[0].ItemId, values[1].ItemId, StringComparison.OrdinalIgnoreCase))
             {

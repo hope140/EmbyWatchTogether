@@ -90,6 +90,7 @@ namespace Emby.Plugins.WatchTogether
             {
                 if (!admin && !r.HasParticipant(currentUserId)) return null;
                 var runtime = plugin.Rooms.GetRuntime(r.Id);
+                if (runtime == null) return null;
                 return new
                 {
                     RoomId = r.Id,
@@ -181,6 +182,11 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var runtime = plugin.Rooms.GetRuntime(request.Id);
+            if (runtime == null)
+            {
+                throw new KeyNotFoundException("room not found");
+            }
+
             var snapshots = BuildSnapshots(plugin, room);
             return new
             {
@@ -224,19 +230,27 @@ namespace Emby.Plugins.WatchTogether
             var room = plugin.Rooms.GetRoom(request.Id);
             if (room == null || !room.HasParticipant(userId)) throw new UnauthorizedAccessException("not a room participant");
 
-            plugin.Rooms.SetParticipantJoined(request.Id, userId, false);
-            var snapshots = BuildSnapshots(plugin, room);
-            if (string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase))
+            var transition = plugin.Rooms.LeaveParticipantResult(request.Id, userId);
+            bool activeBeforeLeave = transition.PreviousState == RoomState.Barrier ||
+                transition.PreviousState == RoomState.Watching;
+            bool sameServer = !string.IsNullOrWhiteSpace(transition.ServerId) &&
+                string.Equals(transition.ServerId, plugin.ResolveServerId(), StringComparison.OrdinalIgnoreCase);
+
+            if (transition.Changed && activeBeforeLeave && sameServer)
             {
-                PauseOnlineParticipants(plugin, room, snapshots);
-            }
-            else if (snapshots.TryGetValue(room.PrimaryUserId, out var primary) && primary != null && primary.Online)
-            {
-                plugin.Issuer?.TryIssue(room.Id, room.AdminUserId, room.PrimaryUserId, primary,
-                    RemoteCommands.Pause, null, DateTimeOffset.UtcNow, out _);
+                var snapshots = BuildSnapshots(plugin, room);
+                if (string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase))
+                {
+                    PauseOnlineParticipants(plugin, room, snapshots);
+                }
+                else if (snapshots.TryGetValue(room.PrimaryUserId, out var primary) && primary != null && primary.Online)
+                {
+                    plugin.Issuer?.TryIssue(room.Id, room.AdminUserId, room.PrimaryUserId, primary,
+                        RemoteCommands.Pause, null, DateTimeOffset.UtcNow, out _);
+                }
             }
 
-            return new { RoomId = request.Id, Joined = false };
+            return new { RoomId = request.Id, Joined = false, Changed = transition.Changed };
         }
 
         public object Post(SendRoomMessageRequest request)
