@@ -46,6 +46,6 @@
 
 - 现象：部分 Emby 客户端在同步暂停、恢复或重建播放会话期间会短暂报告 `PlaybackStopped`，并暂时显示 `Stopped=true` 或缺失会话，随后恢复同一播放。
 - 原因：服务端停止事件和单轮 SessionInfo 是播放状态转换中的瞬时信号，不是权威终态；立即处理会错误暂停另一方并形成重新 Barrier 的循环。
-- 结论：`PlaybackStopped` 只用于唤醒轮询；`Stopped=true`、离线和会话缺失统一要求连续 2 秒快照异常，恢复有效快照时清除计时并保持 `Watching`。
-- 规则：任何新增停止信号都不得绕过确认窗口；位置归零仍按正常 Seek 处理。确认停止后，暂停和通知副作用只执行一次。
-- 验证：真实 Emby Theater 与 embyToLocalPlayer 日志复现了短暂停止后恢复；`SyncEngineTests` 覆盖短暂 stopped/缺失恢复、持续异常确认和 seek-to-zero。
+- 结论：`PlaybackStopped` 只用于唤醒轮询；停止只依据 SessionSelector 选中的当前会话判断。同一用户的旧 stopped Session 不能覆盖当前有效播放；当前会话的 `Stopped=true`、离线和缺失统一要求连续 2 秒快照异常，恢复有效快照时清除计时并保持 `Watching`。
+- 规则：任何新增停止信号或未选中的候选会话都不得绕过当前会话选择与确认窗口；位置归零仍按正常 Seek 处理。确认停止后，暂停和通知副作用只执行一次。
+- 验证：真实 Emby Theater 与 embyToLocalPlayer 日志复现了短暂停止后恢复，以及旧 stopped Session 与当前播放并存导致的误判；`SyncEngineTests` 覆盖同用户同 Item 的旧 stopped Session、短暂 stopped/缺失恢复、持续异常确认和 seek-to-zero。
