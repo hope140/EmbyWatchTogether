@@ -6,6 +6,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 {
     public class SessionSelectorTests
     {
+        private static readonly DateTimeOffset TestNow =
+            new DateTimeOffset(2026, 1, 1, 0, 0, 30, TimeSpan.Zero);
+
         [Fact]
         public void Select_PicksSingleCapableSessionPerUser()
         {
@@ -15,7 +18,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s2", "u2", "i1", activity: 900),
             };
 
-            var result = SessionSelector.Select(candidates, new[] { "u1", "u2" });
+            var result = Select(candidates, new[] { "u1", "u2" });
 
             Assert.Equal(2, result.Count);
             Assert.Equal("s1", result["u1"].SessionId);
@@ -34,7 +37,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s2", "u2", "i1", activity: 900),
             };
 
-            var result = SessionSelector.Select(candidates, new[] { "u1", "u2" });
+            var result = Select(candidates, new[] { "u1", "u2" });
 
             Assert.Single(result);
             Assert.False(result.ContainsKey("u1"));
@@ -46,7 +49,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var unknown = Snapshot("s1", "u1", "i1", capable: false, commands: Array.Empty<string>(), activity: 1000);
             var capable = Snapshot("s2", "u1", "i1", capable: true, activity: 1000);
 
-            var result = SessionSelector.Select(
+            var result = Select(
                 new List<SessionSnapshot> { unknown, capable, Snapshot("s3", "u2", "i1", activity: 900) },
                 new[] { "u1", "u2" });
 
@@ -77,7 +80,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s1", "u1", "i1", activity: 2000),
             };
 
-            var result = SessionSelector.Select(
+            var result = Select(
                 candidates,
                 new[] { "u1", Snapshot("s2", "u2", "i1", activity: 900).UserId });
 
@@ -96,10 +99,53 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s2", "u2", "itemA", activity: 900),
             };
 
-            var result = SessionSelector.Select(candidates, new[] { "u1", "u2" });
+            var result = Select(candidates, new[] { "u1", "u2" });
 
             Assert.Equal("itemA", result["u1"].ItemId);
             Assert.Equal("itemA", result["u2"].ItemId);
+        }
+
+        [Fact]
+        public void Select_RemovesAbsolutelyExpiredCommonCandidateBeforePreferringCommonItem()
+        {
+            var candidates = new List<SessionSnapshot>
+            {
+                SnapshotAt("s1-stale", "u1", "itemA", TestNow.AddSeconds(-61)),
+                SnapshotAt("s1-fresh", "u1", "itemB", TestNow.AddSeconds(-1)),
+                SnapshotAt("s2", "u2", "itemA", TestNow.AddSeconds(-1)),
+            };
+
+            var result = Select(candidates, new[] { "u1", "u2" });
+
+            Assert.Equal("itemB", result["u1"].ItemId);
+            Assert.Equal("itemA", result["u2"].ItemId);
+        }
+
+        [Fact]
+        public void Select_RemovesCandidateLaggingBehindUsersLatestSessionBeforePreferringCommonItem()
+        {
+            var candidates = new List<SessionSnapshot>
+            {
+                SnapshotAt("s1-stale", "u1", "itemA", TestNow.AddSeconds(-17)),
+                SnapshotAt("s1-fresh", "u1", "itemB", TestNow.AddSeconds(-1)),
+                SnapshotAt("s2", "u2", "itemA", TestNow.AddSeconds(-1)),
+            };
+
+            var result = Select(candidates, new[] { "u1", "u2" });
+
+            Assert.Equal("itemB", result["u1"].ItemId);
+            Assert.Equal("itemA", result["u2"].ItemId);
+        }
+
+        private static Dictionary<string, SessionSnapshot> Select(
+            IEnumerable<SessionSnapshot> candidates,
+            IReadOnlyList<string> userIds)
+        {
+            return SessionSelector.Select(
+                candidates,
+                userIds,
+                TestNow,
+                TimeSpan.FromSeconds(SessionSelector.StaleSessionTimeoutSeconds));
         }
 
         private static SessionSnapshot Snapshot(
@@ -110,12 +156,29 @@ namespace Emby.Plugins.WatchTogether.Tests
             string[] commands = null,
             long activity = 0)
         {
+            return SnapshotAt(
+                sessionId,
+                userId,
+                itemId,
+                new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).AddTicks(activity),
+                capable,
+                commands);
+        }
+
+        private static SessionSnapshot SnapshotAt(
+            string sessionId,
+            string userId,
+            string itemId,
+            DateTimeOffset activity,
+            bool capable = true,
+            string[] commands = null)
+        {
             var capabilities = new SessionCapabilityReport(capable, commands ?? new[] { "Pause", "Unpause", "Seek" });
             return new SessionSnapshot(
                 sessionId, userId, itemId, "m1",
                 0, 100 * SessionSnapshot.TicksPerSecond, false, 1.0, stopped: false,
                 capable, capabilities,
-                new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).AddTicks(activity));
+                activity);
         }
     }
 }

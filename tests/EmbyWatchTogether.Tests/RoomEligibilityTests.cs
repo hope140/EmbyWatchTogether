@@ -23,6 +23,30 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void IsPairEligible_RemoteControlFlagsMustBothBeTrueWithoutCommandDeclarations()
+        {
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = Snapshot("u1", supportsRemoteControl: true),
+                ["u2"] = Snapshot("u2", supportsRemoteControl: true),
+            };
+
+            Assert.True(RoomEligibility.IsPairEligible(snapshots));
+        }
+
+        [Fact]
+        public void IsPairEligible_RemoteControlFlagFalseForEitherParticipantReturnsFalse()
+        {
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = Snapshot("u1", supportsRemoteControl: true),
+                ["u2"] = Snapshot("u2", supportsRemoteControl: false),
+            };
+
+            Assert.False(RoomEligibility.IsPairEligible(snapshots));
+        }
+
+        [Fact]
         public void IsPairEligible_DifferentItems_ReturnsFalse()
         {
             var snapshots = TwoOnline("i1", "i2");
@@ -97,6 +121,22 @@ namespace Emby.Plugins.WatchTogether.Tests
                 ["u1"] = TestSnapshots.Online("u1", itemA),
                 ["u2"] = TestSnapshots.Online("u2", itemB),
             };
+        }
+
+        private static SessionSnapshot Snapshot(string userId, bool supportsRemoteControl)
+        {
+            return new SessionSnapshot(
+                "session-" + userId,
+                userId,
+                "i1",
+                "m1",
+                0,
+                100 * SessionSnapshot.TicksPerSecond,
+                false,
+                1.0,
+                stopped: false,
+                supportsRemoteControl,
+                new SessionCapabilityReport(true, Array.Empty<string>()));
         }
     }
 }
