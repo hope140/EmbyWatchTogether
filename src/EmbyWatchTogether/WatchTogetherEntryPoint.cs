@@ -20,6 +20,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly IServerApplicationHost _applicationHost;
         private readonly IJsonSerializer _jsonSerializer;
         private readonly ILogManager _logManager;
+        private Plugin _plugin;
         private SessionBridge _bridge;
         private SyncEngine _syncEngine;
 
@@ -51,6 +52,7 @@ namespace Emby.Plugins.WatchTogether
             var rooms = new RoomManager(store);
             var provider = new SessionBridgeSnapshotProvider(bridge);
             var issuer = new SessionBridgeCommandIssuer(bridge);
+            var options = SyncEngineOptions.From(plugin.Configuration);
 
             plugin.Store = store;
             plugin.Rooms = rooms;
@@ -58,22 +60,29 @@ namespace Emby.Plugins.WatchTogether
             plugin.Issuer = issuer;
 
             _bridge = bridge;
+            _plugin = plugin;
             _syncEngine = new SyncEngine(
                 rooms,
                 provider,
                 issuer,
                 plugin.ResolveServerId,
-                pollIntervalSeconds: plugin.Configuration.PollIntervalSeconds,
-                pauseOtherOnPlaybackStop: plugin.Configuration.PauseOtherOnPlaybackStop,
-                notifyOtherOnPlaybackStop: plugin.Configuration.NotifyOtherOnPlaybackStop,
+                pollIntervalSeconds: options.PollIntervalSeconds,
+                pauseOtherOnPlaybackStop: options.PauseOtherOnPlaybackStop,
+                notifyOtherOnPlaybackStop: options.NotifyOtherOnPlaybackStop,
                 messageIssuer: issuer,
                 logManager: _logManager);
+            plugin.ConfigurationChanged += OnConfigurationChanged;
+            // Close the small race between taking the startup snapshot and
+            // subscribing to the plugin event.
+            _syncEngine.UpdateOptions(SyncEngineOptions.From(plugin.Configuration));
             SubscribeToSessionChanges(bridge);
             _syncEngine.Start();
         }
 
         public void Dispose()
         {
+            UnsubscribeFromConfigurationChanges(_plugin);
+            _plugin = null;
             UnsubscribeFromSessionChanges(_bridge);
 
             _syncEngine?.Dispose();
@@ -81,6 +90,24 @@ namespace Emby.Plugins.WatchTogether
 
             _bridge?.Dispose();
             _bridge = null;
+        }
+
+        private void OnConfigurationChanged(
+            object sender,
+            PluginConfigurationChangedEventArgs e)
+        {
+            if (e?.Options != null)
+            {
+                _syncEngine?.UpdateOptions(e.Options);
+            }
+        }
+
+        private void UnsubscribeFromConfigurationChanges(Plugin plugin)
+        {
+            if (plugin != null)
+            {
+                plugin.ConfigurationChanged -= OnConfigurationChanged;
+            }
         }
 
         private void SubscribeToSessionChanges(SessionBridge bridge)

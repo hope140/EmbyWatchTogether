@@ -23,6 +23,13 @@ namespace Emby.Plugins.WatchTogether
         /// </summary>
         public static Plugin Instance { get; private set; }
 
+        /// <summary>
+        /// Raised only after BasePlugin has accepted the persisted
+        /// configuration. Subscribers receive an immutable normalized snapshot
+        /// and do not depend on a BasePlugin configuration event.
+        /// </summary>
+        public event EventHandler<PluginConfigurationChangedEventArgs> ConfigurationChanged;
+
         public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
             : base(applicationPaths, xmlSerializer)
         {
@@ -50,6 +57,9 @@ namespace Emby.Plugins.WatchTogether
             }
 
             base.UpdateConfiguration(pluginConfiguration);
+            ConfigurationChanged?.Invoke(
+                this,
+                new PluginConfigurationChangedEventArgs(SyncEngineOptions.From(pluginConfiguration)));
         }
 
         /// <summary>

@@ -1,4 +1,8 @@
+using System;
 using System.Linq;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Model.Serialization;
+using Moq;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
@@ -25,6 +29,68 @@ namespace Emby.Plugins.WatchTogether.Tests
             var configuration = new PluginConfiguration();
 
             Assert.Equal(0.5, configuration.PollIntervalSeconds);
+        }
+
+        [Fact]
+        public void SyncEngineOptions_NormalizesInvalidAndOutOfRangeIntervals()
+        {
+            Assert.Equal(
+                SyncEngineOptions.DefaultPollIntervalSeconds,
+                new SyncEngineOptions(double.NaN, true, true).PollIntervalSeconds);
+            Assert.Equal(
+                SyncEngineOptions.DefaultPollIntervalSeconds,
+                new SyncEngineOptions(double.PositiveInfinity, true, true).PollIntervalSeconds);
+            Assert.Equal(
+                SyncEngineOptions.DefaultPollIntervalSeconds,
+                new SyncEngineOptions(0, true, true).PollIntervalSeconds);
+            Assert.Equal(
+                SyncEngineOptions.MinPollIntervalSeconds,
+                new SyncEngineOptions(0.01, true, true).PollIntervalSeconds);
+            Assert.Equal(
+                SyncEngineOptions.MaxPollIntervalSeconds,
+                new SyncEngineOptions(120, true, true).PollIntervalSeconds);
+        }
+
+        [Fact]
+        public void Plugin_UpdateConfiguration_RaisesNormalizedImmutableOptionsAfterBaseUpdate()
+        {
+            var paths = new Mock<IApplicationPaths>();
+            paths.SetupGet(p => p.PluginConfigurationsPath).Returns("C:\\watch-together-tests");
+            var serializer = new Mock<IXmlSerializer>();
+            var plugin = new Plugin(paths.Object, serializer.Object);
+            plugin.SetAttributes(
+                "C:\\watch-together-tests\\Emby.Plugins.WatchTogether.dll",
+                "C:\\watch-together-tests\\data",
+                new Version(1, 0, 0, 0));
+            plugin.SetStartupInfo(_ => { });
+
+            PluginConfigurationChangedEventArgs received = null;
+            plugin.ConfigurationChanged += (sender, args) => received = args;
+            var configuration = new PluginConfiguration
+            {
+                PollIntervalSeconds = double.NaN,
+                PauseOtherOnPlaybackStop = false,
+                NotifyOtherOnPlaybackStop = true,
+            };
+
+            try
+            {
+                plugin.UpdateConfiguration(configuration);
+
+                Assert.NotNull(received);
+                Assert.NotSame(configuration, received.Options);
+                Assert.Equal(0.5, received.Options.PollIntervalSeconds);
+                Assert.False(received.Options.PauseOtherOnPlaybackStop);
+                Assert.True(received.Options.NotifyOtherOnPlaybackStop);
+                Assert.Equal(configuration, plugin.Configuration);
+                Assert.All(
+                    typeof(SyncEngineOptions).GetProperties(),
+                    property => Assert.Null(property.SetMethod));
+            }
+            finally
+            {
+                typeof(Plugin).GetProperty("Instance")?.GetSetMethod(true)?.Invoke(null, new object[] { null });
+            }
         }
 
         [Fact]
