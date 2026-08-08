@@ -640,6 +640,54 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PlaybackStoppedSignal_MatchingWatchingIdentity_HandlesImmediately()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            // Establish the missing-session debounce first. The explicit event
+            // must bypass it and apply the existing stop side effects now.
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.NotNull(_rooms.GetRuntime(room.Id).MissingSessionSinceUtc);
+
+            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal(
+                "u1", "s1", "i1", _clock.Now));
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Equal("播放已停止，等待双方重新打开同一视频", result.Error);
+            Assert.Null(_rooms.GetRuntime(room.Id).MissingSessionSinceUtc);
+            Assert.Contains(_issuer.Issued, i =>
+                i.userId == "u2" && i.command == RemoteCommands.Pause);
+            Assert.Single(_messageIssuer.Issued);
+            Assert.Equal("u2", _messageIssuer.Issued[0].userId);
+        }
+
+        [Fact]
+        public void PlaybackStoppedSignal_MismatchedOrExpiredIdentity_IsIgnored()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+            var watchingAt = runtime.PreviousAtUtc.Value;
+
+            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal(
+                "u1", "old-session", "i1", _clock.Now));
+            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal(
+                "u1", "s1", "i1", watchingAt.AddTicks(-1)));
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Null(result.Error);
+            Assert.Empty(_issuer.Issued);
+            Assert.Empty(_messageIssuer.Issued);
+        }
+
+        [Fact]
         public void PrimaryPositionReset_DoesNotTriggerStopWhenDisabled()
         {
             var room = CreateRoom();
