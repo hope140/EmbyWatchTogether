@@ -407,7 +407,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void PrimaryPositionResetToZero_PausesSecondaryByDefault()
+        public void PrimaryPositionResetToZero_IsNotTreatedAsStop()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -420,18 +420,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             var result = engine.PollOnce(_clock.Now).Single();
 
             var runtime = _rooms.GetRuntime(room.Id);
-            Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Contains("播放已停止", result.Error);
-            Assert.Null(runtime.Barrier);
-            Assert.Empty(runtime.Pending);
-            Assert.Empty(runtime.Suppressed);
-            Assert.Empty(runtime.Previous);
-            Assert.Contains(_issuer.Issued, i =>
-                i.userId == "u2" && i.command == RemoteCommands.Pause);
-            Assert.DoesNotContain(_issuer.Issued, i =>
-                i.userId == "u1" && i.command == RemoteCommands.Pause);
-            Assert.DoesNotContain(_issuer.Issued, i =>
-                i.userId == "u2" && i.command == RemoteCommands.Seek && i.positionTicks == 0);
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.DoesNotContain("播放已停止", result.Error ?? string.Empty);
+            Assert.NotNull(runtime.Barrier);
 
             // Re-opening the same item near the same position starts a new barrier;
             // the old watching snapshot is never reused.
@@ -637,13 +628,19 @@ namespace Emby.Plugins.WatchTogether.Tests
             var result = engine.PollOnce(_clock.Now).Single();
 
             Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Empty(_issuer.Issued);
+
+            _clock.Advance(2);
+            result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
             Assert.Contains(_issuer.Issued, i =>
                 i.userId == "u2" && i.command == RemoteCommands.Pause);
             Assert.DoesNotContain(_issuer.Issued, i => i.userId == "u1");
         }
 
         [Fact]
-        public void PrimaryPositionReset_DoesNotPauseSecondaryWhenDisabled()
+        public void PrimaryPositionReset_DoesNotTriggerStopWhenDisabled()
         {
             var room = CreateRoom();
             var engine = CreateEngine(pauseOtherOnPlaybackStop: false);
@@ -656,11 +653,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             var result = engine.PollOnce(_clock.Now).Single();
 
             var runtime = _rooms.GetRuntime(room.Id);
-            Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Contains("播放已停止", result.Error);
-            Assert.Empty(_issuer.Issued);
-            Assert.Empty(runtime.Pending);
-            Assert.Empty(runtime.Previous);
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.DoesNotContain("播放已停止", result.Error ?? string.Empty);
+            Assert.NotNull(runtime.Barrier);
         }
 
         [Fact]
