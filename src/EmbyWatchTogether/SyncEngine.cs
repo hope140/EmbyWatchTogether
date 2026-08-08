@@ -793,7 +793,7 @@ namespace Emby.Plugins.WatchTogether
             PlaybackStoppedSignal signal,
             DateTimeOffset now)
         {
-            if (runtime == null || signal == null ||
+            if (runtime == null || signal == null || string.IsNullOrEmpty(signal.UserId) ||
                 !runtime.PlaybackStopSuppressions.TryGetValue(signal.UserId, out var suppression))
             {
                 return false;
@@ -813,13 +813,12 @@ namespace Emby.Plugins.WatchTogether
 
             bool occurredDuringBarrier = signal.OccurredAtUtc >= suppression.BarrierStartedAtUtc &&
                 (!suppression.WatchingEnteredAtUtc.HasValue ||
-                 signal.OccurredAtUtc <= suppression.WatchingEnteredAtUtc.Value);
+                 signal.OccurredAtUtc < suppression.WatchingEnteredAtUtc.Value);
             if (!occurredDuringBarrier)
             {
                 return false;
             }
 
-            runtime.PlaybackStopSuppressions.Remove(signal.UserId);
             return true;
         }
 
