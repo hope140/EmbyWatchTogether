@@ -168,6 +168,7 @@ $repositoryPrivateKeyPath = $null
 $verificationKey = $null
 $runtimeKey = $null
 $privateKeyBytes = $null
+$privateKeyText = $null
 $environmentManifestPath = $null
 $environmentSignaturePath = $null
 $signingKeyEnvironmentName = 'WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64'
@@ -384,41 +385,83 @@ try {
     Write-Output 'release signing tests passed'
 }
 finally {
-    if ($signingKeyEnvironmentCaptured) {
-        if ($null -eq $originalSigningKeyEnvironmentValue) {
-            Remove-Item -LiteralPath ('Env:\{0}' -f $signingKeyEnvironmentName) -ErrorAction SilentlyContinue
-            $restoredEnvironmentVariableExists = Test-Path -LiteralPath ('Env:\{0}' -f $signingKeyEnvironmentName)
-            Assert-True -Condition (-not $restoredEnvironmentVariableExists) -Message 'Signing key environment variable was not restored.'
+    $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+
+    try {
+        if ($signingKeyEnvironmentCaptured) {
+            if ($null -eq $originalSigningKeyEnvironmentValue) {
+                Remove-Item -LiteralPath ('Env:\{0}' -f $signingKeyEnvironmentName) -ErrorAction SilentlyContinue
+                $restoredEnvironmentVariableExists = Test-Path -LiteralPath ('Env:\{0}' -f $signingKeyEnvironmentName)
+                if ($restoredEnvironmentVariableExists) {
+                    throw 'Signing key environment variable was not restored.'
+                }
+            }
+            else {
+                [System.Environment]::SetEnvironmentVariable(
+                    $signingKeyEnvironmentName,
+                    $originalSigningKeyEnvironmentValue,
+                    [System.EnvironmentVariableTarget]::Process)
+                $restoredSigningKeyEnvironmentValue = [System.Environment]::GetEnvironmentVariable(
+                    $signingKeyEnvironmentName,
+                    [System.EnvironmentVariableTarget]::Process)
+                if ($restoredSigningKeyEnvironmentValue -cne $originalSigningKeyEnvironmentValue) {
+                    throw 'Signing key environment variable was not restored.'
+                }
+            }
         }
-        else {
-            [System.Environment]::SetEnvironmentVariable(
-                $signingKeyEnvironmentName,
-                $originalSigningKeyEnvironmentValue,
-                [System.EnvironmentVariableTarget]::Process)
-            $restoredSigningKeyEnvironmentValue = [System.Environment]::GetEnvironmentVariable(
-                $signingKeyEnvironmentName,
-                [System.EnvironmentVariableTarget]::Process)
-            Assert-True -Condition ($restoredSigningKeyEnvironmentValue -ceq $originalSigningKeyEnvironmentValue) -Message 'Signing key environment variable was not restored.'
+    }
+    catch {
+        [void]$cleanupErrors.Add('Signing key environment variable was not restored.')
+    }
+
+    try {
+        if ($null -ne $verificationKey) {
+            $verificationKey.Dispose()
         }
     }
-
-    if ($null -ne $verificationKey) {
-        $verificationKey.Dispose()
+    catch {
+        [void]$cleanupErrors.Add('Verification key cleanup failed.')
     }
 
-    if ($null -ne $runtimeKey) {
-        $runtimeKey.Dispose()
+    try {
+        if ($null -ne $runtimeKey) {
+            $runtimeKey.Dispose()
+        }
+    }
+    catch {
+        [void]$cleanupErrors.Add('Runtime key cleanup failed.')
     }
 
-    if ($null -ne $privateKeyBytes) {
-        [System.Array]::Clear($privateKeyBytes, 0, $privateKeyBytes.Length)
+    try {
+        if ($null -ne $privateKeyBytes) {
+            [System.Array]::Clear($privateKeyBytes, 0, $privateKeyBytes.Length)
+        }
+
+        $privateKeyText = $null
+    }
+    catch {
+        [void]$cleanupErrors.Add('Private key memory cleanup failed.')
     }
 
-    if ($null -ne $repositoryPrivateKeyPath -and [System.IO.File]::Exists($repositoryPrivateKeyPath)) {
-        [System.IO.File]::Delete($repositoryPrivateKeyPath)
+    try {
+        if ($null -ne $repositoryPrivateKeyPath -and [System.IO.File]::Exists($repositoryPrivateKeyPath)) {
+            [System.IO.File]::Delete($repositoryPrivateKeyPath)
+        }
+    }
+    catch {
+        [void]$cleanupErrors.Add('Repository test path cleanup failed.')
     }
 
-    if ($null -ne $tempDirectory -and [System.IO.Directory]::Exists($tempDirectory)) {
-        Remove-Item -LiteralPath $tempDirectory -Recurse -Force
+    try {
+        if ($null -ne $tempDirectory -and [System.IO.Directory]::Exists($tempDirectory)) {
+            Remove-Item -LiteralPath $tempDirectory -Recurse -Force
+        }
+    }
+    catch {
+        [void]$cleanupErrors.Add('Temporary directory cleanup failed.')
+    }
+
+    if ($cleanupErrors.Count -gt 0) {
+        throw ('Signing test cleanup failed: ' + ($cleanupErrors -join ' '))
     }
 }
