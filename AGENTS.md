@@ -8,9 +8,9 @@
 
 ## 知识读取与复盘
 
-- 按任务范围读取知识：先看本文件和 [`docs/architecture.md`](docs/architecture.md)，再按需读取 [`docs/lessons-learned.md`](docs/lessons-learned.md)、ADR 索引和相关模块文档；不要全量加载无关历史。
-- 知识库只记录已从当前代码、测试或项目文档核验的事实。写入前搜索去重；发现旧经验失效时更新为当前事实并保留必要的验证依据。
-- 每个任务结束前执行 Knowledge Review：记录新增约束、隐蔽坑、被证明错误的假设和建议沉淀项；架构变化需评估是否更新 `architecture.md` 或创建 ADR。无新增内容也要明确说明。
+- 按需读取知识：先看本文件，再看任务相关的 [`docs/architecture.md`](docs/architecture.md)，然后读取 [`docs/lessons-learned.md`](docs/lessons-learned.md) 中相关内容，最后按模块读取相关 ADR；不要机械全量加载无关历史。
+- 知识库只记录已由真实代码、测试、实际运行或日志、可复现结果，或官方文档与当前实现交叉确认的事实。写入前搜索去重；发现旧经验失效时更新为当前事实并保留验证依据。
+- 每个具有实质性代码修改、Bug/架构/兼容性调查的任务结束前执行 Knowledge Review：记录新增约束、隐蔽坑、被证明错误的假设和建议沉淀项；架构变化需评估是否更新 `architecture.md` 或创建 ADR。无发现时可在完成报告明确 Knowledge Findings/Review 为“无”，不为流程强行改知识文档。
 - 子代理完成报告必须包含 `Knowledge Findings`，主线程负责审核其事实依据、去重结果和是否需要架构/ADR 更新。
 
 ## 变更原则
