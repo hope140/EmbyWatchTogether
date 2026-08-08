@@ -4,7 +4,7 @@
 
 本文件适用于整个仓库。更深目录中的 `AGENTS.md` 可以补充局部规则，但不得放宽这里的任务边界、隔离、审核与发布要求。
 
-本仓库采用“主线程 + `luna_worker` 子代理 + PR Stack”工作流。详细操作、计划模板和派发模板见 `docs/pr-stack-workflow.md`。
+本仓库采用“主线程 + 分级 Luna 子代理 + PR Stack”工作流。详细操作、计划模板和派发模板见 `docs/pr-stack-workflow.md`。
 
 ## 变更原则
 
@@ -34,11 +34,19 @@
 - 是否允许并行
 - 计划使用的子代理
 
-主线程应把边界明确、可验证、可回滚的编码任务交给 `luna_worker`。架构取舍、需求澄清、跨 Stack 集成、最终发布和无法明确划界的修改仍由主线程负责。
+主线程应把边界明确、可验证、可回滚的编码任务交给分级 Luna worker；`luna_worker` 是 Medium（Level 1）默认入口，`luna_high_worker` 是 High（Level 2）入口，`luna_max_worker` 是 Max（Level 3）受限入口。架构取舍、需求澄清、跨 Stack 集成、最终发布和无法明确划界的修改仍由主线程负责。
+
+### Luna 分级选择规则
+
+- 默认选择 `luna_worker`（Medium）。适用于搜索代码、阅读文件、查找调用关系、配置修改、小范围代码修改、边界清晰的功能、简单 Bug、补测试、文档修改，以及主代理已经给出实现方案的任务。
+- 需要一定独立推理的普通功能、多文件修改、中等复杂度 Bug、模块内部重构或 Medium 无法可靠完成的任务，选择 `luna_high_worker`（High）；无法明确判断 Medium 是否足够时，默认选择 High。
+- 只有跨模块高复杂度、疑难 Bug、大范围重构、高风险核心逻辑、大量上下文联合推理，或 High 已经因推理复杂度失败时，才选择 `luna_max_worker`（Max）。“任务重要”不能单独作为升级理由；每次选择 Max 都必须在派发契约中填写明确复杂度理由。
+- 升级顺序为 Medium -> High -> Max，但不要求每个任务都从 Medium 开始。Medium/High 因环境、测试环境、依赖、权限、输入不足或需求不清失败时，不得升级 reasoning；应先修复阻塞、补充输入、澄清需求或重新规划 Stack。
+- agent TOML 提供固定入口，不提供单个 worker 内自动动态升级；由主代理显式选择 worker 名称。若当前运行时仍只展示旧的 `luna_worker`，需重新加载或重启配置后才会显示新增入口，具体操作以实际运行时为准。
 
 ### 模型可用性回退
 
-当主线程环境只有 DeepSeek v4 可用（OpenAI 额度用完或 `gpt-5.6-luna` 不可用）时，本应交由 `luna_worker` 的实现任务改派给 `deepseek_worker`（使用 DeepSeek V4 Flash）；OpenAI 恢复可用后仍使用 `luna_worker`。派发契约、worktree 隔离、审核门禁与回滚要求不因代理切换而放宽。
+当主线程环境只有 DeepSeek v4 可用（OpenAI 额度用完或 `gpt-5.6-luna` 不可用）时，本应交由 Luna worker 的实现任务改派给 `deepseek_worker`（使用 DeepSeek V4 Flash）；OpenAI 恢复可用后按任务复杂度选择对应 Luna 入口。该备用 agent 沿用现有固定配置，不宣称与三个 Luna 等级自动一一映射。派发契约、worktree 隔离、审核门禁与回滚要求不因代理切换而放宽。
 
 ## PR Stack 与并发规则
 
