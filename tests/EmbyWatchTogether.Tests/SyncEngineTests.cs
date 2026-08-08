@@ -105,10 +105,15 @@ namespace Emby.Plugins.WatchTogether.Tests
                 _clock.Advance(1);
                 var result = engine.PollOnce(_clock.Now).Single();
 
-                Assert.Equal(RoomState.Waiting, result.State);
-                Assert.Equal("播放已停止，等待双方重新打开同一视频", result.Error);
+                Assert.Equal(RoomState.Watching, result.State);
+                Assert.Null(result.Error);
                 Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Pause);
                 Assert.Empty(_messageIssuer.Issued);
+
+                _clock.Advance(2);
+                result = engine.PollOnce(_clock.Now).Single();
+                Assert.Equal(RoomState.Waiting, result.State);
+                Assert.Equal("播放已停止，等待双方重新打开同一视频", result.Error);
             }
             finally
             {
@@ -553,6 +558,13 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             var result = engine.PollOnce(_clock.Now).Single();
 
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Empty(_issuer.Issued);
+
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
             Assert.Equal(RoomState.Waiting, result.State);
             Assert.Contains(_issuer.Issued, i =>
                 i.userId == "u2" && i.command == RemoteCommands.Pause);
@@ -570,6 +582,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
                 Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
@@ -629,8 +645,64 @@ namespace Emby.Plugins.WatchTogether.Tests
             engine.PollOnce(_clock.Now);
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
 
             Assert.Single(_messageIssuer.Issued);
+        }
+
+        [Fact]
+        public void TransientStoppedSnapshot_RecoversBeforeDebounceWithoutSideEffects()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Empty(_issuer.Issued);
+            Assert.Empty(_messageIssuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Null(result.Error);
+            Assert.Empty(_issuer.Issued);
+            Assert.Empty(_messageIssuer.Issued);
+        }
+
+        [Fact]
+        public void TransientMissingParticipant_RecoversBeforeDebounceWithoutBarrier()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Null(result.Error);
+            Assert.Empty(_issuer.Issued);
         }
 
         [Fact]
@@ -643,6 +715,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
                 Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
             Assert.Single(_messageIssuer.Issued);
@@ -677,6 +753,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 0, stopped: true),
                 Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
@@ -714,6 +796,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             var result = engine.PollOnce(_clock.Now).Single();
 
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Empty(_issuer.Issued);
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
             Assert.Equal(RoomState.Waiting, result.State);
             Assert.Contains(_issuer.Issued, i =>
                 i.userId == "u2" && i.command == RemoteCommands.Pause);
@@ -731,7 +819,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             var result = engine.PollOnce(_clock.Now).Single();
 
-            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Equal(RoomState.Watching, result.State);
             Assert.Empty(_issuer.Issued);
 
             _clock.Advance(2);
@@ -741,107 +829,6 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains(_issuer.Issued, i =>
                 i.userId == "u2" && i.command == RemoteCommands.Pause);
             Assert.DoesNotContain(_issuer.Issued, i => i.userId == "u1");
-        }
-
-        [Fact]
-        public void PlaybackStoppedSignal_MatchingWatchingIdentity_HandlesImmediately()
-        {
-            var room = CreateRoom();
-            var engine = CreateEngine();
-            EnterWatching(engine, room);
-
-            // Establish the missing-session debounce first. The explicit event
-            // must bypass it and apply the existing stop side effects now.
-            SetCandidates(Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-            Assert.NotNull(_rooms.GetRuntime(room.Id).MissingSessionSinceUtc);
-
-            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal(
-                "u1", "s1", "i1", _clock.Now));
-            var result = engine.PollOnce(_clock.Now).Single();
-
-            Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Equal("播放已停止，等待双方重新打开同一视频", result.Error);
-            Assert.Null(_rooms.GetRuntime(room.Id).MissingSessionSinceUtc);
-            Assert.Contains(_issuer.Issued, i =>
-                i.userId == "u2" && i.command == RemoteCommands.Pause);
-            Assert.Single(_messageIssuer.Issued);
-            Assert.Equal("u2", _messageIssuer.Issued[0].userId);
-        }
-
-        [Fact]
-        public void PlaybackStoppedSignal_MismatchedOrExpiredIdentity_IsIgnored()
-        {
-            var room = CreateRoom();
-            var engine = CreateEngine();
-            EnterWatching(engine, room);
-            var runtime = _rooms.GetRuntime(room.Id);
-            var watchingAt = runtime.PreviousAtUtc.Value;
-
-            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal(
-                "u1", "old-session", "i1", _clock.Now));
-            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal(
-                "u1", "s1", "i1", watchingAt.AddTicks(-1)));
-            var result = engine.PollOnce(_clock.Now).Single();
-
-            Assert.Equal(RoomState.Watching, result.State);
-            Assert.Null(result.Error);
-            Assert.Empty(_issuer.Issued);
-            Assert.Empty(_messageIssuer.Issued);
-        }
-
-        [Fact]
-        public void PlaybackStoppedSignal_ContradictoryOnlineSnapshot_IsIgnored()
-        {
-            var room = CreateRoom();
-            var engine = CreateEngine();
-            EnterWatching(engine, room);
-
-            // Complete a fresh barrier, then reproduce the production sequence:
-            // the callback timestamp is after Watching while the current
-            // session/item remains online and not stopped.
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
-
-            SetCandidates(
-                Snapshot("s1", "u1", paused: true, position: 60 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: true, position: 60 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
-                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-            _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
-            _clock.Advance(1);
-            var result = engine.PollOnce(_clock.Now).Single();
-
-            Assert.Equal(RoomState.Watching, result.State);
-            Assert.Null(result.Error);
-            Assert.Empty(_messageIssuer.Issued);
-
-            var pauseCountBeforeContradictoryStops = _issuer.Issued.Count(i => i.command == RemoteCommands.Pause);
-            _clock.Advance(1);
-            var postWatchingEventAtUtc = _clock.Now;
-            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal("u1", "s1", "i1", postWatchingEventAtUtc));
-            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal("u1", "s1", "i1", postWatchingEventAtUtc));
-            result = engine.PollOnce(_clock.Now).Single();
-
-            Assert.Equal(RoomState.Watching, result.State);
-            Assert.Null(result.Error);
-            Assert.Equal(pauseCountBeforeContradictoryStops, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
-            Assert.Empty(_messageIssuer.Issued);
         }
 
         [Fact]

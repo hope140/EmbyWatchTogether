@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -51,8 +50,6 @@ namespace Emby.Plugins.WatchTogether
         private readonly object _roomPollLogLock = new object();
         private readonly Dictionary<string, DateTimeOffset> _lastRoomPollErrorAtUtc =
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
-        private readonly ConcurrentQueue<PlaybackStoppedSignal> _playbackStoppedSignals =
-            new ConcurrentQueue<PlaybackStoppedSignal>();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
         private Thread _thread;
@@ -181,30 +178,6 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        /// <summary>
-        /// Queues a typed playback-stop event and wakes the coordinator. The
-        /// Emby event thread never infers a stop from a UI snapshot or performs
-        /// room side effects directly.
-        /// </summary>
-        public void EnqueuePlaybackStopped(PlaybackStoppedSignal signal)
-        {
-            if (signal == null)
-            {
-                return;
-            }
-
-            lock (_lock)
-            {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                _playbackStoppedSignals.Enqueue(signal);
-                SignalWakeLocked();
-            }
-        }
-
         public IReadOnlyList<RoomPollResult> PollOnce(DateTimeOffset now)
         {
             var options = GetOptionsSnapshot();
@@ -259,7 +232,6 @@ namespace Emby.Plugins.WatchTogether
 
             if (validRoomIds.Count == 0)
             {
-                DrainPlaybackStoppedSignals();
                 return results;
             }
 
@@ -272,8 +244,6 @@ namespace Emby.Plugins.WatchTogether
             {
                 return results;
             }
-
-            var playbackStoppedSignals = DrainPlaybackStoppedSignals();
 
             var explicitStopped = candidates
                 .Where(s => s != null && s.Stopped)
@@ -308,22 +278,6 @@ namespace Emby.Plugins.WatchTogether
                         snapshots.Values.All(s => s != null) &&
                         snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
 
-                    // Process an explicit stop before the snapshot-derived
-                    // missing-session debounce or normal Watching tick.
-                    // Matching is identity-based so a late event cannot affect a
-                    // reconnected session or a different item.
-                    if (TryHandlePlaybackStoppedSignals(
-                        runtime,
-                        room,
-                        snapshots,
-                        playbackStoppedSignals,
-                        options,
-                        now))
-                    {
-                        results.Add(Result(room, runtime, eligible));
-                        continue;
-                    }
-
                     if (TryGetStoppedUsers(runtime, room, snapshots, explicitStopped, now, out var stoppedUsers))
                     {
                         // SessionSelector omits stopped/offline sessions, so the
@@ -356,6 +310,13 @@ namespace Emby.Plugins.WatchTogether
                         runtime.PreviousAtUtc = null;
                         runtime.MissingSessionSinceUtc = null;
                         runtime.Error = StoppedPlaybackError;
+                        results.Add(Result(room, runtime, eligible));
+                        continue;
+                    }
+
+                    if (runtime.State == RoomState.Watching &&
+                        runtime.MissingSessionSinceUtc.HasValue)
+                    {
                         results.Add(Result(room, runtime, eligible));
                         continue;
                     }
@@ -396,7 +357,8 @@ namespace Emby.Plugins.WatchTogether
                         // current identities instead.
                         runtime.ResetToWaiting();
                     }
-                    if (!sameItem && runtime.State != RoomState.Waiting)
+                    if (!sameItem && runtime.State != RoomState.Waiting &&
+                        !runtime.MissingSessionSinceUtc.HasValue)
                     {
                         runtime.ResetToWaiting();
                     }
@@ -426,6 +388,12 @@ namespace Emby.Plugins.WatchTogether
                         }
                         else
                         {
+                            if (runtime.MissingSessionSinceUtc.HasValue)
+                            {
+                                results.Add(Result(room, runtime, eligible));
+                                continue;
+                            }
+
                             // A participant may have switched to the next episode or
                             // another item. Do not seek across item boundaries; pause
                             // any active peer(s) once the pair is no longer eligible.
@@ -707,159 +675,6 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private List<PlaybackStoppedSignal> DrainPlaybackStoppedSignals()
-        {
-            var signals = new List<PlaybackStoppedSignal>();
-            while (_playbackStoppedSignals.TryDequeue(out var signal))
-            {
-                if (signal != null)
-                {
-                    signals.Add(signal);
-                }
-            }
-
-            return signals;
-        }
-
-        private bool TryHandlePlaybackStoppedSignals(
-            RoomRuntime runtime,
-            Room room,
-            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
-            IReadOnlyList<PlaybackStoppedSignal> signals,
-            SyncEngineOptions options,
-            DateTimeOffset now)
-        {
-            if (signals == null || signals.Count == 0)
-            {
-                return false;
-            }
-
-            PlaybackStoppedSignal matchingSignal = null;
-            foreach (var signal in signals)
-            {
-                if (!IsCurrentPlaybackStoppedSignal(runtime, room, snapshots, signal))
-                {
-                    continue;
-                }
-
-                if (IsContradictoryPlaybackStoppedSignal(snapshots, signal))
-                {
-                    _logger?.Info(
-                        $"Room {room.Id}: ignored contradictory playback stopped event for " +
-                        $"{signal.UserId}; matching session is still online");
-                    continue;
-                }
-
-                matchingSignal = signal;
-                break;
-            }
-
-            if (matchingSignal == null)
-            {
-                return false;
-            }
-
-            var stoppedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                matchingSignal.UserId,
-            };
-            bool stopAlreadyHandled = string.Equals(
-                runtime.Error,
-                StoppedPlaybackError,
-                StringComparison.Ordinal);
-            if (!stopAlreadyHandled)
-            {
-                if (options.PauseOtherOnPlaybackStop)
-                {
-                    PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
-                }
-
-                if (options.NotifyOtherOnPlaybackStop)
-                {
-                    NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
-                }
-
-                _logger?.Info(
-                    $"Room {room.Id}: playback stopped by {matchingSignal.UserId}; " +
-                    $"pausedOther={options.PauseOtherOnPlaybackStop}, notifiedOther={options.NotifyOtherOnPlaybackStop}");
-            }
-
-            runtime.ResetToWaiting();
-            runtime.Previous.Clear();
-            runtime.PreviousAtUtc = null;
-            runtime.MissingSessionSinceUtc = null;
-            runtime.Error = StoppedPlaybackError;
-            return true;
-        }
-
-        private static bool IsContradictoryPlaybackStoppedSignal(
-            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
-            PlaybackStoppedSignal signal)
-        {
-            if (snapshots == null || signal == null || string.IsNullOrEmpty(signal.UserId) ||
-                !snapshots.TryGetValue(signal.UserId, out var current) || current == null ||
-                !current.Online || current.Stopped)
-            {
-                return false;
-            }
-
-            return string.Equals(current.SessionId, signal.SessionId, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(current.ItemId, signal.ItemId, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsCurrentPlaybackStoppedSignal(
-            RoomRuntime runtime,
-            Room room,
-            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
-            PlaybackStoppedSignal signal)
-        {
-            if (runtime == null || room == null || snapshots == null || signal == null ||
-                (runtime.State != RoomState.Watching && !runtime.MissingSessionSinceUtc.HasValue) ||
-                room.JoinedParticipantUserIds.Count != 2 ||
-                string.IsNullOrEmpty(signal.UserId) ||
-                string.IsNullOrEmpty(signal.SessionId) ||
-                string.IsNullOrEmpty(signal.ItemId) ||
-                signal.OccurredAtUtc == default(DateTimeOffset) ||
-                !room.IsJoined(signal.UserId) ||
-                (!string.IsNullOrEmpty(runtime.SyncItemId) &&
-                 !string.Equals(runtime.SyncItemId, signal.ItemId, StringComparison.OrdinalIgnoreCase)))
-            {
-                return false;
-            }
-
-            // PreviousAtUtc is the newest point at which the current Watching
-            // identity was observed. An event older than that point is stale.
-            if (runtime.PreviousAtUtc.HasValue &&
-                signal.OccurredAtUtc < runtime.PreviousAtUtc.Value)
-            {
-                return false;
-            }
-
-            if (runtime.Previous.TryGetValue(signal.UserId, out var previous))
-            {
-                if (!HasSameIdentity(signal.SessionId, signal.ItemId, previous))
-                {
-                    return false;
-                }
-            }
-            else if (!runtime.LastWatchingSessionIds.TryGetValue(signal.UserId, out var lastSessionId) ||
-                     !string.Equals(lastSessionId, signal.SessionId, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            // If Emby still exposes a current session for the user, it must be
-            // the same identity. A newer session makes an old stop event stale.
-            if (snapshots.TryGetValue(signal.UserId, out var current) &&
-                current != null &&
-                !HasSameIdentity(signal.SessionId, signal.ItemId, current))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
         private static bool TryGetStoppedUsers(
             RoomRuntime runtime,
             Room room,
@@ -881,38 +696,32 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var members = room.JoinedParticipantUserIds;
-            bool missingSession = false;
-            bool explicitStop = false;
+            bool stopObserved = false;
             foreach (var userId in members)
             {
                 if (explicitStopped != null && explicitStopped.ContainsKey(userId))
                 {
                     stoppedUsers.Add(userId);
-                    explicitStop = true;
+                    stopObserved = true;
                     continue;
                 }
 
                 if (!snapshots.TryGetValue(userId, out var current) || current == null || !current.Online)
                 {
                     stoppedUsers.Add(userId);
-                    missingSession = true;
+                    stopObserved = true;
                 }
                 else if (current.Stopped)
                 {
                     stoppedUsers.Add(userId);
+                    stopObserved = true;
                 }
             }
 
-            if (explicitStop)
+            if (!stopObserved)
             {
                 runtime.MissingSessionSinceUtc = null;
-                return true;
-            }
-
-            if (!missingSession)
-            {
-                runtime.MissingSessionSinceUtc = null;
-                return stoppedUsers.Count > 0;
+                return false;
             }
 
             if (!runtime.MissingSessionSinceUtc.HasValue)
@@ -1799,14 +1608,6 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
-            foreach (var pair in snapshots)
-            {
-                if (pair.Value != null && !string.IsNullOrEmpty(pair.Value.SessionId))
-                {
-                    runtime.LastWatchingSessionIds[pair.Key] = pair.Value.SessionId;
-                }
-            }
-
             var members = room.JoinedParticipantUserIds;
             if (runtime.SyncItemId == null ||
                 snapshots.Count != members.Count ||
