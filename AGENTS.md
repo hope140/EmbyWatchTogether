@@ -6,6 +6,13 @@
 
 本仓库采用“主线程 + 分级 Luna 子代理 + PR Stack”工作流。详细操作、计划模板和派发模板见 `docs/pr-stack-workflow.md`。
 
+## 知识读取与复盘
+
+- 按任务范围读取知识：先看本文件和 [`docs/architecture.md`](docs/architecture.md)，再按需读取 [`docs/lessons-learned.md`](docs/lessons-learned.md)、ADR 索引和相关模块文档；不要全量加载无关历史。
+- 知识库只记录已从当前代码、测试或项目文档核验的事实。写入前搜索去重；发现旧经验失效时更新为当前事实并保留必要的验证依据。
+- 每个任务结束前执行 Knowledge Review：记录新增约束、隐蔽坑、被证明错误的假设和建议沉淀项；架构变化需评估是否更新 `architecture.md` 或创建 ADR。无新增内容也要明确说明。
+- 子代理完成报告必须包含 `Knowledge Findings`，主线程负责审核其事实依据、去重结果和是否需要架构/ADR 更新。
+
 ## 变更原则
 
 - 先检查真实代码、仓库文档、Git 状态和现有改动，再设计或修改。
