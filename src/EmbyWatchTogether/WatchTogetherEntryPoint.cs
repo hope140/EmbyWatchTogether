@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Logging;
@@ -111,7 +112,26 @@ namespace Emby.Plugins.WatchTogether
 
         private void OnPlaybackProgress(object sender, EventArgs e) => _syncEngine?.RequestImmediatePoll();
 
-        private void OnPlaybackStopped(object sender, EventArgs e) => _syncEngine?.RequestImmediatePoll();
+        private void OnPlaybackStopped(object sender, PlaybackStopEventArgs e)
+        {
+            if (e == null)
+            {
+                return;
+            }
+
+            var session = e.Session;
+            string itemId = e.MediaInfo?.Id ?? session?.NowPlayingItem?.Id;
+            if (string.IsNullOrEmpty(itemId) && e.Item != null && e.Item.Id != Guid.Empty)
+            {
+                itemId = e.Item.Id.ToString();
+            }
+
+            _syncEngine?.EnqueuePlaybackStopped(new PlaybackStoppedSignal(
+                session?.UserId,
+                session?.Id,
+                itemId,
+                DateTimeOffset.UtcNow));
+        }
 
         private void OnSessionStarted(object sender, SessionEventArgs e) => _syncEngine?.RequestImmediatePoll();
 
