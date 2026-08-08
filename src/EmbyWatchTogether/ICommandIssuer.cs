@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace Emby.Plugins.WatchTogether
 {
@@ -21,6 +22,25 @@ namespace Emby.Plugins.WatchTogether
             string command,
             long? positionTicks,
             DateTimeOffset now,
+            out string error);
+    }
+
+    /// <summary>
+    /// Internal cancellation-aware adapter used by the live engine. The
+    /// public ICommandIssuer contract remains unchanged so existing test and
+    /// extension implementations continue to compile.
+    /// </summary>
+    internal interface ICancellableCommandIssuer
+    {
+        bool TryIssue(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string command,
+            long? positionTicks,
+            DateTimeOffset now,
+            CancellationToken cancellationToken,
             out string error);
     }
 }

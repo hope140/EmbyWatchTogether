@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Emby.Plugins.WatchTogether
 {
@@ -40,6 +41,14 @@ namespace Emby.Plugins.WatchTogether
 
         public string ItemId { get; set; }
 
+        /// <summary>
+        /// Session identity captured when the barrier starts. A matching ItemId
+        /// is not enough to reuse a barrier after a participant reconnects with
+        /// a different Emby session.
+        /// </summary>
+        public Dictionary<string, string> SessionIds { get; } =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         public bool PauseSent { get; set; }
 
         public bool SeekSent { get; set; }
@@ -50,6 +59,10 @@ namespace Emby.Plugins.WatchTogether
     public sealed class PendingCommand
     {
         public string UserId { get; set; }
+
+        public string SessionId { get; set; }
+
+        public string ItemId { get; set; }
 
         public string Command { get; set; }
 
@@ -62,6 +75,10 @@ namespace Emby.Plugins.WatchTogether
 
     public sealed class SuppressedCommand
     {
+        public string SessionId { get; set; }
+
+        public string ItemId { get; set; }
+
         public string Command { get; set; }
 
         public long? PositionTicks { get; set; }
@@ -76,6 +93,14 @@ namespace Emby.Plugins.WatchTogether
     public sealed class PauseAlignState
     {
         public string AnchorUserId { get; set; }
+
+        public string AnchorSessionId { get; set; }
+
+        public string AnchorItemId { get; set; }
+
+        public string SessionId { get; set; }
+
+        public string ItemId { get; set; }
 
         public long TargetPositionTicks { get; set; }
 

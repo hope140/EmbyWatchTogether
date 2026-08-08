@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -30,7 +31,11 @@ namespace Emby.Plugins.WatchTogether
         private const string AutomaticResyncMessageHeader = "一起观看";
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
         private const int NotificationTimeoutMs = 3000;
+        private const double RoomPollErrorLogIntervalSeconds = 30.0;
+        private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
         private const double AckLatencyEmaAlpha = 0.3;
+        private const double MissingSessionDebounceSeconds = 2;
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -39,14 +44,21 @@ namespace Emby.Plugins.WatchTogether
         private readonly ILogger _logger;
         private readonly Func<string> _serverIdProvider;
         private readonly Func<DateTimeOffset> _clock;
-        private readonly double _pollIntervalSeconds;
-        private readonly bool _pauseOtherOnPlaybackStop;
-        private readonly bool _notifyOtherOnPlaybackStop;
+        private double _pollIntervalSeconds;
+        private bool _pauseOtherOnPlaybackStop;
+        private bool _notifyOtherOnPlaybackStop;
         private readonly object _lock = new object();
+        private readonly object _roomPollLogLock = new object();
+        private readonly Dictionary<string, DateTimeOffset> _lastRoomPollErrorAtUtc =
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentQueue<PlaybackStoppedSignal> _playbackStoppedSignals =
+            new ConcurrentQueue<PlaybackStoppedSignal>();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
         private Thread _thread;
         private bool _disposed;
+        private bool _resourcesDisposed;
+        private bool _threadExited;
 
         public SyncEngine(
             RoomManager roomManager,
@@ -75,9 +87,13 @@ namespace Emby.Plugins.WatchTogether
 
             _serverIdProvider = serverIdProvider ?? (() => string.Empty);
             _clock = clock ?? (() => DateTimeOffset.UtcNow);
-            _pollIntervalSeconds = Math.Max(0.05, pollIntervalSeconds);
-            _pauseOtherOnPlaybackStop = pauseOtherOnPlaybackStop;
-            _notifyOtherOnPlaybackStop = notifyOtherOnPlaybackStop;
+            var options = new SyncEngineOptions(
+                pollIntervalSeconds,
+                pauseOtherOnPlaybackStop,
+                notifyOtherOnPlaybackStop);
+            _pollIntervalSeconds = options.PollIntervalSeconds;
+            _pauseOtherOnPlaybackStop = options.PauseOtherOnPlaybackStop;
+            _notifyOtherOnPlaybackStop = options.NotifyOtherOnPlaybackStop;
         }
 
         public void Start()
@@ -102,6 +118,32 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        /// <summary>
+        /// Applies the live synchronization settings and wakes a sleeping loop
+        /// so the next poll observes them without waiting for the old interval.
+        /// </summary>
+        public void UpdateOptions(SyncEngineOptions options)
+        {
+            if (options == null)
+            {
+                throw new ArgumentNullException(nameof(options));
+            }
+
+            lock (_lock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _pollIntervalSeconds = SyncEngineOptions.NormalizePollIntervalSeconds(
+                    options.PollIntervalSeconds);
+                _pauseOtherOnPlaybackStop = options.PauseOtherOnPlaybackStop;
+                _notifyOtherOnPlaybackStop = options.NotifyOtherOnPlaybackStop;
+                SignalWakeLocked();
+            }
+        }
+
         public void Stop()
         {
             Thread thread;
@@ -112,12 +154,14 @@ namespace Emby.Plugins.WatchTogether
                     return;
                 }
 
-                _cts.Cancel();
-                _wakeEvent.Set();
+                CancelLocked();
                 thread = _thread;
             }
 
-            JoinThread(thread);
+            if (!JoinThread(thread))
+            {
+                _logger?.Warn("WatchTogether sync engine stop timed out after 10s");
+            }
         }
 
         /// <summary>
@@ -133,20 +177,37 @@ namespace Emby.Plugins.WatchTogether
                     return;
                 }
 
-                try
+                SignalWakeLocked();
+            }
+        }
+
+        /// <summary>
+        /// Queues a typed playback-stop event and wakes the coordinator. The
+        /// Emby event thread never infers a stop from a UI snapshot or performs
+        /// room side effects directly.
+        /// </summary>
+        public void EnqueuePlaybackStopped(PlaybackStoppedSignal signal)
+        {
+            if (signal == null)
+            {
+                return;
+            }
+
+            lock (_lock)
+            {
+                if (_disposed)
                 {
-                    _wakeEvent.Set();
+                    return;
                 }
-                catch (ObjectDisposedException)
-                {
-                    // A concurrent disposal has already completed the wake-up
-                    // path; callers must not observe a disposal race.
-                }
+
+                _playbackStoppedSignals.Enqueue(signal);
+                SignalWakeLocked();
             }
         }
 
         public IReadOnlyList<RoomPollResult> PollOnce(DateTimeOffset now)
         {
+            var options = GetOptionsSnapshot();
             var results = new List<RoomPollResult>();
             var rooms = _roomManager.ListRooms();
             if (rooms.Count == 0)
@@ -155,33 +216,50 @@ namespace Emby.Plugins.WatchTogether
             }
 
             string currentServerId = _serverIdProvider();
-            var validRooms = new List<Room>();
-            foreach (var room in rooms)
+            var validRoomIds = new List<string>();
+            foreach (var listedRoom in rooms)
             {
-                var runtime = _roomManager.GetRuntime(room.Id);
-                if (!string.Equals(room.ServerId, currentServerId, StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    runtime.State = RoomState.Unavailable;
-                    runtime.Error = "room server is unavailable";
-                    runtime.Barrier = null;
-                    runtime.Pending.Clear();
-                    _logger?.Info($"Room {room.Id}: marked unavailable (server mismatch)");
-                    results.Add(new RoomPollResult
+                    using (var access = _roomManager.TryEnterRoom(listedRoom.Id))
                     {
-                        RoomId = room.Id,
-                        State = RoomState.Unavailable,
-                        Eligible = false,
-                        Error = runtime.Error,
-                    });
+                        if (access == null)
+                        {
+                            continue;
+                        }
+
+                        var room = access.Room;
+                        var runtime = access.Runtime;
+                        if (!string.Equals(room.ServerId, currentServerId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            runtime.State = RoomState.Unavailable;
+                            runtime.Error = "room server is unavailable";
+                            runtime.Barrier = null;
+                            runtime.Pending.Clear();
+                            _logger?.Info($"Room {room.Id}: marked unavailable (server mismatch)");
+                            results.Add(new RoomPollResult
+                            {
+                                RoomId = room.Id,
+                                State = RoomState.Unavailable,
+                                Eligible = false,
+                                Error = runtime.Error,
+                            });
+                        }
+                        else
+                        {
+                            validRoomIds.Add(room.Id);
+                        }
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    validRooms.Add(room);
+                    LogRoomPollException(listedRoom?.Id, now, ex);
                 }
             }
 
-            if (validRooms.Count == 0)
+            if (validRoomIds.Count == 0)
             {
+                DrainPlaybackStoppedSignals();
                 return results;
             }
 
@@ -195,11 +273,29 @@ namespace Emby.Plugins.WatchTogether
                 return results;
             }
 
-            lock (_lock)
+            var playbackStoppedSignals = DrainPlaybackStoppedSignals();
+
+            var explicitStopped = candidates
+                .Where(s => s != null && s.Stopped)
+                .GroupBy(s => s.UserId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(s => s.LastActivityDateUtc).First(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            foreach (var roomId in validRoomIds)
             {
-                foreach (var room in validRooms)
+                try
                 {
-                    var runtime = _roomManager.GetRuntime(room.Id);
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access == null)
+                        {
+                            continue;
+                        }
+
+                    var room = access.Room;
+                    var runtime = access.Runtime;
                     if (runtime.State == RoomState.Unavailable)
                     {
                         runtime.State = RoomState.Waiting;
@@ -212,11 +308,23 @@ namespace Emby.Plugins.WatchTogether
                         snapshots.Values.All(s => s != null) &&
                         snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
 
-                    // While actively watching, Emby may briefly retain the old
-                    // ItemId after a player is closed while reporting
-                    // PositionTicks = 0. Treat that transition as a stop, not as
-                    // a user-issued seek, before observing pending commands.
-                    if (TryGetStoppedUsers(runtime, room, snapshots, out var stoppedUsers))
+                    // Process an explicit stop before the snapshot-derived
+                    // missing-session debounce or normal Watching tick.
+                    // Matching is identity-based so a late event cannot affect a
+                    // reconnected session or a different item.
+                    if (TryHandlePlaybackStoppedSignals(
+                        runtime,
+                        room,
+                        snapshots,
+                        playbackStoppedSignals,
+                        options,
+                        now))
+                    {
+                        results.Add(Result(room, runtime, eligible));
+                        continue;
+                    }
+
+                    if (TryGetStoppedUsers(runtime, room, snapshots, explicitStopped, now, out var stoppedUsers))
                     {
                         // SessionSelector omits stopped/offline sessions, so the
                         // same stop condition can be observed on every poll until
@@ -228,22 +336,25 @@ namespace Emby.Plugins.WatchTogether
                             StringComparison.Ordinal);
                         if (!stopAlreadyHandled)
                         {
-                            if (_pauseOtherOnPlaybackStop)
+                            if (options.PauseOtherOnPlaybackStop)
                             {
                                 PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
                             }
 
-                            if (_notifyOtherOnPlaybackStop)
+                            if (options.NotifyOtherOnPlaybackStop)
                             {
                                 NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
                             }
 
                             _logger?.Info(
                                 $"Room {room.Id}: playback stopped by {string.Join(",", stoppedUsers)}; " +
-                                $"pausedOther={_pauseOtherOnPlaybackStop}, notifiedOther={_notifyOtherOnPlaybackStop}");
+                                $"pausedOther={options.PauseOtherOnPlaybackStop}, notifiedOther={options.NotifyOtherOnPlaybackStop}");
                         }
 
                         runtime.ResetToWaiting();
+                        runtime.Previous.Clear();
+                        runtime.PreviousAtUtc = null;
+                        runtime.MissingSessionSinceUtc = null;
                         runtime.Error = StoppedPlaybackError;
                         results.Add(Result(room, runtime, eligible));
                         continue;
@@ -266,7 +377,25 @@ namespace Emby.Plugins.WatchTogether
                         }
                     }
 
-                    bool pendingFailed = ObservePending(runtime, room, snapshots, now);
+                    bool staleDeferredCommand = DiscardStaleDeferredCommands(
+                        runtime,
+                        snapshots,
+                        sameItem);
+                    bool pendingFailed = ObservePending(
+                        runtime,
+                        room,
+                        snapshots,
+                        sameItem,
+                        now,
+                        out var stalePendingCommand);
+                    if (staleDeferredCommand || stalePendingCommand)
+                    {
+                        // A command captured for a different session or item
+                        // must never be acknowledged or retried against the
+                        // current snapshot. Rebuild the barrier from the
+                        // current identities instead.
+                        runtime.ResetToWaiting();
+                    }
                     if (!sameItem && runtime.State != RoomState.Waiting)
                     {
                         runtime.ResetToWaiting();
@@ -350,7 +479,16 @@ namespace Emby.Plugins.WatchTogether
                         runtime.Previous.Clear();
                     }
 
-                    results.Add(Result(room, runtime, eligible));
+                        results.Add(Result(room, runtime, eligible));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // A broken room must not prevent the remaining rooms from
+                    // being polled in this cycle. The per-room logger is
+                    // rate-limited so a persistent client failure is visible
+                    // without flooding the server log.
+                    LogRoomPollException(roomId, now, ex);
                 }
             }
 
@@ -362,53 +500,83 @@ namespace Emby.Plugins.WatchTogether
             Thread thread;
             lock (_lock)
             {
-                if (_disposed)
+                if (_resourcesDisposed)
                 {
                     return;
                 }
 
                 _disposed = true;
-                _cts.Cancel();
-                _wakeEvent.Set();
+                CancelLocked();
                 thread = _thread;
             }
 
-            JoinThread(thread);
-            _wakeEvent.Dispose();
-            _cts.Dispose();
+            if (!JoinThread(thread))
+            {
+                _logger?.Warn("WatchTogether sync engine dispose timed out after 10s");
+                return;
+            }
+
+            DisposeResources();
         }
 
         private void Loop()
         {
             var token = _cts.Token;
             var waitHandles = new WaitHandle[] { token.WaitHandle, _wakeEvent };
-            var timeoutMilliseconds = GetPollTimeoutMilliseconds();
-
-            while (!token.IsCancellationRequested)
+            try
             {
-                try
+                while (!token.IsCancellationRequested)
                 {
-                    PollOnce(_clock());
+                    try
+                    {
+                        PollOnce(_clock());
+                    }
+                    catch
+                    {
+                        // Polling must never kill the background thread. Room
+                        // failures are isolated and logged by PollOnce; this
+                        // guard remains for failures outside a room context.
+                    }
+
+                    try
+                    {
+                        WaitHandle.WaitAny(waitHandles, GetPollTimeoutMilliseconds());
+                    }
+                    catch
+                    {
+                        return;
+                    }
                 }
-                catch
+            }
+            finally
+            {
+                bool disposeResources;
+                lock (_lock)
                 {
-                    // Polling must never kill the background thread.
+                    _threadExited = true;
+                    disposeResources = _disposed && !_resourcesDisposed;
+                    if (disposeResources)
+                    {
+                        _resourcesDisposed = true;
+                    }
                 }
 
-                try
+                if (disposeResources)
                 {
-                    WaitHandle.WaitAny(waitHandles, timeoutMilliseconds);
-                }
-                catch
-                {
-                    return;
+                    DisposeWaitHandles();
                 }
             }
         }
 
         private int GetPollTimeoutMilliseconds()
         {
-            var milliseconds = _pollIntervalSeconds * 1000.0;
+            double pollIntervalSeconds;
+            lock (_lock)
+            {
+                pollIntervalSeconds = _pollIntervalSeconds;
+            }
+
+            var milliseconds = pollIntervalSeconds * 1000.0;
             if (milliseconds >= int.MaxValue)
             {
                 return int.MaxValue;
@@ -417,32 +585,267 @@ namespace Emby.Plugins.WatchTogether
             return Math.Max(1, (int)Math.Ceiling(milliseconds));
         }
 
-        private static void JoinThread(Thread thread)
+        private bool JoinThread(Thread thread)
         {
-            if (thread == null || thread == Thread.CurrentThread)
+            if (thread == null)
             {
-                return;
+                return true;
+            }
+
+            if (thread == Thread.CurrentThread)
+            {
+                return false;
             }
 
             try
             {
-                thread.Join();
+                return thread.Join(StopTimeout);
             }
             catch
             {
                 // A stopping/disposal path must not surface thread races.
+                return false;
             }
+        }
+
+        private void CancelLocked()
+        {
+            try
+            {
+                _cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Disposal has already completed the cancellation path.
+            }
+
+            SignalWakeLocked();
+        }
+
+        private void SignalWakeLocked()
+        {
+            try
+            {
+                _wakeEvent.Set();
+            }
+            catch (ObjectDisposedException)
+            {
+                // A completed disposal must not escape into an event callback.
+            }
+        }
+
+        private SyncEngineOptions GetOptionsSnapshot()
+        {
+            lock (_lock)
+            {
+                return new SyncEngineOptions(
+                    _pollIntervalSeconds,
+                    _pauseOtherOnPlaybackStop,
+                    _notifyOtherOnPlaybackStop);
+            }
+        }
+
+        private void DisposeResources()
+        {
+            lock (_lock)
+            {
+                if (_resourcesDisposed || (_thread != null && !_threadExited))
+                {
+                    return;
+                }
+
+                _resourcesDisposed = true;
+            }
+
+            DisposeWaitHandles();
+        }
+
+        private void DisposeWaitHandles()
+        {
+            try
+            {
+                _wakeEvent.Dispose();
+            }
+            catch
+            {
+                // Dispose is best effort after the thread has exited.
+            }
+
+            try
+            {
+                _cts.Dispose();
+            }
+            catch
+            {
+                // Dispose is best effort after the thread has exited.
+            }
+        }
+
+        private void LogRoomPollException(string roomId, DateTimeOffset now, Exception exception)
+        {
+            string key = roomId ?? "<unknown>";
+            bool shouldLog;
+            lock (_roomPollLogLock)
+            {
+                if (!_lastRoomPollErrorAtUtc.TryGetValue(key, out var lastLoggedAt) ||
+                    (now - lastLoggedAt).TotalSeconds >= RoomPollErrorLogIntervalSeconds)
+                {
+                    _lastRoomPollErrorAtUtc[key] = now;
+                    shouldLog = true;
+                }
+                else
+                {
+                    shouldLog = false;
+                }
+            }
+
+            if (shouldLog)
+            {
+                _logger?.Warn(
+                    $"Room {key}: poll failed ({exception?.GetType().Name ?? "unknown"}): " +
+                    $"{exception?.Message ?? "unknown error"}");
+            }
+        }
+
+        private List<PlaybackStoppedSignal> DrainPlaybackStoppedSignals()
+        {
+            var signals = new List<PlaybackStoppedSignal>();
+            while (_playbackStoppedSignals.TryDequeue(out var signal))
+            {
+                if (signal != null)
+                {
+                    signals.Add(signal);
+                }
+            }
+
+            return signals;
+        }
+
+        private bool TryHandlePlaybackStoppedSignals(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            IReadOnlyList<PlaybackStoppedSignal> signals,
+            SyncEngineOptions options,
+            DateTimeOffset now)
+        {
+            if (signals == null || signals.Count == 0)
+            {
+                return false;
+            }
+
+            PlaybackStoppedSignal matchingSignal = null;
+            foreach (var signal in signals)
+            {
+                if (IsCurrentPlaybackStoppedSignal(runtime, room, snapshots, signal))
+                {
+                    matchingSignal = signal;
+                    break;
+                }
+            }
+
+            if (matchingSignal == null)
+            {
+                return false;
+            }
+
+            var stoppedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                matchingSignal.UserId,
+            };
+            bool stopAlreadyHandled = string.Equals(
+                runtime.Error,
+                StoppedPlaybackError,
+                StringComparison.Ordinal);
+            if (!stopAlreadyHandled)
+            {
+                if (options.PauseOtherOnPlaybackStop)
+                {
+                    PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                }
+
+                if (options.NotifyOtherOnPlaybackStop)
+                {
+                    NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                }
+
+                _logger?.Info(
+                    $"Room {room.Id}: playback stopped by {matchingSignal.UserId}; " +
+                    $"pausedOther={options.PauseOtherOnPlaybackStop}, notifiedOther={options.NotifyOtherOnPlaybackStop}");
+            }
+
+            runtime.ResetToWaiting();
+            runtime.Previous.Clear();
+            runtime.PreviousAtUtc = null;
+            runtime.MissingSessionSinceUtc = null;
+            runtime.Error = StoppedPlaybackError;
+            return true;
+        }
+
+        private static bool IsCurrentPlaybackStoppedSignal(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            PlaybackStoppedSignal signal)
+        {
+            if (runtime == null || room == null || snapshots == null || signal == null ||
+                (runtime.State != RoomState.Watching && !runtime.MissingSessionSinceUtc.HasValue) ||
+                room.JoinedParticipantUserIds.Count != 2 ||
+                string.IsNullOrEmpty(signal.UserId) ||
+                string.IsNullOrEmpty(signal.SessionId) ||
+                string.IsNullOrEmpty(signal.ItemId) ||
+                signal.OccurredAtUtc == default(DateTimeOffset) ||
+                !room.IsJoined(signal.UserId) ||
+                (!string.IsNullOrEmpty(runtime.SyncItemId) &&
+                 !string.Equals(runtime.SyncItemId, signal.ItemId, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            // PreviousAtUtc is the newest point at which the current Watching
+            // identity was observed. An event older than that point is stale.
+            if (runtime.PreviousAtUtc.HasValue &&
+                signal.OccurredAtUtc < runtime.PreviousAtUtc.Value)
+            {
+                return false;
+            }
+
+            if (runtime.Previous.TryGetValue(signal.UserId, out var previous))
+            {
+                if (!HasSameIdentity(signal.SessionId, signal.ItemId, previous))
+                {
+                    return false;
+                }
+            }
+            else if (!runtime.LastWatchingSessionIds.TryGetValue(signal.UserId, out var lastSessionId) ||
+                     !string.Equals(lastSessionId, signal.SessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // If Emby still exposes a current session for the user, it must be
+            // the same identity. A newer session makes an old stop event stale.
+            if (snapshots.TryGetValue(signal.UserId, out var current) &&
+                current != null &&
+                !HasSameIdentity(signal.SessionId, signal.ItemId, current))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static bool TryGetStoppedUsers(
             RoomRuntime runtime,
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            IReadOnlyDictionary<string, SessionSnapshot> explicitStopped,
+            DateTimeOffset now,
             out HashSet<string> stoppedUsers)
         {
             stoppedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (runtime == null || room == null || snapshots == null ||
-                runtime.State != RoomState.Watching ||
+                (runtime.State != RoomState.Watching && !runtime.MissingSessionSinceUtc.HasValue) ||
                 room.JoinedParticipantUserIds.Count != 2)
             {
                 // A barrier is only the pause/seek/restore handshake. A
@@ -453,37 +856,47 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var members = room.JoinedParticipantUserIds;
+            bool missingSession = false;
+            bool explicitStop = false;
             foreach (var userId in members)
             {
-                if (!snapshots.TryGetValue(userId, out var current) || current == null ||
-                    !current.Online || current.Stopped)
+                if (explicitStopped != null && explicitStopped.ContainsKey(userId))
                 {
                     stoppedUsers.Add(userId);
-                }
-            }
-
-            if (stoppedUsers.Count > 0)
-            {
-                return true;
-            }
-
-            foreach (var userId in members)
-            {
-                if (!snapshots.TryGetValue(userId, out var current) || current == null ||
-                    !runtime.Previous.TryGetValue(userId, out var previous) || previous == null ||
-                    !string.Equals(previous.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase))
-                {
+                    explicitStop = true;
                     continue;
                 }
 
-                if (IsPositionReset(previous.PositionTicks, current.PositionTicks))
+                if (!snapshots.TryGetValue(userId, out var current) || current == null || !current.Online)
                 {
                     stoppedUsers.Add(userId);
-                    return true;
+                    missingSession = true;
+                }
+                else if (current.Stopped)
+                {
+                    stoppedUsers.Add(userId);
                 }
             }
 
-            return false;
+            if (explicitStop)
+            {
+                runtime.MissingSessionSinceUtc = null;
+                return true;
+            }
+
+            if (!missingSession)
+            {
+                runtime.MissingSessionSinceUtc = null;
+                return stoppedUsers.Count > 0;
+            }
+
+            if (!runtime.MissingSessionSinceUtc.HasValue)
+            {
+                runtime.MissingSessionSinceUtc = now;
+                return false;
+            }
+
+            return (now - runtime.MissingSessionSinceUtc.Value).TotalSeconds >= MissingSessionDebounceSeconds;
         }
 
         private void PauseOtherAfterPlaybackStopped(
@@ -532,7 +945,7 @@ namespace Emby.Plugins.WatchTogether
                     // Display messages are advisory: a client that rejects the
                     // capability or fails to receive the message must not alter
                     // the stop transition or its existing pause behavior.
-                    _messageIssuer.TryIssueMessage(
+                    TryIssueMessage(
                         room.Id,
                         room.AdminUserId,
                         pair.Key,
@@ -572,7 +985,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Automatic retry notices are advisory. Delivery failures
                     // must not prevent the new barrier from being started.
-                    _messageIssuer.TryIssueMessage(
+                    TryIssueMessage(
                         room.Id,
                         room.AdminUserId,
                         userId,
@@ -661,13 +1074,6 @@ namespace Emby.Plugins.WatchTogether
             return difference >= seekDetectionThresholdTicks;
         }
 
-        private static bool IsPositionReset(long previousPositionTicks, long currentPositionTicks)
-        {
-            return previousPositionTicks > 2 * SyncConstants.TicksPerSecond &&
-                currentPositionTicks <= SyncConstants.TicksPerSecond &&
-                previousPositionTicks - currentPositionTicks >= SyncConstants.DriftThresholdTicks;
-        }
-
         private static bool HasLargePositionGap(IReadOnlyDictionary<string, SessionSnapshot> snapshots)
         {
             if (snapshots == null || snapshots.Count != 2 || snapshots.Values.Any(s => s == null))
@@ -689,14 +1095,128 @@ namespace Emby.Plugins.WatchTogether
             };
         }
 
-        private bool ObservePending(RoomRuntime runtime, Room room, IReadOnlyDictionary<string, SessionSnapshot> snapshots, DateTimeOffset now)
+        private static bool HasSameIdentity(
+            string sessionId,
+            string itemId,
+            SessionSnapshot snapshot)
+        {
+            return snapshot != null &&
+                !string.IsNullOrEmpty(sessionId) &&
+                !string.IsNullOrEmpty(itemId) &&
+                string.Equals(sessionId, snapshot.SessionId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(itemId, snapshot.ItemId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCurrentCommandIdentity(
+            RoomRuntime runtime,
+            bool sameItem,
+            string userId,
+            string sessionId,
+            string itemId,
+            SessionSnapshot snapshot)
+        {
+            if (!sameItem || snapshot == null ||
+                !string.Equals(snapshot.UserId, userId, StringComparison.OrdinalIgnoreCase) ||
+                !HasSameIdentity(sessionId, itemId, snapshot))
+            {
+                return false;
+            }
+
+            string expectedItem = runtime?.Barrier?.ItemId ?? runtime?.SyncItemId;
+            return string.IsNullOrEmpty(expectedItem) ||
+                string.Equals(expectedItem, snapshot.ItemId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool DiscardStaleDeferredCommands(
+            RoomRuntime runtime,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            bool sameItem)
+        {
+            bool discarded = false;
+
+            foreach (var pair in runtime.Suppressed.ToList())
+            {
+                snapshots.TryGetValue(pair.Key, out var snapshot);
+                if (IsCurrentCommandIdentity(
+                    runtime,
+                    sameItem,
+                    pair.Key,
+                    pair.Value?.SessionId,
+                    pair.Value?.ItemId,
+                    snapshot))
+                {
+                    continue;
+                }
+
+                runtime.Suppressed.Remove(pair.Key);
+                discarded = true;
+            }
+
+            foreach (var pair in runtime.PauseAlign.ToList())
+            {
+                string userId = pair.Key;
+                var align = pair.Value;
+                snapshots.TryGetValue(userId, out var follower);
+                SessionSnapshot anchor = null;
+                if (!string.IsNullOrEmpty(align?.AnchorUserId))
+                {
+                    snapshots.TryGetValue(align.AnchorUserId, out anchor);
+                }
+
+                bool targetCurrent = align != null && IsCurrentCommandIdentity(
+                    runtime,
+                    sameItem,
+                    userId,
+                    align.SessionId,
+                    align.ItemId,
+                    follower);
+                bool anchorCurrent = align != null && IsCurrentCommandIdentity(
+                    runtime,
+                    sameItem,
+                    align.AnchorUserId,
+                    align.AnchorSessionId,
+                    align.AnchorItemId,
+                    anchor);
+                if (targetCurrent && anchorCurrent)
+                {
+                    continue;
+                }
+
+                runtime.PauseAlign.Remove(userId);
+                discarded = true;
+            }
+
+            return discarded;
+        }
+
+        private bool ObservePending(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            bool sameItem,
+            DateTimeOffset now,
+            out bool stalePendingCommand)
         {
             bool failed = false;
+            stalePendingCommand = false;
             foreach (var pair in runtime.Pending.ToList())
             {
                 string userId = pair.Key;
                 var pending = pair.Value;
                 snapshots.TryGetValue(userId, out var snapshot);
+
+                if (!IsCurrentCommandIdentity(
+                    runtime,
+                    sameItem,
+                    userId,
+                    pending?.SessionId,
+                    pending?.ItemId,
+                    snapshot))
+                {
+                    runtime.Pending.Remove(userId);
+                    stalePendingCommand = true;
+                    continue;
+                }
 
                 if (PendingMatcher.Matches(pending, snapshot))
                 {
@@ -705,6 +1225,8 @@ namespace Emby.Plugins.WatchTogether
                     runtime.Pending.Remove(userId);
                     runtime.Suppressed[userId] = new SuppressedCommand
                     {
+                        SessionId = pending.SessionId,
+                        ItemId = pending.ItemId,
                         Command = pending.Command,
                         PositionTicks = pending.PositionTicks,
                         UntilUtc = now + TimeSpan.FromSeconds(SyncConstants.SuppressSeconds),
@@ -735,7 +1257,7 @@ namespace Emby.Plugins.WatchTogether
                     _logger?.Info(
                         $"Room {room.Id}: pending {pending.Command} for {userId} timed out; " +
                         $"retry {pending.Retries + 1}/{SyncConstants.MaxPendingRetries}");
-                    if (Issue(runtime, room, userId, snapshot, pending.Command, positionTicks, now))
+                    if (Issue(runtime, room, userId, snapshot, pending.Command, positionTicks, now, out _))
                     {
                         if (runtime.Pending.TryGetValue(userId, out var retry))
                         {
@@ -745,6 +1267,10 @@ namespace Emby.Plugins.WatchTogether
                                 runtime.Barrier.StartedAtUtc = now;
                             }
                         }
+                    }
+                    else
+                    {
+                        failed = true;
                     }
                 }
                 else
@@ -778,6 +1304,105 @@ namespace Emby.Plugins.WatchTogether
             _logger?.Info($"Room {roomId}: barrier retry scheduled: {error}");
         }
 
+        private bool TryIssueCommand(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string command,
+            long? positionTicks,
+            DateTimeOffset now,
+            out string error)
+        {
+            if (_issuer == null)
+            {
+                error = "no command issuer configured";
+                return false;
+            }
+
+            var cancellable = _issuer as ICancellableCommandIssuer;
+            if (cancellable == null)
+            {
+                // Keep legacy test doubles and third-party implementations
+                // source-compatible while the built-in issuer uses the
+                // cancellation-aware path below.
+                return _issuer.TryIssue(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    command,
+                    positionTicks,
+                    now,
+                    out error);
+            }
+
+            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            {
+                return cancellable.TryIssue(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    command,
+                    positionTicks,
+                    now,
+                    timeout.Token,
+                    out error);
+            }
+        }
+
+        private bool TryIssueMessage(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string header,
+            string text,
+            int? timeoutMs,
+            DateTimeOffset now,
+            out string error)
+        {
+            if (_messageIssuer == null)
+            {
+                error = "no message issuer configured";
+                return false;
+            }
+
+            var cancellable = _messageIssuer as ICancellableMessageIssuer;
+            if (cancellable == null)
+            {
+                // Keep legacy test doubles and third-party implementations
+                // source-compatible while the built-in issuer uses the
+                // cancellation-aware path below.
+                return _messageIssuer.TryIssueMessage(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    header,
+                    text,
+                    timeoutMs,
+                    now,
+                    out error);
+            }
+
+            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            {
+                return cancellable.TryIssueMessage(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    header,
+                    text,
+                    timeoutMs,
+                    now,
+                    timeout.Token,
+                    out error);
+            }
+        }
+
         private bool Issue(
             RoomRuntime runtime,
             Room room,
@@ -787,34 +1412,55 @@ namespace Emby.Plugins.WatchTogether
             long? positionTicks,
             DateTimeOffset now)
         {
+            return Issue(runtime, room, userId, snapshot, command, positionTicks, now, out _);
+        }
+
+        private bool Issue(
+            RoomRuntime runtime,
+            Room room,
+            string userId,
+            SessionSnapshot snapshot,
+            string command,
+            long? positionTicks,
+            DateTimeOffset now,
+            out string failure)
+        {
+            failure = null;
             if (runtime.Pending.TryGetValue(userId, out var existing) &&
                 string.Equals(existing.Command, command, StringComparison.Ordinal))
             {
-                return true;
+                if (HasSameIdentity(existing.SessionId, existing.ItemId, snapshot))
+                {
+                    return true;
+                }
+
+                // Never let a command captured for an old device/item suppress
+                // a command for the current snapshot.
+                runtime.Pending.Remove(userId);
             }
 
-            bool ok;
-            string error;
-            if (_issuer == null)
-            {
-                ok = false;
-                error = "no command issuer configured";
-            }
-            else
-            {
-                ok = _issuer.TryIssue(room.Id, room.AdminUserId, userId, snapshot, command, positionTicks, now, out error);
-            }
+            bool ok = TryIssueCommand(
+                room.Id,
+                room.AdminUserId,
+                userId,
+                snapshot,
+                command,
+                positionTicks,
+                now,
+                out var error);
 
             if (!ok)
             {
-                runtime.Error = $"{command} command failed: {error}";
-                runtime.State = RoomState.Waiting;
+                failure = $"{command} command failed: {error}";
+                _logger?.Warn($"Room {room.Id}: {failure}");
                 return false;
             }
 
             runtime.Pending[userId] = new PendingCommand
             {
                 UserId = userId,
+                SessionId = snapshot.SessionId,
+                ItemId = snapshot.ItemId,
                 Command = command,
                 PositionTicks = positionTicks,
                 IssuedAtUtc = now,
@@ -854,6 +1500,13 @@ namespace Emby.Plugins.WatchTogether
                 RestoreSent = false,
             };
             runtime.SyncItemId = anchor.ItemId;
+            foreach (var pair in snapshots)
+            {
+                if (pair.Value != null)
+                {
+                    runtime.Barrier.SessionIds[pair.Key] = pair.Value.SessionId;
+                }
+            }
             runtime.Pending.Clear();
             runtime.Suppressed.Clear();
             runtime.PauseAlign.Clear();
@@ -877,7 +1530,12 @@ namespace Emby.Plugins.WatchTogether
             var members = room.JoinedParticipantUserIds;
 
             if (!snapshots.Values.All(s => s != null) ||
-                snapshots.Values.Any(s => !string.Equals(s.ItemId, barrier.ItemId, StringComparison.OrdinalIgnoreCase)))
+                snapshots.Values.Any(s => !string.Equals(s.ItemId, barrier.ItemId, StringComparison.OrdinalIgnoreCase)) ||
+                barrier.SessionIds.Count != members.Count ||
+                members.Any(user =>
+                    !snapshots.TryGetValue(user, out var snapshot) ||
+                    !barrier.SessionIds.TryGetValue(user, out var sessionId) ||
+                    !HasSameIdentity(sessionId, barrier.ItemId, snapshot)))
             {
                 runtime.ResetToWaiting();
                 return;
@@ -888,9 +1546,33 @@ namespace Emby.Plugins.WatchTogether
                 case BarrierStage.Pause:
                     if (!barrier.PauseSent)
                     {
+                        bool allIssued = true;
+                        string issueFailure = null;
                         foreach (var user in members)
                         {
-                            Issue(runtime, room, user, snapshots[user], RemoteCommands.Pause, null, now);
+                            if (!Issue(
+                                runtime,
+                                room,
+                                user,
+                                snapshots[user],
+                                RemoteCommands.Pause,
+                                null,
+                                now,
+                                out var failure))
+                            {
+                                allIssued = false;
+                                issueFailure ??= failure;
+                            }
+                        }
+
+                        if (!allIssued)
+                        {
+                            ScheduleBarrierRetry(
+                                runtime,
+                                room.Id,
+                                issueFailure ?? "barrier pause command failed",
+                                now);
+                            return;
                         }
 
                         barrier.PauseSent = true;
@@ -921,7 +1603,24 @@ namespace Emby.Plugins.WatchTogether
                     long target = barrier.PrimaryPositionTicks;
                     if (!barrier.SeekSent)
                     {
-                        Issue(runtime, room, follower, snapshots[follower], RemoteCommands.Seek, target, now);
+                        if (!Issue(
+                            runtime,
+                            room,
+                            follower,
+                            snapshots[follower],
+                            RemoteCommands.Seek,
+                            target,
+                            now,
+                            out var failure))
+                        {
+                            ScheduleBarrierRetry(
+                                runtime,
+                                room.Id,
+                                failure ?? "barrier seek command failed",
+                                now);
+                            return;
+                        }
+
                         barrier.SeekSent = true;
                         return;
                     }
@@ -945,9 +1644,33 @@ namespace Emby.Plugins.WatchTogether
                     if (!barrier.RestoreSent)
                     {
                         string command = barrier.PrimaryPaused ? RemoteCommands.Pause : RemoteCommands.Unpause;
+                        bool allIssued = true;
+                        string issueFailure = null;
                         foreach (var user in members)
                         {
-                            Issue(runtime, room, user, snapshots[user], command, null, now);
+                            if (!Issue(
+                                runtime,
+                                room,
+                                user,
+                                snapshots[user],
+                                command,
+                                null,
+                                now,
+                                out var failure))
+                            {
+                                allIssued = false;
+                                issueFailure ??= failure;
+                            }
+                        }
+
+                        if (!allIssued)
+                        {
+                            ScheduleBarrierRetry(
+                                runtime,
+                                room.Id,
+                                issueFailure ?? $"barrier {command} command failed",
+                                now);
+                            return;
                         }
 
                         barrier.RestoreSent = true;
@@ -1051,6 +1774,14 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
+            foreach (var pair in snapshots)
+            {
+                if (pair.Value != null && !string.IsNullOrEmpty(pair.Value.SessionId))
+                {
+                    runtime.LastWatchingSessionIds[pair.Key] = pair.Value.SessionId;
+                }
+            }
+
             var members = room.JoinedParticipantUserIds;
             if (runtime.SyncItemId == null ||
                 snapshots.Count != members.Count ||
@@ -1070,6 +1801,21 @@ namespace Emby.Plugins.WatchTogether
 
                 runtime.PreviousAtUtc = now;
                 return;
+            }
+
+            foreach (var user in members)
+            {
+                if (!snapshots.TryGetValue(user, out var current) || current == null ||
+                    !previous.TryGetValue(user, out var old) || old == null ||
+                    !string.Equals(old.SessionId, current.SessionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    // A reconnect can keep the same item and position while
+                    // still representing a different device session. Do not
+                    // interpret that identity change as a seek or reuse the
+                    // previous Watching barrier state.
+                    runtime.ResetToWaiting();
+                    return;
+                }
             }
 
             string primary = room.PrimaryUserId;
@@ -1095,7 +1841,14 @@ namespace Emby.Plugins.WatchTogether
                     {
                         runtime.Suppressed.Remove(user);
                     }
-                    else if (PendingMatcher.Matches(suppressed.Command, suppressed.PositionTicks, current))
+                    else if (IsCurrentCommandIdentity(
+                        runtime,
+                        true,
+                        user,
+                        suppressed.SessionId,
+                        suppressed.ItemId,
+                        current) &&
+                        PendingMatcher.Matches(suppressed.Command, suppressed.PositionTicks, current))
                     {
                         suppressPause = suppressed.Command == RemoteCommands.Pause ||
                                         suppressed.Command == RemoteCommands.Unpause;
@@ -1108,6 +1861,13 @@ namespace Emby.Plugins.WatchTogether
                 {
                     bool alreadyPending = pending != null &&
                         (pending.Command == RemoteCommands.Pause || pending.Command == RemoteCommands.Unpause) &&
+                        IsCurrentCommandIdentity(
+                            runtime,
+                            true,
+                            user,
+                            pending.SessionId,
+                            pending.ItemId,
+                            current) &&
                         PendingMatcher.Matches(pending, current);
                     if (!suppressPause && !alreadyPending)
                     {
@@ -1169,19 +1929,23 @@ namespace Emby.Plugins.WatchTogether
                     // Defer alignment of the other side to the paused anchor's
                     // position (borrowed from syncplay's pause-snap idea); the
                     // target is stable because the anchor is paused.
-                    long anchorPositionTicks = snapshots.TryGetValue(winner.userId, out var winnerSnapshot) &&
-                        winnerSnapshot != null
-                            ? winnerSnapshot.PositionTicks
-                            : 0;
+                    snapshots.TryGetValue(winner.userId, out var winnerSnapshot);
+                    long anchorPositionTicks = winnerSnapshot?.PositionTicks ?? 0;
                     foreach (var user in members)
                     {
                         if (user != winner.userId &&
                             !runtime.PauseAlign.ContainsKey(user) &&
-                            snapshots.TryGetValue(user, out _))
+                            snapshots.TryGetValue(user, out var followerSnapshot) &&
+                            followerSnapshot != null &&
+                            winnerSnapshot != null)
                         {
                             runtime.PauseAlign[user] = new PauseAlignState
                             {
                                 AnchorUserId = winner.userId,
+                                AnchorSessionId = winnerSnapshot.SessionId,
+                                AnchorItemId = winnerSnapshot.ItemId,
+                                SessionId = followerSnapshot.SessionId,
+                                ItemId = followerSnapshot.ItemId,
                                 TargetPositionTicks = anchorPositionTicks,
                                 CreatedAtUtc = now,
                             };
@@ -1195,12 +1959,28 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 string command = winner.paused ? RemoteCommands.Pause : RemoteCommands.Unpause;
+                bool allIssued = true;
+                string issueFailure = null;
                 foreach (var user in members)
                 {
                     if (user != winner.userId && snapshots.TryGetValue(user, out var snapshot) && snapshot != null)
                     {
-                        Issue(runtime, room, user, snapshot, command, null, now);
+                        if (!Issue(runtime, room, user, snapshot, command, null, now, out var failure))
+                        {
+                            allIssued = false;
+                            issueFailure ??= failure;
+                        }
                     }
+                }
+
+                if (!allIssued)
+                {
+                    ScheduleBarrierRetry(
+                        runtime,
+                        room.Id,
+                        issueFailure ?? $"{command} command failed",
+                        now);
+                    return;
                 }
 
                 _logger?.Info(
@@ -1229,6 +2009,17 @@ namespace Emby.Plugins.WatchTogether
                 string userId = pair.Key;
                 var align = pair.Value;
 
+                if (align == null ||
+                    string.IsNullOrEmpty(align.AnchorUserId) ||
+                    !snapshots.TryGetValue(align.AnchorUserId, out var anchor) ||
+                    !snapshots.TryGetValue(userId, out var follower) ||
+                    !HasSameIdentity(align.AnchorSessionId, align.AnchorItemId, anchor) ||
+                    !HasSameIdentity(align.SessionId, align.ItemId, follower))
+                {
+                    runtime.PauseAlign.Remove(userId);
+                    continue;
+                }
+
                 if ((now - align.CreatedAtUtc).TotalSeconds >= SyncConstants.PauseAlignTimeoutSeconds)
                 {
                     runtime.PauseAlign.Remove(userId);
@@ -1237,17 +2028,13 @@ namespace Emby.Plugins.WatchTogether
 
                 // Only seek while the anchor is still paused; a moving target
                 // would make the follower miss by the command latency.
-                if (!snapshots.TryGetValue(align.AnchorUserId, out var anchor) ||
-                    anchor == null ||
-                    !anchor.IsPaused)
+                if (!anchor.IsPaused)
                 {
                     runtime.PauseAlign.Remove(userId);
                     continue;
                 }
 
-                if (!snapshots.TryGetValue(userId, out var follower) ||
-                    follower == null ||
-                    !follower.IsPaused)
+                if (!follower.IsPaused)
                 {
                     // Wait for the propagated pause to land before seeking.
                     continue;
@@ -1266,7 +2053,24 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                Issue(runtime, room, userId, follower, RemoteCommands.Seek, align.TargetPositionTicks, now);
+                if (!Issue(
+                    runtime,
+                    room,
+                    userId,
+                    follower,
+                    RemoteCommands.Seek,
+                    align.TargetPositionTicks,
+                    now,
+                    out var failure))
+                {
+                    ScheduleBarrierRetry(
+                        runtime,
+                        room.Id,
+                        failure ?? "Seek command failed",
+                        now);
+                    return;
+                }
+
                 runtime.PauseAlign.Remove(userId);
                 _logger?.Info(
                     $"Room {room.Id}: aligned paused follower {userId} to " +

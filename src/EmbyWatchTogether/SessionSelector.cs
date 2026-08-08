@@ -13,10 +13,40 @@ namespace Emby.Plugins.WatchTogether
     public static class SessionSelector
     {
         public const double StaleActivityGapSeconds = 5 * 60;
+        public const double StaleSessionTimeoutSeconds = 60;
+        public const double PerUserActivityGapSeconds = 15;
 
         public static Dictionary<string, SessionSnapshot> Select(
             IEnumerable<SessionSnapshot> candidates,
-            IReadOnlyList<string> userIds)
+            IReadOnlyList<string> userIds,
+            DateTimeOffset? now = null,
+            double staleTimeoutSeconds = StaleSessionTimeoutSeconds)
+        {
+            return SelectCore(
+                candidates,
+                userIds,
+                now,
+                TimeSpan.FromSeconds(staleTimeoutSeconds));
+        }
+
+        public static Dictionary<string, SessionSnapshot> Select(
+            IEnumerable<SessionSnapshot> candidates,
+            IReadOnlyList<string> userIds,
+            DateTimeOffset? now,
+            TimeSpan staleTimeout)
+        {
+            return SelectCore(
+                candidates,
+                userIds,
+                now,
+                staleTimeout);
+        }
+
+        private static Dictionary<string, SessionSnapshot> SelectCore(
+            IEnumerable<SessionSnapshot> candidates,
+            IReadOnlyList<string> userIds,
+            DateTimeOffset? now,
+            TimeSpan staleTimeout)
         {
             var byUser = new Dictionary<string, List<SessionSnapshot>>(StringComparer.OrdinalIgnoreCase);
             foreach (var userId in userIds ?? Array.Empty<string>())
@@ -34,7 +64,12 @@ namespace Emby.Plugins.WatchTogether
                 byUser[snapshot.UserId].Add(snapshot);
             }
 
-            IsolateStaleUnknown(byUser);
+            if (now.HasValue)
+            {
+                RemoveExpired(byUser, now.Value, staleTimeout);
+            }
+
+            RemoveSessionsLaggingBehindUserLatest(byUser);
             PreferCommonItem(byUser);
 
             var selected = new Dictionary<string, SessionSnapshot>(StringComparer.OrdinalIgnoreCase);
@@ -60,36 +95,37 @@ namespace Emby.Plugins.WatchTogether
             return selected;
         }
 
-        private static void IsolateStaleUnknown(Dictionary<string, List<SessionSnapshot>> byUser)
+        private static void RemoveExpired(
+            Dictionary<string, List<SessionSnapshot>> byUser,
+            DateTimeOffset now,
+            TimeSpan staleTimeout)
         {
-            var capableActivity = byUser.Values
-                .SelectMany(v => v)
-                .Where(s => s.Capabilities != null && s.Capabilities.SupportsRemoteControl)
-                .Select(s => s.LastActivityDateUtc)
-                .Where(t => t != default)
-                .ToList();
-
-            if (capableActivity.Count == 0)
-            {
-                return;
-            }
-
-            var freshest = capableActivity.Max();
+            DateTimeOffset cutoff = now - staleTimeout;
             foreach (var key in byUser.Keys.ToList())
             {
-                var retained = byUser[key]
-                    .Where(s =>
-                    {
-                        bool capabilityKnown = s.Capabilities != null && s.Capabilities.SupportsRemoteControl;
-                        if (capabilityKnown || s.LastActivityDateUtc == default)
-                        {
-                            return true;
-                        }
-
-                        return (freshest - s.LastActivityDateUtc).TotalSeconds <= StaleActivityGapSeconds;
-                    })
+                byUser[key] = byUser[key]
+                    .Where(s => s.LastActivityDateUtc == default || s.LastActivityDateUtc >= cutoff)
                     .ToList();
-                byUser[key] = retained;
+            }
+        }
+
+        private static void RemoveSessionsLaggingBehindUserLatest(
+            Dictionary<string, List<SessionSnapshot>> byUser)
+        {
+            foreach (var key in byUser.Keys.ToList())
+            {
+                var values = byUser[key];
+                if (values.Count == 0)
+                {
+                    continue;
+                }
+
+                DateTimeOffset latest = values.Max(s => s.LastActivityDateUtc);
+                byUser[key] = values
+                    .Where(s => s.LastActivityDateUtc == default ||
+                                latest == default ||
+                                (latest - s.LastActivityDateUtc).TotalSeconds <= PerUserActivityGapSeconds)
+                    .ToList();
             }
         }
 
