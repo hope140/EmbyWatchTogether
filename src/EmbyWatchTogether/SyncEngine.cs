@@ -737,19 +737,21 @@ namespace Emby.Plugins.WatchTogether
             PlaybackStoppedSignal matchingSignal = null;
             foreach (var signal in signals)
             {
+                if (!IsCurrentPlaybackStoppedSignal(runtime, room, snapshots, signal))
+                {
+                    continue;
+                }
+
                 if (IsContradictoryPlaybackStoppedSignal(snapshots, signal))
                 {
                     _logger?.Info(
                         $"Room {room.Id}: ignored contradictory playback stopped event for " +
-                        $"{signal.UserId} ({signal.SessionId}/{signal.ItemId})");
+                        $"{signal.UserId}; matching session is still online");
                     continue;
                 }
 
-                if (IsCurrentPlaybackStoppedSignal(runtime, room, snapshots, signal))
-                {
-                    matchingSignal = signal;
-                    break;
-                }
+                matchingSignal = signal;
+                break;
             }
 
             if (matchingSignal == null)
