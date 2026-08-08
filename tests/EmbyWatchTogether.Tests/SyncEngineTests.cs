@@ -792,6 +792,50 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PlaybackStoppedSignal_FromBarrier_IsIgnoredAfterEnteringWatching()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            // A position change starts a fresh barrier. The stop event is
+            // captured while that barrier is issuing pause/restore commands,
+            // but is delivered only after the room returns to Watching.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            var pauseCountBeforeLateStop = _issuer.Issued.Count(i => i.command == RemoteCommands.Pause);
+            engine.EnqueuePlaybackStopped(new PlaybackStoppedSignal("u1", "s1", "i1", _clock.Now));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Null(result.Error);
+            Assert.Equal(pauseCountBeforeLateStop, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.Empty(_messageIssuer.Issued);
+        }
+
+        [Fact]
         public void PrimaryPositionReset_DoesNotTriggerStopWhenDisabled()
         {
             var room = CreateRoom();
