@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using MediaBrowser.Model.Serialization;
 using Moq;
@@ -48,6 +49,74 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Update_AtomicallyReplacesFile_AndKeepsBackup()
+        {
+            var store = new RoomStore(_filePath, NewSerializer());
+            store.Create(NewRoom("r1", new[] { "u1", "u2" }, "u1"));
+            string previousPayload = File.ReadAllText(_filePath);
+
+            store.Update(new Room(
+                "r1", "server-1", "http://emby", "room-r1", "admin-1", "u1",
+                new[] { "u1", "u2" }, new[] { "u1" }, DateTimeOffset.UtcNow));
+
+            Assert.NotEqual(previousPayload, File.ReadAllText(_filePath));
+            Assert.Equal(previousPayload, File.ReadAllText(_filePath + ".bak"));
+            Assert.Single(new RoomStore(_filePath, NewSerializer()).GetRoom("r1").JoinedParticipantUserIds);
+
+            string firstUpdatedPayload = File.ReadAllText(_filePath);
+            store.Update(new Room(
+                "r1", "server-1", "http://emby", "room-r1-again", "admin-1", "u1",
+                new[] { "u1", "u2" }, new[] { "u1", "u2" }, DateTimeOffset.UtcNow));
+
+            Assert.NotEqual(firstUpdatedPayload, File.ReadAllText(_filePath));
+            Assert.Equal(firstUpdatedPayload, File.ReadAllText(_filePath + ".bak"));
+        }
+
+        [Fact]
+        public void Delete_WriteFailure_LeavesStoreAndDiskUnchanged()
+        {
+            var serializer = NewSerializerMock();
+            var store = new RoomStore(_filePath, serializer.Object);
+            var room = NewRoom("r1", new[] { "u1", "u2" }, "u1");
+            store.Create(room);
+            string previousPayload = File.ReadAllText(_filePath);
+
+            serializer
+                .Setup(s => s.SerializeToString(It.IsAny<object>()))
+                .Throws(new IOException("simulated disk full"));
+
+            Assert.Throws<RoomStoreException>(() => store.Delete(room.Id));
+
+            Assert.Same(room, store.GetRoom(room.Id));
+            Assert.Equal(previousPayload, File.ReadAllText(_filePath));
+            Assert.NotNull(new RoomStore(_filePath, NewSerializer()).GetRoom(room.Id));
+        }
+
+        [Fact]
+        public void RoomManager_WriteFailure_LeavesMemoryRuntimeAndDiskUnchanged()
+        {
+            var serializer = NewSerializerMock();
+            var store = new RoomStore(_filePath, serializer.Object);
+            var manager = new RoomManager(store);
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1", new[] { "u1", "u2" }, "u1");
+            manager.GetRuntime(room.Id).State = RoomState.Watching;
+            string previousPayload = File.ReadAllText(_filePath);
+
+            serializer
+                .Setup(s => s.SerializeToString(It.IsAny<object>()))
+                .Throws(new IOException("simulated disk full"));
+
+            Assert.Throws<RoomStoreException>(() => manager.SetParticipantJoined(room.Id, "u2", false));
+
+            Assert.True(room.IsJoined("u2"));
+            Assert.Equal(RoomState.Watching, manager.GetRuntime(room.Id).State);
+            Assert.Equal(previousPayload, File.ReadAllText(_filePath));
+            Assert.Equal("u2", new RoomStore(_filePath, NewSerializer())
+                .GetRoom(room.Id).JoinedParticipantUserIds.Single(user => user == "u2"));
+        }
+
+        [Fact]
         public void Create_DuplicateId_Throws()
         {
             var store = new RoomStore(_filePath, NewSerializer());
@@ -75,6 +144,28 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void InvalidRoomData_ThrowsWithoutOverwriting()
+        {
+            string invalidPayload = JsonSerializer.Serialize(new[]
+            {
+                new RoomDto
+                {
+                    Id = "r1",
+                    ServerId = "server-1",
+                    AdminUserId = "admin-1",
+                    PrimaryUserId = "u1",
+                    ParticipantUserIds = new List<string> { "u1" },
+                    JoinedParticipantUserIds = new List<string> { "u1" },
+                    CreatedAtUtc = DateTimeOffset.UtcNow.ToString("o"),
+                },
+            });
+            File.WriteAllText(_filePath, invalidPayload);
+
+            Assert.Throws<RoomStoreException>(() => new RoomStore(_filePath, NewSerializer()));
+            Assert.Equal(invalidPayload, File.ReadAllText(_filePath));
+        }
+
+        [Fact]
         public void MissingFile_StartsEmpty()
         {
             var store = new RoomStore(_filePath, NewSerializer());
@@ -99,6 +190,11 @@ namespace Emby.Plugins.WatchTogether.Tests
 
         private static IJsonSerializer NewSerializer()
         {
+            return NewSerializerMock().Object;
+        }
+
+        private static Mock<IJsonSerializer> NewSerializerMock()
+        {
             var mock = new Mock<IJsonSerializer>();
             mock.Setup(s => s.SerializeToString(It.IsAny<object>()))
                 .Returns<object>(o => JsonSerializer.Serialize(o, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
@@ -106,7 +202,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 .Returns<string>(json => JsonSerializer.Deserialize<List<RoomDto>>(
                     json,
                     new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }));
-            return mock.Object;
+            return mock;
         }
 
         private static Room NewRoom(string id, string[] participants, string primary)

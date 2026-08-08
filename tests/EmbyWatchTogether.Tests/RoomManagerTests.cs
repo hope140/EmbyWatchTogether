@@ -86,6 +86,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.True(manager.DeleteRoom(room.Id));
             Assert.Null(manager.GetRoom(room.Id));
+            Assert.Null(manager.GetRuntime(room.Id));
+            Assert.Null(manager.GetRuntime("missing"));
             Assert.False(manager.DeleteRoom(room.Id));
         }
 
@@ -204,6 +206,33 @@ namespace Emby.Plugins.WatchTogether.Tests
             var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
 
             Assert.Throws<KeyNotFoundException>(() => manager.SetParticipantJoined(room.Id, "u3", false));
+        }
+
+        [Fact]
+        public void LeaveParticipant_ReturnsAtomicTransition_AndRepeatedLeaveIsNoOp()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Barrier;
+
+            var first = manager.LeaveParticipantResult(room.Id, "u2");
+
+            Assert.True(first.Changed);
+            Assert.False(first.Joined);
+            Assert.Equal(RoomState.Barrier, first.PreviousState);
+            Assert.False(room.IsJoined("u2"));
+            Assert.Equal(RoomState.Waiting, runtime.State);
+
+            runtime.State = RoomState.Watching;
+            runtime.Error = "keep this state on an idempotent retry";
+            var repeated = manager.LeaveParticipantResult(room.Id, "u2");
+
+            Assert.False(repeated.Changed);
+            Assert.False(repeated.Joined);
+            Assert.Equal(RoomState.Watching, repeated.PreviousState);
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Equal("keep this state on an idempotent retry", runtime.Error);
         }
 
         private sealed class FakeIssuer : ICommandIssuer
