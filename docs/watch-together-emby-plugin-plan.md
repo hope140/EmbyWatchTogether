@@ -19,7 +19,7 @@
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
 
-程序集目标框架为 `netstandard2.0`，项目版本为 `1.2.0.11`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。C# 行为、公共 API 和版本号不由本文档改变。
+程序集目标框架为 `netstandard2.0`，项目版本为 `1.2.0.12`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。C# 行为、公共 API 和版本号不由本文档改变。
 
 ## 2. 组件和数据流
 
@@ -83,7 +83,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 6. 推进 Barrier 或处理 Watching 中的用户操作；
 7. 生成房间状态供 REST API 和管理页显示。
 
-播放开始、进度、停止、会话开始/结束和能力变化事件会调用 `RequestImmediatePoll`；`PlaybackStopped` 还会把带 user/session/item identity 的事件排入同步线程处理。配置事件会更新 `PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop`，并唤醒等待中的循环，因此保存后下一轮轮询即可看到新策略。内部唤醒事件会合并突发通知，轮询间隔仍是兜底，不会因为事件风暴创建多个线程。
+播放开始、进度、停止、会话开始/结束和能力变化事件只调用 `RequestImmediatePoll`，具体状态仍由同步线程读取会话快照确认。配置事件会更新 `PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop`，并唤醒等待中的循环，因此保存后下一轮轮询即可看到新策略。内部唤醒事件会合并突发通知，轮询间隔仍是兜底，不会因为事件风暴创建多个线程。
 
 ## 5. 起播 Barrier
 
@@ -133,12 +133,12 @@ manualSeek = abs(current.PositionTicks - expected) >= threshold
 
 ### 停止或退出
 
-只有在 `Watching` 状态才产生持久停止处理。停止判断按以下优先级执行：
+只有在 `Watching` 状态才产生持久停止处理。停止判断按以下顺序执行：
 
-1. Emby 的 `PlaybackStopped` 事件先进入同步线程；事件必须匹配已加入用户的 `UserId`、当前 `SessionId`、当前 `ItemId` 和有效时间点。迟到的旧会话、旧 Item 或已经重连后的事件会被忽略。
-2. 没有匹配事件时才使用会话快照。快照标记 `stopped` 会直接处理；会话暂时消失或离线会先记录时间，持续缺失达到 2 秒 debounce 后才处理。
+1. Emby 的 `PlaybackStopped` 事件只唤醒同步轮询，不直接触发停止副作用。
+2. 会话快照标记 `stopped`、离线或缺失都先记录疑似停止时间；异常状态连续达到 2 秒 debounce 后才确认，期间恢复有效快照会清除计时并保持 `Watching`。
 3. 位置归零不是停止条件；合法的 seek-to-zero 不会单独触发停止副作用。
-4. 仅在进入停止状态的转换上执行副作用，避免每轮重复；`PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方，`NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示。
+4. 仅在停止状态确认的转换上执行副作用，避免每轮重复；`PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方，`NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示。
 5. 清理运行时并回到 `Waiting`，要求双方重新打开同一视频。
 
 Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久的播放停止。
@@ -157,8 +157,8 @@ Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久
 
 | 配置项 | 默认值 | 当前作用 |
 | --- | ---: | --- |
-| `PauseOtherOnPlaybackStop` | `true` | 停止事件或快照停止确认后暂停另一方 |
-| `NotifyOtherOnPlaybackStop` | `true` | 停止事件或快照停止确认后发送 DisplayMessage |
+| `PauseOtherOnPlaybackStop` | `true` | 会话快照持续确认停止后暂停另一方 |
+| `NotifyOtherOnPlaybackStop` | `true` | 会话快照持续确认停止后发送 DisplayMessage |
 
 Emby 负责保存配置；设置页只允许管理员修改。`PollIntervalSeconds` 默认 `0.5` 秒并由入口点传给同步引擎。配置事件会把 `PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop` 热更新到同步引擎，并唤醒等待中的循环，保存后下一轮轮询生效。`Enabled`、`MaxRuntimeDifferenceSeconds`、`SeekToleranceSeconds`、`BarrierSeekTimeoutSeconds` 和 `StaleSessionTimeoutSeconds` 仍是配置模型字段，但不作为实时同步策略，关键阈值按本节所述固定策略运行。
 

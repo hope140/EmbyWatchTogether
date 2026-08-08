@@ -1,6 +1,6 @@
 # Emby Watch Together 插件
 
-Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，当前项目版本为 `1.2.0.11`。它读取同一台服务器上的会话快照，并通过 Emby 远程控制命令协调起播、暂停/继续、用户手动拖动进度、切换视频和停止播放。
+Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，当前项目版本为 `1.2.0.12`。它读取同一台服务器上的会话快照，并通过 Emby 远程控制命令协调起播、暂停/继续、用户手动拖动进度、切换视频和停止播放。
 
 插件只负责房间内的协调，不会修改媒体库、转码设置或播放器客户端。正常播放期间不做周期性 Seek：网络延迟、SessionInfo 更新延迟和小幅播放速度差不会被反复纠正。
 
@@ -10,7 +10,7 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 - 两位参与者打开相同 Item 后，插件执行起播 Barrier：暂停双方、以主用户位置为锚点对齐另一端，再恢复起播前的暂停/播放状态。
 - `Watching` 阶段传播明确的暂停/继续和手动 Seek。主用户同时操作时优先作为冲突裁决者，命令确认和抑制窗口可避免回环与重复控制；会话选择和同步命令都绑定当前 session identity、Item 和设备会话。
 - 切换到不同 Item 时回到等待状态，不跨 Item Seek；两人都在播放时会按安全规则暂停活跃会话，单人播放受到保护。
-- 停止处理优先消费 Emby 的 `PlaybackStopped` 事件，并按 user/session/item identity 匹配当前房间；事件缺失时才使用会话快照判断。会话暂时消失要经过 2 秒 debounce，合法的 seek-to-zero 不会单独被当成停止；默认暂停另一方并发送提示消息，两个行为可以分别关闭。
+- Emby 的 `PlaybackStopped` 事件只唤醒轮询，不直接确认停止；会话快照持续显示停止、离线或缺失达到 2 秒后才处理，期间恢复有效快照会取消本次判定。合法的 seek-to-zero 不会单独被当成停止；确认停止后默认暂停另一方并发送提示消息，两个行为可以分别关闭。
 - Emby 管理页提供房间创建、加入/退出、暂停、继续、重新同步、删除和状态查看。
 - 命令带取消和超时，确认超时后只做有限重试；起播失败进入冷却并自动重试，不会无限刷命令。每个房间的同步串行执行，单个房间异常会被隔离并记录，不会终止其他房间的轮询。
 
@@ -70,8 +70,8 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 
 | 配置项 | 默认值 | 作用 |
 | --- | ---: | --- |
-| `PauseOtherOnPlaybackStop` | `true` | 一方被 `PlaybackStopped` 事件或快照停止逻辑确认后，暂停仍在播放的另一方 |
-| `NotifyOtherOnPlaybackStop` | `true` | 同一停止事件发生时向另一方发送文字提示 |
+| `PauseOtherOnPlaybackStop` | `true` | 一方被会话快照持续确认停止后，暂停仍在播放的另一方 |
+| `NotifyOtherOnPlaybackStop` | `true` | 同一停止状态确认后向另一方发送文字提示 |
 
 配置由 Emby 保存，只有管理员可以修改。`PollIntervalSeconds` 默认 `0.5` 秒，用于控制会话轮询频率；`PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop` 保存后通过配置事件热更新，下一轮轮询生效，配置变更还会唤醒等待中的循环。`Enabled`、`MaxRuntimeDifferenceSeconds`、`SeekToleranceSeconds`、`BarrierSeekTimeoutSeconds` 和 `StaleSessionTimeoutSeconds` 仍是模型中的保留字段，不作为实时策略；轮询频率也不会开启周期性漂移 Seek。
 
