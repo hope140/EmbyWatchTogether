@@ -234,7 +234,7 @@ https://github.com/hope140/EmbyWatchTogether/releases/download/<tag>/Emby.Plugin
 2. 将 `keyId => RSAKeyValue` 映射提交到 `ReleaseTrustStore`；
 3. 将匹配的 PKCS#8 base64 私钥放入 GitHub Environment `release` 的 `WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64` secret。
 
-不得把真实私钥、公钥内容、token、本机服务器信息或私人路径写入文档或提交。当前生产 key bootstrap 尚未完成，因此**发布 workflow 会安全失败**，不能把当前仓库描述为已经可以生产发布。
+公钥映射是用于验签的公开材料，应在审核后提交到 `ReleaseTrustStore`，不需要保密。不得把真实私钥、GitHub secret 值、token、本机服务器信息或私人路径写入文档或提交；示例不得包含真实生产私钥或 secret 值。当前生产 key bootstrap 尚未完成，因此**发布 workflow 会安全失败**，不能把当前仓库描述为已经可以生产发布。
 
 签名发布相关文件及职责如下：
 
