@@ -180,7 +180,7 @@ Assert-Matches -Text $workflowText -Pattern 'actions/setup-dotnet@v4' -Message '
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{10}dotnet-version:\s*[\x27\"]?10\.0\.x[\x27\"]?\s*$' -Message 'The workflow must use the .NET 10 SDK.'
 
 $runBlocks = @(Get-RunBlocks -Text $workflowText)
-Assert-True -Condition ($runBlocks.Count -ge 8) -Message 'The workflow is missing required PowerShell run steps.'
+Assert-True -Condition ($runBlocks.Count -ge 9) -Message 'The workflow is missing required PowerShell run steps.'
 $runText = $runBlocks -join "`n"
 
 Assert-Matches -Text $runText -Pattern 'RELEASE_TAG|RELEASE_KEY_ID' -Message 'PowerShell steps do not consume the environment inputs.'
@@ -189,6 +189,48 @@ Assert-Matches -Text $runText -Pattern 'ReleaseTrustStore\.cs' -Message 'The wor
 Assert-Matches -Text $runText -Pattern 'RSAKeyValue' -Message 'The workflow does not require an RSAKeyValue public key.'
 Assert-Matches -Text $runText -Pattern 'trustStoreText|keyIndex|keyToken' -Message 'The workflow does not tie the requested key_id to the trust store source.'
 Assert-Matches -Text $runText -Pattern 'throw' -Message 'The trust-store validation is not fail closed.'
+Assert-Matches -Text $runText -Pattern 'Regex\]::Escape\(\$keyId\)' -Message 'The trust-store mapping regex must escape key_id.'
+Assert-Matches -Text $runText -Pattern 'mappingPattern' -Message 'The exact trust-store mapping regex is missing.'
+Assert-Matches -Text $runText -Pattern ([System.Text.RegularExpressions.Regex]::Escape("Groups['publicKey']")) -Message 'The trust-store mapping regex must capture only the publicKey value.'
+$mappingPatternLines = @($runText -split "`n" | Where-Object { $_ -match '^\s*\$mappingPattern\s*=' })
+Assert-True -Condition ($mappingPatternLines.Count -eq 1) -Message 'The workflow must define one exact keyId mapping regex.'
+$mappingPatternSource = [string]$mappingPatternLines[0]
+Assert-True -Condition $mappingPatternSource.Contains('\[\s*"') -Message 'The mapping regex must match the exact bracketed keyId.'
+Assert-True -Condition $mappingPatternSource.Contains('"\s*\]\s*=\s*"') -Message 'The mapping regex must match the dictionary assignment.'
+Assert-True -Condition $mappingPatternSource.Contains('(?<publicKey><RSAKeyValue>.*?</RSAKeyValue>)') -Message 'The mapping regex must capture the RSAKeyValue XML only.'
+Assert-NotMatches -Text $runText -Pattern 'windowStart|windowLength|keyIndex|keyToken' -Message 'The workflow must not use a nearby-window trust-store search.'
+Assert-Matches -Text $runText -Pattern 'RUNNER_TEMP' -Message 'The workflow must use RUNNER_TEMP for the temporary public key.'
+Assert-Matches -Text $runText -Pattern 'EmbyWatchTogether\.release\.public-key\.xml' -Message 'The temporary public key filename is missing.'
+Assert-Matches -Text $runText -Pattern 'WriteAllText\(\$publicKeyPath' -Message 'The mapped public key must be written to a temporary file.'
+Assert-Matches -Text $runText -Pattern 'publicKeyUtf8' -Message 'The temporary public key must use a dedicated UTF-8 encoding.'
+Assert-Matches -Text $runText -Pattern 'UTF8Encoding\]::new\(\$false' -Message 'The temporary public key must be written without a BOM.'
+Assert-Matches -Text $runText -Pattern 'XmlReaderSettings' -Message 'The public key XML reader settings are missing.'
+Assert-Matches -Text $runText -Pattern 'DtdProcessing' -Message 'The public key XML parser must configure DTD processing.'
+Assert-Matches -Text $runText -Pattern 'DtdProcessing.*Prohibit|Prohibit.*DtdProcessing' -Message 'The public key XML parser must prohibit DTDs.'
+Assert-Matches -Text $runText -Pattern 'XmlResolver\s*=\s*\$null' -Message 'The public key XML parser must disable XmlResolver.'
+Assert-Matches -Text $runText -Pattern ([System.Text.RegularExpressions.Regex]::Escape("SelectNodes('./*')")) -Message 'The public key parser must inspect the complete child-element set.'
+Assert-Matches -Text $runText -Pattern ([System.Text.RegularExpressions.Regex]::Escape("SelectNodes('./Modulus')")) -Message 'The public key parser must require a unique Modulus.'
+Assert-Matches -Text $runText -Pattern ([System.Text.RegularExpressions.Regex]::Escape("SelectNodes('./Exponent')")) -Message 'The public key parser must require a unique Exponent.'
+Assert-Matches -Text $runText -Pattern 'ConvertFrom-StrictBase64|FromBase64String' -Message 'The public key components must use strict base64 decoding.'
+Assert-Matches -Text $runText -Pattern 'RSAParameters' -Message 'The workflow must build RSA parameters from the trusted XML.'
+Assert-Matches -Text $runText -Pattern 'ImportParameters' -Message 'The workflow must import the trusted RSA parameters.'
+Assert-Matches -Text $runText -Pattern 'VerifyData' -Message 'The workflow must verify the release signature.'
+Assert-Matches -Text $runText -Pattern 'HashAlgorithmName\]::SHA256' -Message 'Signature verification must use SHA-256.'
+Assert-Matches -Text $runText -Pattern 'RSASignaturePadding\]::Pkcs1' -Message 'Signature verification must use RSA PKCS#1 v1.5 padding.'
+Assert-Matches -Text $runText -Pattern 'signatureIsValid' -Message 'The workflow must check the RSA verification result.'
+Assert-Matches -Text $runText -Pattern 'if \(-not \$signatureIsValid\)' -Message 'Signature verification failure must throw.'
+Assert-Matches -Text $workflowText -Pattern 'always\(\)' -Message 'Temporary public-key cleanup must run after every job outcome.'
+Assert-Matches -Text $runText -Pattern 'Remove-Item' -Message 'Temporary public-key cleanup is missing.'
+Assert-NotMatches -Text $runText -Pattern '(?im)Write-Output.*(?:publicKeyXml|publicKeyBytes|signatureText|signatureBytes|decodedSignature)' -Message 'The workflow must not output public-key or signature material.'
+
+$writePublicKeyIndex = $runText.IndexOf('WriteAllText($publicKeyPath', [System.StringComparison]::Ordinal)
+$readPublicKeyIndex = $runText.IndexOf('ReadAllBytes($publicKeyPath', [System.StringComparison]::Ordinal)
+$verifySignatureIndex = $runText.IndexOf('VerifyData(', [System.StringComparison]::Ordinal)
+$createReleaseIndex = $runText.IndexOf('gh release create', [System.StringComparison]::Ordinal)
+$cleanupPublicKeyIndex = $runText.IndexOf('Remove-Item -LiteralPath $publicKeyPath', [System.StringComparison]::Ordinal)
+Assert-True -Condition ($writePublicKeyIndex -ge 0 -and $writePublicKeyIndex -lt $readPublicKeyIndex) -Message 'The asset step must read the public key after validation writes it.'
+Assert-True -Condition ($readPublicKeyIndex -lt $verifySignatureIndex -and $verifySignatureIndex -lt $createReleaseIndex) -Message 'Signature verification must occur before release creation.'
+Assert-True -Condition ($createReleaseIndex -lt $cleanupPublicKeyIndex) -Message 'Temporary public-key cleanup must follow the release step.'
 
 Assert-Matches -Text $runText -Pattern 'dotnet\s+build\s+src[\\/]EmbyWatchTogether\.sln\s+-c\s+Release\s+--nologo' -Message 'The Release solution build command is missing.'
 Assert-Matches -Text $runText -Pattern 'dotnet\s+test\s+tests[\\/]EmbyWatchTogether\.Tests[\\/]EmbyWatchTogether\.Tests\.csproj\s+-c\s+Release\s+--nologo\s+-v\s+minimal' -Message 'The complete Release test command is missing.'

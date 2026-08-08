@@ -146,31 +146,30 @@ jobs:
 
           $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
           $trustStoreText = [System.IO.File]::ReadAllText($trustStorePath, $strictUtf8)
-          $keyToken = [string]::Concat('"', $keyId, '"')
-          $keyIndex = $trustStoreText.IndexOf($keyToken, [System.StringComparison]::Ordinal)
-          if ($keyIndex -lt 0) {
-              throw ('ReleaseTrustStore.cs does not contain the requested key_id: {0}' -f $keyId)
-          }
-
-          $rsaPublicKeyPattern = '<RSAKeyValue>.*?<Modulus>.+?</Modulus>.*?<Exponent>.+?</Exponent>.*?</RSAKeyValue>'
-          $regexOptions = [System.Text.RegularExpressions.RegexOptions]::Singleline -bor
+          $escapedKeyId = [System.Text.RegularExpressions.Regex]::Escape($keyId)
+          $mappingPattern = '\[\s*"' + $escapedKeyId + '"\s*\]\s*=\s*"(?<publicKey><RSAKeyValue>.*?</RSAKeyValue>)"\s*,?'
+          $mappingRegexOptions = [System.Text.RegularExpressions.RegexOptions]::Singleline -bor
               [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
-          $rsaMatch = [System.Text.RegularExpressions.Regex]::Match(
+          $mappingMatches = [System.Text.RegularExpressions.Regex]::Matches(
               $trustStoreText,
-              $rsaPublicKeyPattern,
-              $regexOptions)
-          if (-not $rsaMatch.Success) {
-              throw 'ReleaseTrustStore.cs does not contain an RSAKeyValue public key.'
+              $mappingPattern,
+              $mappingRegexOptions)
+          if ($mappingMatches.Count -ne 1) {
+              throw ('ReleaseTrustStore.cs must contain exactly one RSAKeyValue mapping for key_id: {0}' -f $keyId)
           }
 
-          $windowStart = [Math]::Max(0, $keyIndex - 4096)
-          $windowLength = [Math]::Min($trustStoreText.Length - $windowStart, 16384)
-          if (-not [System.Text.RegularExpressions.Regex]::IsMatch(
-                  $trustStoreText.Substring($windowStart, $windowLength),
-                  $rsaPublicKeyPattern,
-                  $regexOptions)) {
-              throw 'The requested key_id is not mapped to the RSAKeyValue public key in ReleaseTrustStore.cs.'
+          $publicKeyXml = $mappingMatches[0].Groups['publicKey'].Value
+          if ([string]::IsNullOrWhiteSpace($publicKeyXml)) {
+              throw 'The mapped ReleaseTrustStore public key is empty.'
           }
+
+          $publicKeyPath = Join-Path $env:RUNNER_TEMP 'EmbyWatchTogether.release.public-key.xml'
+          $publicKeyUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+          if ([System.IO.File]::Exists($publicKeyPath)) {
+              [System.IO.File]::Delete($publicKeyPath)
+          }
+
+          [System.IO.File]::WriteAllText($publicKeyPath, $publicKeyXml, $publicKeyUtf8)
 
           Write-Output ('Release input validation passed for tag {0} and keyId {1}.' -f $tag, $keyId)
 
@@ -404,6 +403,136 @@ jobs:
               throw 'The release signature is empty.'
           }
 
+          $publicKeyPath = Join-Path $env:RUNNER_TEMP 'EmbyWatchTogether.release.public-key.xml'
+          $publicKeyInfo = [System.IO.FileInfo]::new($publicKeyPath)
+          if (-not $publicKeyInfo.Exists -or $publicKeyInfo.Length -le 0 -or $publicKeyInfo.Length -gt 16KB) {
+              throw 'The temporary release public key file is missing, empty, or too large.'
+          }
+
+          $publicKeyBytes = [System.IO.File]::ReadAllBytes($publicKeyPath)
+          if ($publicKeyBytes.Length -ge 3 -and
+              $publicKeyBytes[0] -eq 0xEF -and
+              $publicKeyBytes[1] -eq 0xBB -and
+              $publicKeyBytes[2] -eq 0xBF) {
+              throw 'The temporary release public key must not contain a UTF-8 BOM.'
+          }
+
+          try {
+              $publicKeyXml = $strictUtf8.GetString($publicKeyBytes)
+          }
+          catch {
+              throw 'The temporary release public key is not strict UTF-8.'
+          }
+
+          $xmlSettings = [System.Xml.XmlReaderSettings]::new()
+          $xmlSettings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+          $xmlSettings.XmlResolver = $null
+          $publicKeyDocument = [System.Xml.XmlDocument]::new()
+          $publicKeyDocument.XmlResolver = $null
+          $publicKeyStringReader = $null
+          $publicKeyReader = $null
+          try {
+              $publicKeyStringReader = [System.IO.StringReader]::new($publicKeyXml)
+              $publicKeyReader = [System.Xml.XmlReader]::Create($publicKeyStringReader, $xmlSettings)
+              $publicKeyDocument.Load($publicKeyReader)
+          }
+          catch {
+              throw 'The temporary release public key XML is invalid.'
+          }
+          finally {
+              if ($null -ne $publicKeyReader) {
+                  $publicKeyReader.Dispose()
+              }
+
+              if ($null -ne $publicKeyStringReader) {
+                  $publicKeyStringReader.Dispose()
+              }
+          }
+
+          $publicKeyRoot = $publicKeyDocument.DocumentElement
+          if ($null -eq $publicKeyRoot -or
+              $publicKeyRoot.Name -cne 'RSAKeyValue' -or
+              $publicKeyRoot.NamespaceURI -cne '') {
+              throw 'The release public key root must be RSAKeyValue without a namespace.'
+          }
+
+          $publicKeyChildren = @($publicKeyRoot.SelectNodes('./*'))
+          $modulusNodes = @($publicKeyRoot.SelectNodes('./Modulus'))
+          $exponentNodes = @($publicKeyRoot.SelectNodes('./Exponent'))
+          if ($publicKeyChildren.Count -ne 2 -or
+              $modulusNodes.Count -ne 1 -or
+              $exponentNodes.Count -ne 1) {
+              throw 'The release public key must contain exactly one Modulus and one Exponent.'
+          }
+
+          if ($publicKeyChildren[0].Name -cne 'Modulus' -or
+              $publicKeyChildren[1].Name -cne 'Exponent') {
+              throw 'The release public key contains unexpected child elements.'
+          }
+
+          function ConvertFrom-StrictBase64 {
+              param(
+                  [string]$Value,
+                  [string]$Description
+              )
+
+              if ([string]::IsNullOrEmpty($Value) -or
+                  ($Value.Length % 4) -ne 0 -or
+                  -not [System.Text.RegularExpressions.Regex]::IsMatch(
+                      $Value,
+                      '\A[A-Za-z0-9+/]+={0,2}\z',
+                      [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
+                  throw ('{0} must be strict base64.' -f $Description)
+              }
+
+              try {
+                  $bytes = [System.Convert]::FromBase64String($Value)
+              }
+              catch {
+                  throw ('{0} must be decodable base64.' -f $Description)
+              }
+
+              if ($bytes.Length -eq 0) {
+                  throw ('{0} must not be empty.' -f $Description)
+              }
+
+              return ,$bytes
+          }
+
+          $modulusBytes = ConvertFrom-StrictBase64 `
+              -Value $modulusNodes[0].InnerText `
+              -Description 'The RSA modulus'
+          $exponentBytes = ConvertFrom-StrictBase64 `
+              -Value $exponentNodes[0].InnerText `
+              -Description 'The RSA exponent'
+
+          $rsaParameters = [System.Security.Cryptography.RSAParameters]::new()
+          $rsaParameters.Modulus = $modulusBytes
+          $rsaParameters.Exponent = $exponentBytes
+          $releaseRsa = $null
+          $signatureIsValid = $false
+          try {
+              $releaseRsa = [System.Security.Cryptography.RSA]::Create()
+              $releaseRsa.ImportParameters($rsaParameters)
+              $signatureIsValid = $releaseRsa.VerifyData(
+                  $manifestBytes,
+                  $decodedSignature,
+                  [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                  [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+          }
+          catch {
+              throw 'The release signature could not be verified with the trusted RSA public key.'
+          }
+          finally {
+              if ($null -ne $releaseRsa) {
+                  $releaseRsa.Dispose()
+              }
+          }
+
+          if (-not $signatureIsValid) {
+              throw 'The release signature verification failed.'
+          }
+
           Write-Output ('Release metadata validated for tag {0}, keyId {1}, and version {2}.' -f
               $env:RELEASE_TAG,
               $env:RELEASE_KEY_ID,
@@ -437,4 +566,20 @@ jobs:
               --title ('Release ' + $env:RELEASE_TAG)
           if ($LASTEXITCODE -ne 0) {
               throw 'GitHub Release creation failed.'
+          }
+
+      - name: Remove temporary release public key
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $publicKeyPath = Join-Path $env:RUNNER_TEMP 'EmbyWatchTogether.release.public-key.xml'
+          try {
+              if (Test-Path -LiteralPath $publicKeyPath) {
+                  Remove-Item -LiteralPath $publicKeyPath -Force -ErrorAction Stop
+              }
+          }
+          catch {
+              Write-Warning 'Best-effort cleanup of the temporary release public key failed.'
           }
