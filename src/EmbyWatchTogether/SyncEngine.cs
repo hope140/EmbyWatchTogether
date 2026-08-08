@@ -155,32 +155,41 @@ namespace Emby.Plugins.WatchTogether
             }
 
             string currentServerId = _serverIdProvider();
-            var validRooms = new List<Room>();
-            foreach (var room in rooms)
+            var validRoomIds = new List<string>();
+            foreach (var listedRoom in rooms)
             {
-                var runtime = _roomManager.GetRuntime(room.Id);
-                if (!string.Equals(room.ServerId, currentServerId, StringComparison.OrdinalIgnoreCase))
+                using (var access = _roomManager.TryEnterRoom(listedRoom.Id))
                 {
-                    runtime.State = RoomState.Unavailable;
-                    runtime.Error = "room server is unavailable";
-                    runtime.Barrier = null;
-                    runtime.Pending.Clear();
-                    _logger?.Info($"Room {room.Id}: marked unavailable (server mismatch)");
-                    results.Add(new RoomPollResult
+                    if (access == null)
                     {
-                        RoomId = room.Id,
-                        State = RoomState.Unavailable,
-                        Eligible = false,
-                        Error = runtime.Error,
-                    });
-                }
-                else
-                {
-                    validRooms.Add(room);
+                        continue;
+                    }
+
+                    var room = access.Room;
+                    var runtime = access.Runtime;
+                    if (!string.Equals(room.ServerId, currentServerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        runtime.State = RoomState.Unavailable;
+                        runtime.Error = "room server is unavailable";
+                        runtime.Barrier = null;
+                        runtime.Pending.Clear();
+                        _logger?.Info($"Room {room.Id}: marked unavailable (server mismatch)");
+                        results.Add(new RoomPollResult
+                        {
+                            RoomId = room.Id,
+                            State = RoomState.Unavailable,
+                            Eligible = false,
+                            Error = runtime.Error,
+                        });
+                    }
+                    else
+                    {
+                        validRoomIds.Add(room.Id);
+                    }
                 }
             }
 
-            if (validRooms.Count == 0)
+            if (validRoomIds.Count == 0)
             {
                 return results;
             }
@@ -195,11 +204,17 @@ namespace Emby.Plugins.WatchTogether
                 return results;
             }
 
-            lock (_lock)
+            foreach (var roomId in validRoomIds)
             {
-                foreach (var room in validRooms)
+                using (var access = _roomManager.TryEnterRoom(roomId))
                 {
-                    var runtime = _roomManager.GetRuntime(room.Id);
+                    if (access == null)
+                    {
+                        continue;
+                    }
+
+                    var room = access.Room;
+                    var runtime = access.Runtime;
                     if (runtime.State == RoomState.Unavailable)
                     {
                         runtime.State = RoomState.Waiting;

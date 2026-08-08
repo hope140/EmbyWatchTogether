@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace Emby.Plugins.WatchTogether
 {
@@ -43,6 +44,14 @@ namespace Emby.Plugins.WatchTogether
         private readonly RoomStore _store;
         private readonly Dictionary<string, Room> _rooms = new Dictionary<string, Room>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, RoomRuntime> _runtimes = new Dictionary<string, RoomRuntime>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, object> _roomGates = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Shared registry lock used by the manager and the sync engine for
+        /// short-lived room lookup/revalidation. Runtime operations use the
+        /// per-room gate so external command I/O never runs under this lock.
+        /// </summary>
+        public object SyncRoot => _lock;
 
         public RoomManager(RoomStore store = null)
         {
@@ -53,6 +62,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     _rooms[room.Id] = room;
                     _runtimes[room.Id] = new RoomRuntime();
+                    _roomGates[room.Id] = new object();
                 }
             }
         }
@@ -117,6 +127,7 @@ namespace Emby.Plugins.WatchTogether
                 _store?.Create(room);
                 _rooms[room.Id] = room;
                 _runtimes[room.Id] = new RoomRuntime();
+                _roomGates[room.Id] = new object();
                 return room;
             }
         }
@@ -128,6 +139,7 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
+            object roomGate;
             lock (_lock)
             {
                 if (!_rooms.ContainsKey(roomId))
@@ -135,14 +147,28 @@ namespace Emby.Plugins.WatchTogether
                     return false;
                 }
 
-                if (_store != null && !_store.Delete(roomId))
-                {
-                    return false;
-                }
+                roomGate = _roomGates[roomId];
+            }
 
-                _rooms.Remove(roomId);
-                _runtimes.Remove(roomId);
-                return true;
+            lock (roomGate)
+            {
+                lock (_lock)
+                {
+                    if (!_rooms.ContainsKey(roomId))
+                    {
+                        return false;
+                    }
+
+                    if (_store != null && !_store.Delete(roomId))
+                    {
+                        return false;
+                    }
+
+                    _rooms.Remove(roomId);
+                    _runtimes.Remove(roomId);
+                    _roomGates.Remove(roomId);
+                    return true;
+                }
             }
         }
 
@@ -187,6 +213,41 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        /// <summary>
+        /// Enters the atomic operation scope for an existing room. The room
+        /// and runtime are revalidated after acquiring the per-room gate so a
+        /// stale ListRooms result cannot create or operate on a deleted room.
+        /// </summary>
+        internal RoomAccess TryEnterRoom(string roomId)
+        {
+            if (string.IsNullOrEmpty(roomId))
+            {
+                return null;
+            }
+
+            object roomGate;
+            lock (_lock)
+            {
+                if (!_rooms.ContainsKey(roomId) || !_roomGates.TryGetValue(roomId, out roomGate))
+                {
+                    return null;
+                }
+            }
+
+            Monitor.Enter(roomGate);
+            lock (_lock)
+            {
+                if (!_rooms.TryGetValue(roomId, out var room) ||
+                    !_runtimes.TryGetValue(roomId, out var runtime))
+                {
+                    Monitor.Exit(roomGate);
+                    return null;
+                }
+
+                return new RoomAccess(roomGate, room, runtime);
+            }
+        }
+
         public bool SetParticipantJoined(string roomId, string userId, bool joined)
         {
             return SetParticipantJoinedResult(roomId, userId, joined).Changed;
@@ -204,65 +265,65 @@ namespace Emby.Plugins.WatchTogether
 
         public ParticipantStateChangeResult SetParticipantJoinedResult(string roomId, string userId, bool joined)
         {
-            lock (_lock)
+            using (var access = TryEnterRoom(roomId))
             {
-                if (!_rooms.TryGetValue(roomId ?? string.Empty, out var room) || !room.HasParticipant(userId))
+                if (access == null || !access.Room.HasParticipant(userId))
                 {
                     throw new KeyNotFoundException("room participant not found");
                 }
 
-                if (!_runtimes.TryGetValue(room.Id, out var runtime))
+                lock (_lock)
                 {
-                    throw new KeyNotFoundException("room runtime not found");
-                }
+                    var room = access.Room;
+                    var runtime = access.Runtime;
+                    var result = new ParticipantStateChangeResult
+                    {
+                        RoomId = room.Id,
+                        UserId = userId,
+                        Joined = joined,
+                        Changed = room.IsJoined(userId) != joined,
+                        PreviousState = runtime.State,
+                        ServerId = room.ServerId,
+                    };
 
-                var result = new ParticipantStateChangeResult
-                {
-                    RoomId = room.Id,
-                    UserId = userId,
-                    Joined = joined,
-                    Changed = room.IsJoined(userId) != joined,
-                    PreviousState = runtime.State,
-                    ServerId = room.ServerId,
-                };
+                    if (!result.Changed)
+                    {
+                        return result;
+                    }
 
-                if (!result.Changed)
-                {
+                    if (_store != null)
+                    {
+                        var joinedUsers = room.JoinedParticipantUserIds.ToList();
+                        if (joined)
+                        {
+                            joinedUsers.Add(userId);
+                        }
+                        else
+                        {
+                            joinedUsers.RemoveAll(u => string.Equals(u, userId, StringComparison.OrdinalIgnoreCase));
+                        }
+
+                        var candidate = new Room(
+                            room.Id,
+                            room.ServerId,
+                            room.ServerUrl,
+                            room.Name,
+                            room.AdminUserId,
+                            room.PrimaryUserId,
+                            room.ParticipantUserIds,
+                            joinedUsers,
+                            room.CreatedAtUtc);
+                        _store.Update(candidate);
+                    }
+
+                    if (!room.SetJoined(userId, joined))
+                    {
+                        throw new InvalidOperationException("room participant state changed unexpectedly");
+                    }
+
+                    runtime.ResetToWaiting();
                     return result;
                 }
-
-                if (_store != null)
-                {
-                    var joinedUsers = room.JoinedParticipantUserIds.ToList();
-                    if (joined)
-                    {
-                        joinedUsers.Add(userId);
-                    }
-                    else
-                    {
-                        joinedUsers.RemoveAll(u => string.Equals(u, userId, StringComparison.OrdinalIgnoreCase));
-                    }
-
-                    var candidate = new Room(
-                        room.Id,
-                        room.ServerId,
-                        room.ServerUrl,
-                        room.Name,
-                        room.AdminUserId,
-                        room.PrimaryUserId,
-                        room.ParticipantUserIds,
-                        joinedUsers,
-                        room.CreatedAtUtc);
-                    _store.Update(candidate);
-                }
-
-                if (!room.SetJoined(userId, joined))
-                {
-                    throw new InvalidOperationException("room participant state changed unexpectedly");
-                }
-
-                runtime.ResetToWaiting();
-                return result;
             }
         }
 
@@ -278,30 +339,28 @@ namespace Emby.Plugins.WatchTogether
             ICommandIssuer issuer,
             DateTimeOffset now)
         {
-            var room = GetRoom(roomId);
-            if (room == null)
-            {
-                throw new KeyNotFoundException("room not found");
-            }
-
             action = (action ?? string.Empty).ToLowerInvariant();
             if (action != "pause" && action != "resume" && action != "resync")
             {
                 throw new ArgumentException($"unknown room action: {action}", nameof(action));
             }
 
-            var runtime = GetRuntime(roomId);
-            if (runtime == null)
+            using (var access = TryEnterRoom(roomId))
             {
-                throw new KeyNotFoundException("room not found");
-            }
+                if (access == null)
+                {
+                    throw new KeyNotFoundException("room not found");
+                }
 
-            lock (_lock)
-            {
+                var room = access.Room;
+                var runtime = access.Runtime;
                 if (action == "resync")
                 {
-                    runtime.ResetToWaiting();
-                    return new RoomActionResult { RoomId = roomId, State = runtime.State };
+                    lock (_lock)
+                    {
+                        runtime.ResetToWaiting();
+                        return new RoomActionResult { RoomId = roomId, State = runtime.State };
+                    }
                 }
 
                 string command = action == "pause" ? RemoteCommands.Pause : RemoteCommands.Unpause;
@@ -320,30 +379,69 @@ namespace Emby.Plugins.WatchTogether
 
                     if (issuer.TryIssue(roomId, room.AdminUserId, user, snapshot, command, positionTicks: null, now, out string error))
                     {
-                        runtime.Pending[user] = new PendingCommand
+                        lock (_lock)
                         {
-                            UserId = user,
-                            Command = command,
-                            PositionTicks = null,
-                            IssuedAtUtc = now,
-                            Retries = 0,
-                        };
-                        issued.Add(user);
+                            runtime.Pending[user] = new PendingCommand
+                            {
+                                UserId = user,
+                                SessionId = snapshot.SessionId,
+                                ItemId = snapshot.ItemId,
+                                Command = command,
+                                PositionTicks = null,
+                                IssuedAtUtc = now,
+                                Retries = 0,
+                            };
+                            issued.Add(user);
+                        }
                     }
                     else
                     {
-                        runtime.Error = $"{command} command failed: {error}";
+                        lock (_lock)
+                        {
+                            runtime.Error = $"{command} command failed: {error}";
+                        }
                     }
                 }
 
-                return new RoomActionResult
+                lock (_lock)
                 {
-                    RoomId = roomId,
-                    State = runtime.State,
-                    Command = command,
-                    Users = issued,
-                    Error = runtime.Error,
-                };
+                    return new RoomActionResult
+                    {
+                        RoomId = roomId,
+                        State = runtime.State,
+                        Command = command,
+                        Users = issued,
+                        Error = runtime.Error,
+                    };
+                }
+            }
+        }
+
+        internal sealed class RoomAccess : IDisposable
+        {
+            private readonly object _gate;
+            private bool _disposed;
+
+            internal RoomAccess(object gate, Room room, RoomRuntime runtime)
+            {
+                _gate = gate;
+                Room = room;
+                Runtime = runtime;
+            }
+
+            internal Room Room { get; }
+
+            internal RoomRuntime Runtime { get; }
+
+            public void Dispose()
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                Monitor.Exit(_gate);
             }
         }
     }
