@@ -67,6 +67,46 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task PollOnce_RoomDeletedAfterRuntimeLookup_DoesNotIssueCommands()
+        {
+            var room = CreateRoom();
+            var provider = new BlockingSnapshotProvider(new[]
+            {
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0),
+            });
+            var engine = new SyncEngine(
+                _rooms,
+                provider,
+                _issuer,
+                () => "server-1",
+                () => _clock.Now,
+                messageIssuer: _messageIssuer);
+
+            var pollTask = Task.Run(() => engine.PollOnce(_clock.Now));
+            try
+            {
+                await provider.EnteredTask.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(_rooms.DeleteRoom(room.Id));
+            }
+            finally
+            {
+                provider.Release.Set();
+            }
+
+            try
+            {
+                Assert.Empty(await pollTask);
+                Assert.Empty(_issuer.Issued);
+                Assert.Null(_rooms.GetRuntime(room.Id));
+            }
+            finally
+            {
+                engine.Dispose();
+            }
+        }
+
+        [Fact]
         public void PollOnce_ServerMismatch_MarksRoomUnavailable()
         {
             var room = CreateRoom();
@@ -1363,6 +1403,30 @@ namespace Emby.Plugins.WatchTogether.Tests
             public List<SessionSnapshot> Snapshots { get; set; } = new List<SessionSnapshot>();
 
             public IReadOnlyList<SessionSnapshot> GetSessionSnapshots() => Snapshots;
+        }
+
+        private sealed class BlockingSnapshotProvider : ISessionSnapshotProvider
+        {
+            private readonly IReadOnlyList<SessionSnapshot> _snapshots;
+
+            public BlockingSnapshotProvider(IReadOnlyList<SessionSnapshot> snapshots)
+            {
+                _snapshots = snapshots;
+            }
+
+            private readonly TaskCompletionSource<bool> _entered =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public Task EnteredTask => _entered.Task;
+
+            public ManualResetEventSlim Release { get; } = new ManualResetEventSlim(false);
+
+            public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
+            {
+                _entered.TrySetResult(true);
+                Release.Wait(TimeSpan.FromSeconds(5));
+                return _snapshots;
+            }
         }
 
         private sealed class RecordingMessageIssuer : IMessageIssuer
