@@ -36,6 +36,7 @@ namespace Emby.Plugins.WatchTogether
         private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
         private const double AckLatencyEmaAlpha = 0.3;
         private const double MissingSessionDebounceSeconds = 2;
+        private const double PlaybackStopSuppressionSeconds = 3;
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -737,6 +738,11 @@ namespace Emby.Plugins.WatchTogether
             PlaybackStoppedSignal matchingSignal = null;
             foreach (var signal in signals)
             {
+                if (ConsumeSuppressedPlaybackStoppedSignal(runtime, signal, now))
+                {
+                    continue;
+                }
+
                 if (IsCurrentPlaybackStoppedSignal(runtime, room, snapshots, signal))
                 {
                     matchingSignal = signal;
@@ -779,6 +785,41 @@ namespace Emby.Plugins.WatchTogether
             runtime.PreviousAtUtc = null;
             runtime.MissingSessionSinceUtc = null;
             runtime.Error = StoppedPlaybackError;
+            return true;
+        }
+
+        private static bool ConsumeSuppressedPlaybackStoppedSignal(
+            RoomRuntime runtime,
+            PlaybackStoppedSignal signal,
+            DateTimeOffset now)
+        {
+            if (runtime == null || signal == null ||
+                !runtime.PlaybackStopSuppressions.TryGetValue(signal.UserId, out var suppression))
+            {
+                return false;
+            }
+
+            if (!string.Equals(suppression.SessionId, signal.SessionId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(suppression.ItemId, signal.ItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (now > suppression.UntilUtc)
+            {
+                runtime.PlaybackStopSuppressions.Remove(signal.UserId);
+                return false;
+            }
+
+            bool occurredDuringBarrier = signal.OccurredAtUtc >= suppression.BarrierStartedAtUtc &&
+                (!suppression.WatchingEnteredAtUtc.HasValue ||
+                 signal.OccurredAtUtc <= suppression.WatchingEnteredAtUtc.Value);
+            if (!occurredDuringBarrier)
+            {
+                return false;
+            }
+
+            runtime.PlaybackStopSuppressions.Remove(signal.UserId);
             return true;
         }
 
@@ -1510,6 +1551,20 @@ namespace Emby.Plugins.WatchTogether
             runtime.Pending.Clear();
             runtime.Suppressed.Clear();
             runtime.PauseAlign.Clear();
+            runtime.PlaybackStopSuppressions.Clear();
+            foreach (var pair in snapshots)
+            {
+                if (pair.Value != null)
+                {
+                    runtime.PlaybackStopSuppressions[pair.Key] = new PlaybackStopSuppression
+                    {
+                        SessionId = pair.Value.SessionId,
+                        ItemId = pair.Value.ItemId,
+                        BarrierStartedAtUtc = now,
+                        UntilUtc = DateTimeOffset.MaxValue,
+                    };
+                }
+            }
             _logger?.Info(
                 $"Room {room.Id}: barrier started, anchor={anchorUser}, " +
                 $"target={FormatPosition(anchor.PositionTicks)}s, paused={anchor.IsPaused}");
@@ -1756,6 +1811,11 @@ namespace Emby.Plugins.WatchTogether
             runtime.Suppressed.Clear();
             runtime.PauseAlign.Clear();
             runtime.Previous.Clear();
+            foreach (var pair in runtime.PlaybackStopSuppressions)
+            {
+                pair.Value.WatchingEnteredAtUtc = now;
+                pair.Value.UntilUtc = now.AddSeconds(PlaybackStopSuppressionSeconds);
+            }
             foreach (var pair in snapshots)
             {
                 runtime.Previous[pair.Key] = pair.Value;
