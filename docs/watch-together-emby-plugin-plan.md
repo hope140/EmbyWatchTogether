@@ -19,7 +19,7 @@
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
 
- 程序集目标框架为 `netstandard2.0`，项目版本为 `1.2.0.7`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。C# 行为、公共 API 和版本号不由本文档改变。
+程序集目标框架为 `netstandard2.0`，项目版本为 `1.2.0.8`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。C# 行为、公共 API 和版本号不由本文档改变。
 
 ## 2. 组件和数据流
 
@@ -39,9 +39,9 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 - `Plugin` 是 Emby 发现的插件入口，提供插件 ID、名称和嵌入式管理页。
 - `WatchTogetherEntryPoint` 在服务器启动时构造存储、会话桥接和同步线程，在停止时释放它们。
 - `SessionBridge` 将 Emby `SessionInfo` 和远程命令适配为插件使用的快照和命令；会话事件会请求立即轮询。
-- `SessionSelector` 为每位已加入用户选择当前有效会话，过滤停止/陈旧记录，并尽量保留两端共同 Item。
-- `RoomManager` 管理房间元数据和每个房间的 `RoomRuntime`；`RoomStore` 将房间元数据写入插件数据目录的 `rooms.json`。
-- `SyncEngine` 是轮询驱动的状态机；`WatchTogetherService` 提供管理页使用的 REST API，并在服务端再次校验权限。
+- `SessionSelector` 为每位已加入用户选择当前有效会话，过滤停止/陈旧记录，并尽量保留两端共同 Item；后续同步继续绑定所选 session identity。
+- `RoomManager` 管理房间元数据和每个房间的 `RoomRuntime`；只有已知房间才会创建 runtime，`RoomStore` 将房间元数据写入插件数据目录的 `rooms.json`。
+- `SyncEngine` 是轮询驱动的状态机；每个房间通过独立 gate 串行处理，单房间异常被记录并隔离；`WatchTogetherService` 提供管理页使用的 REST API，并在服务端再次校验权限。
 
 ## 3. 房间、资格和运行时状态
 
@@ -49,7 +49,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 一个房间必须有两名不同的参与者和一名主用户，主用户必须是参与者之一。每名用户不能同时属于其他房间。创建房间时两名参与者默认标记为已加入；参与者可以在管理页执行加入或退出。
 
-房间保存 `ServerId`、名称、管理员、主用户、参与者、加入状态和创建时间。运行时的上一轮快照、Pending 命令、Suppressed 窗口、Barrier 阶段和错误冷却不写入 `rooms.json`；插件重启后会从 `Waiting` 重新开始。
+房间保存 `ServerId`、名称、管理员、主用户、参与者、加入状态和创建时间。写入时先生成候选文件，再使用 `File.Replace` 替换现有 `rooms.json` 并保留 `.bak` 备份；损坏文件会报告错误，不会静默覆盖。运行时的上一轮快照、Pending 命令、Suppressed 窗口、Barrier 阶段和错误冷却不写入 `rooms.json`；插件重启后会从 `Waiting` 重新开始。重复 `Leave` 不改变成员状态，也不会重复触发暂停。
 
 ### 进入 Barrier 的资格
 
@@ -83,7 +83,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 6. 推进 Barrier 或处理 Watching 中的用户操作；
 7. 生成房间状态供 REST API 和管理页显示。
 
-播放开始、进度、停止、会话开始/结束和能力变化事件会调用 `RequestImmediatePoll`。内部唤醒事件会合并突发通知，轮询间隔仍是兜底，不会因为事件风暴创建多个线程。
+播放开始、进度、停止、会话开始/结束和能力变化事件会调用 `RequestImmediatePoll`；`PlaybackStopped` 还会把带 user/session/item identity 的事件排入同步线程处理。配置事件会更新 `PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop`，并唤醒等待中的循环，因此保存后下一轮轮询即可看到新策略。内部唤醒事件会合并突发通知，轮询间隔仍是兜底，不会因为事件风暴创建多个线程。
 
 ## 5. 起播 Barrier
 
@@ -105,7 +105,7 @@ Barrier 的四个阶段按顺序执行，每条远程命令都等待 SessionInfo
 
 播放状态恢复后，如果两端位置差超过 1 秒，只向非主用户做一次最终 Seek，再等待确认。命令未确认或阶段超时会回到 `Waiting`，记录错误并安排自动重试冷却。
 
-Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确认时错误为 `playback command was not acknowledged`，约 3 秒冷却后在条件仍满足时自动重新开始 Barrier。自动重试提示是尽力发送的消息，消息失败不会阻塞状态机。
+Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确认时错误为 `playback command was not acknowledged`，约 3 秒冷却后在条件仍满足时自动重新开始 Barrier。远程命令和提示消息都支持取消，并有约 5 秒的外部调用超时；引擎停止等待线程结束的时间有 10 秒上限。自动重试提示是尽力发送的消息，消息失败不会阻塞状态机。
 
 ## 6. Watching 阶段的同步规则
 
@@ -115,16 +115,17 @@ Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确�
 
 ### 手动 Seek 判定
 
-不能直接把两次快照的位置差当成 Seek，因为轮询间隔和播放速率会造成自然位移。当前逻辑先估算预期位置：
+不能直接把两次快照的位置差当成 Seek，因为轮询间隔和播放速率会造成自然位移。当前逻辑先估算预期位置，并用每位用户已观测的命令确认延迟 EMA 提高判定阈值：
 
 ```text
 expected = previous.PositionTicks
 if previous 未暂停:
     expected += elapsedSeconds × previous.PlaybackRate × TicksPerSecond
-manualSeek = abs(current.PositionTicks - expected) >= 5 秒
+threshold = max(4 秒, user_ack_latency_ema)
+manualSeek = abs(current.PositionTicks - expected) >= threshold
 ```
 
-暂停/继续或播放速率变化本身不会被误判为 Seek。只有明显的单次位置跳变才向另一端发送一次 Seek；长期的小幅速度差不会触发周期性纠偏。
+暂停/继续或播放速率变化本身不会被误判为 Seek。只有明显的单次位置跳变才向另一端发送一次 Seek；长期的小幅速度差不会触发周期性纠偏。刚完成远程 Seek 后的短暂校准回退也不会重复触发 Seek。
 
 ### 不同 Item
 
@@ -132,14 +133,21 @@ manualSeek = abs(current.PositionTicks - expected) >= 5 秒
 
 ### 停止或退出
 
-只有在 `Watching` 状态才产生持久停止处理。以下情况会被识别：会话消失或离线、快照标记 stopped、同一 Item 的位置从明显非零值重置到接近零。处理步骤是：
+只有在 `Watching` 状态才产生持久停止处理。停止判断按以下优先级执行：
 
-1. 仅在进入停止状态的转换上执行副作用，避免每轮重复；
-2. `PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方；
-3. `NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示；
-4. 清理运行时并回到 `Waiting`，要求双方重新打开同一视频。
+1. Emby 的 `PlaybackStopped` 事件先进入同步线程；事件必须匹配已加入用户的 `UserId`、当前 `SessionId`、当前 `ItemId` 和有效时间点。迟到的旧会话、旧 Item 或已经重连后的事件会被忽略。
+2. 没有匹配事件时才使用会话快照。快照标记 `stopped` 会直接处理；会话暂时消失或离线会先记录时间，持续缺失达到 2 秒 debounce 后才处理。
+3. 位置归零不是停止条件；合法的 seek-to-zero 不会单独触发停止副作用。
+4. 仅在进入停止状态的转换上执行副作用，避免每轮重复；`PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方，`NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示。
+5. 清理运行时并回到 `Waiting`，要求双方重新打开同一视频。
 
 Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久的播放停止。
+
+### 会话身份和命令生命周期
+
+`SessionSelector` 选择会话后，`Watching`、Barrier、Pending、Suppressed 和暂停对齐状态都会记录对应的 session identity 与 Item。即使新设备继续播放相同 Item 和位置，只要 session identity 变化也会回到 `Waiting`，不会把旧快照当成手动 Seek。Pending 命令遇到不同会话、不同 Item 或设备重连时直接丢弃，不跨身份确认或重试。
+
+每个房间通过独立 gate 串行完成快照处理和状态迁移；一个房间的异常只记录到该房间并隔离，不会终止同步线程或影响其他房间。远程命令和消息调用带取消与约 5 秒超时，停止引擎等待后台线程的上限为 10 秒。
 
 ## 7. 设置页和 REST API
 
@@ -149,10 +157,10 @@ Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久
 
 | 配置项 | 默认值 | 当前作用 |
 | --- | ---: | --- |
-| `PauseOtherOnPlaybackStop` | `true` | 停止或退出时暂停另一方 |
-| `NotifyOtherOnPlaybackStop` | `true` | 停止或退出时发送 DisplayMessage |
+| `PauseOtherOnPlaybackStop` | `true` | 停止事件或快照停止确认后暂停另一方 |
+| `NotifyOtherOnPlaybackStop` | `true` | 停止事件或快照停止确认后发送 DisplayMessage |
 
-Emby 负责保存配置；设置页只允许管理员修改。`PollIntervalSeconds` 默认 `0.5` 秒并由入口点传给同步引擎。`Enabled`、`MaxRuntimeDifferenceSeconds`、`SeekToleranceSeconds`、`BarrierSeekTimeoutSeconds` 和 `StaleSessionTimeoutSeconds` 仍是配置模型字段，但当前页面不暴露它们，关键阈值按本节所述固定策略运行。
+Emby 负责保存配置；设置页只允许管理员修改。`PollIntervalSeconds` 默认 `0.5` 秒并由入口点传给同步引擎。配置事件会把 `PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop` 热更新到同步引擎，并唤醒等待中的循环，保存后下一轮轮询生效。`Enabled`、`MaxRuntimeDifferenceSeconds`、`SeekToleranceSeconds`、`BarrierSeekTimeoutSeconds` 和 `StaleSessionTimeoutSeconds` 仍是配置模型字段，但不作为实时同步策略，关键阈值按本节所述固定策略运行。
 
 ### 服务路由和权限
 
@@ -200,6 +208,42 @@ dist/EmbyWatchTogether.zip
 
 ZIP 根目录直接包含 DLL。`.publish/`、`dist/` 和编译输出是临时产物，不应提交。
 
+### 签名正式版流程
+
+正式版检查不是只看程序集版本或 MD5。更新任务会从 GitHub 下载三个固定资产：
+
+- `Emby.Plugins.WatchTogether.dll`
+- `EmbyWatchTogether.release.manifest`
+- `EmbyWatchTogether.release.manifest.sig`
+
+三个资产可通过各自的 `releases/latest/download/<asset>` 地址发现。manifest 使用严格 UTF-8、无 BOM、LF 换行且无尾部换行或额外空白的 canonical 字段顺序：`schema`、`keyId`、`tag`、`version`、`assetName`、`size`、`sha256`。detached signature 使用 RSA PKCS#1 v1.5 + SHA-256 验签；未知 `keyId` 或任一 canonical 规则不满足时 fail closed。
+
+DLL 校验包含流式 SHA-256、文件大小、程序集名 `Emby.Plugins.WatchTogether` 和程序集版本，并要求它们与 manifest 一致。校验成功后，传给 Emby installer 的 `sourceUrl` 使用 manifest `tag` 的精确地址：
+
+```text
+https://github.com/hope140/EmbyWatchTogether/releases/download/<tag>/Emby.Plugins.WatchTogether.dll
+```
+
+插件计算的 MD5 只作为 Emby installer 的二次校验，不是签名信任依据。正式版 GitHub Release 固定发布四个资产：DLL、`EmbyWatchTogether.zip`、manifest 和 detached signature；tag 必须与 `Version`、`FileVersion`、`AssemblyVersion` 三项一致。
+
+### 生产 key bootstrap 与 workflow
+
+`src/EmbyWatchTogether/ReleaseTrustStore.cs` 当前默认 `ReleaseTrustStore` 为空并 fail closed。首次生产发布前，运营必须：
+
+1. 使用 `scripts/release/New-ReleaseSigningKey.ps1` 在仓库外生成 RSA 密钥，并审核公钥；
+2. 将 `keyId => RSAKeyValue` 映射提交到 `ReleaseTrustStore`；
+3. 将匹配的 PKCS#8 base64 私钥放入 GitHub Environment `release` 的 `WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64` secret。
+
+不得把真实私钥、公钥内容、token、本机服务器信息或私人路径写入文档或提交。当前生产 key bootstrap 尚未完成，因此**发布 workflow 会安全失败**，不能把当前仓库描述为已经可以生产发布。
+
+签名发布相关文件及职责如下：
+
+- `scripts/release/New-ReleaseSigningKey.ps1`：生成仓库外的 PKCS#8 base64 私钥和 `RSAKeyValue` 公钥。
+- `scripts/release/Sign-ReleaseManifest.ps1`：校验 DLL 名称/程序集/版本，流式计算大小和 SHA-256，并生成 manifest 与 signature。
+- `tests/release-signing.tests.ps1`：验证密钥、canonical manifest、RSA 签名和 DLL 校验。
+- `tests/release-workflow.tests.ps1`：验证触发条件、输入、版本检查、固定资产、签名步骤和发布命令。
+- `.github/workflows/release.yml`：仅 `workflow_dispatch`，输入 `tag` 和 `key_id`；checkout 对应 tag，校验三项版本，构建、测试、生成测试签名并验证四个固定资产，最后使用 `--verify-tag` 创建 Release；workflow 不部署服务器。
+
 ## 9. 验证方案
 
 ### 自动化测试
@@ -207,8 +251,10 @@ ZIP 根目录直接包含 DLL。`.publish/`、`dist/` 和编译输出是临时�
 最小验收命令：
 
 ```powershell
-dotnet test tests/EmbyWatchTogether.Tests/EmbyWatchTogether.Tests.csproj -c Release --nologo -v minimal
 dotnet build src/EmbyWatchTogether.sln -c Release --nologo
+dotnet test tests/EmbyWatchTogether.Tests/EmbyWatchTogether.Tests.csproj -c Release --nologo -v minimal
+pwsh -NoProfile -File tests/release-workflow.tests.ps1
+pwsh -NoProfile -File tests/release-signing.tests.ps1
 git diff --check
 ```
 
@@ -220,7 +266,8 @@ git diff --check
 - Pending acknowledgement、一次重试、失败冷却和消息失败隔离；
 - 主用户冲突裁决、手动 Seek 去重、长轮询和自然速率差不误判；
 - 不同 Item 的安全暂停、单人保护、停止检测和重复通知抑制；
-- 嵌入式设置页资源和配置默认值。
+- 嵌入式设置页资源和配置默认值；
+- 发布密钥生成、canonical manifest、RSA 签名校验和手动发布 workflow 约束。
 
 ### 人工验收
 
@@ -242,6 +289,7 @@ git diff --check
 - 正常播放期间出现反复跳转时，优先排查其他插件、客户端或遥控器；本实现只有检测到明显单次跳变才发 Seek。
 - 停止后的暂停/提示是尽力行为：目标客户端必须支持对应远程命令，消息失败不会阻止房间回到等待状态。
 - 房间元数据文件损坏时 `RoomStore` 会报告错误而不会静默覆盖；恢复前请备份 Emby 插件数据目录。
+- `ReleaseTrustStore` 为空时所有正式版更新都会 fail closed；当前生产 key bootstrap 尚未完成，发布 workflow 会安全失败。完成 bootstrap 前不得把仓库资产当作已经可生产发布。
 - 真实网络、客户端实现和媒体上游可能导致确认延迟或会话短暂缺失，发布前仍需在实际 Emby 环境完成人工验收。
 
 仓库协作与 Stack/Worktree 约定见 [`docs/pr-stack-workflow.md`](pr-stack-workflow.md)。
