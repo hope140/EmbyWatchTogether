@@ -24,6 +24,25 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void NotifyOnSyncActions_DefaultsToEnabledAndIsIndependent()
+        {
+            var configuration = new PluginConfiguration();
+            Assert.True(configuration.NotifyOnSyncActions);
+            configuration.NotifyOtherOnPlaybackStop = false;
+            Assert.True(configuration.NotifyOnSyncActions);
+            configuration.NotifyOnSyncActions = false;
+            Assert.False(configuration.NotifyOnSyncActions);
+        }
+
+        [Fact]
+        public void SyncEngineOptions_From_PropagatesNotifyOnSyncActions_AndLegacyConstructorRemainsCompatible()
+        {
+            Assert.True(SyncEngineOptions.From(new PluginConfiguration { NotifyOnSyncActions = true }).NotifyOnSyncActions);
+            Assert.True(new SyncEngineOptions(0.5, true, true, true).NotifyOnSyncActions);
+            Assert.True(new SyncEngineOptions(0.5, true, true).NotifyOnSyncActions);
+        }
+
+        [Fact]
         public void PollIntervalSeconds_DefaultsToHalfSecond()
         {
             var configuration = new PluginConfiguration();

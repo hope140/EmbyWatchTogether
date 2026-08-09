@@ -18,9 +18,10 @@ namespace Emby.Plugins.WatchTogether
             double pollIntervalSeconds,
             bool pauseOtherOnPlaybackStop,
             bool notifyOtherOnPlaybackStop)
-            : this(pollIntervalSeconds, pauseOtherOnPlaybackStop, notifyOtherOnPlaybackStop, false)
+            : this(pollIntervalSeconds, pauseOtherOnPlaybackStop, notifyOtherOnPlaybackStop, true)
         {
             LegacyAutomaticRetryNotifications = true;
+            IsNotifyOnSyncActionsExplicit = false;
         }
 
         public SyncEngineOptions(
@@ -34,6 +35,7 @@ namespace Emby.Plugins.WatchTogether
             NotifyOtherOnPlaybackStop = notifyOtherOnPlaybackStop;
             NotifyOnSyncActions = notifyOnSyncActions;
             LegacyAutomaticRetryNotifications = false;
+            IsNotifyOnSyncActionsExplicit = true;
         }
 
         public double PollIntervalSeconds { get; }
@@ -45,6 +47,8 @@ namespace Emby.Plugins.WatchTogether
         public bool NotifyOnSyncActions { get; }
 
         internal bool LegacyAutomaticRetryNotifications { get; }
+
+        internal bool IsNotifyOnSyncActionsExplicit { get; }
 
         public static SyncEngineOptions From(PluginConfiguration configuration)
         {
