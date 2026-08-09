@@ -556,13 +556,38 @@ jobs:
               throw 'Could not verify that the GitHub Release does not already exist.'
           }
 
+          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE ('docs/releases/{0}.md' -f $env:RELEASE_TAG)
+          if (-not [System.IO.File]::Exists($releaseNotesPath)) {
+              throw ('The Chinese release notes file is missing: {0}' -f $releaseNotesPath)
+          }
+
+          $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+          $releaseNotesBytes = [System.IO.File]::ReadAllBytes($releaseNotesPath)
+          if ($releaseNotesBytes.Length -eq 0 -or
+              ($releaseNotesBytes.Length -ge 3 -and $releaseNotesBytes[0] -eq 0xEF -and
+               $releaseNotesBytes[1] -eq 0xBB -and $releaseNotesBytes[2] -eq 0xBF)) {
+              throw 'The Chinese release notes must be non-empty UTF-8 without a BOM.'
+          }
+
+          try {
+              $releaseNotesText = $strictUtf8.GetString($releaseNotesBytes)
+          }
+          catch {
+              throw 'The Chinese release notes are not strict UTF-8.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseNotesText) -or
+              -not [System.Text.RegularExpressions.Regex]::IsMatch($releaseNotesText, '[\u3400-\u9FFF]')) {
+              throw 'The Chinese release notes must be non-empty and contain CJK characters.'
+          }
+
           gh release create $env:RELEASE_TAG `
               'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll' `
               'dist/EmbyWatchTogether.zip' `
               'dist/EmbyWatchTogether.release.manifest' `
               'dist/EmbyWatchTogether.release.manifest.sig' `
               --verify-tag `
-              --generate-notes `
+              --notes-file $releaseNotesPath `
               --title ('Release ' + $env:RELEASE_TAG)
           if ($LASTEXITCODE -ne 0) {
               throw 'GitHub Release creation failed.'
