@@ -358,7 +358,8 @@ namespace Emby.Plugins.WatchTogether
                         runtime.ResetToWaiting();
                     }
 
-                    if (!sameItem && snapshots.Count == 2)
+                    if (!sameItem && snapshots.Count == 2 &&
+                        !runtime.WaitingPauseRetries.Values.Any(state => state.Exhausted))
                     {
                         runtime.Error = "两位参与者打开了不同视频，暂不发送同步指令";
                     }
@@ -1064,6 +1065,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             if (clearedCondition &&
+                !runtime.WaitingPauseRetries.Values.Any(state => state.Exhausted) &&
                 string.Equals(runtime.Error, WaitingPauseRetryLimitError, StringComparison.Ordinal))
             {
                 runtime.Error = null;
@@ -1080,6 +1082,7 @@ namespace Emby.Plugins.WatchTogether
         {
             bool failed = false;
             bool seekFailed = false;
+            bool nonSeekFailed = false;
             stalePendingCommand = false;
             foreach (var pair in runtime.Pending.ToList())
             {
@@ -1168,6 +1171,7 @@ namespace Emby.Plugins.WatchTogether
                     {
                         failed = true;
                         seekFailed |= pending.Command == RemoteCommands.Seek;
+                        nonSeekFailed |= pending.Command != RemoteCommands.Seek;
                     }
                 }
                 else
@@ -1175,6 +1179,7 @@ namespace Emby.Plugins.WatchTogether
                     runtime.Pending.Remove(userId);
                     failed = true;
                     seekFailed |= pending.Command == RemoteCommands.Seek;
+                    nonSeekFailed |= pending.Command != RemoteCommands.Seek;
                     _logger?.Warn(
                         $"Room {room.Id}: pending {pending.Command} for {userId} failed " +
                         $"after {SyncConstants.MaxPendingRetries + 1} attempts");
@@ -1184,6 +1189,7 @@ namespace Emby.Plugins.WatchTogether
             if (failed)
             {
                 if (seekFailed &&
+                    !nonSeekFailed &&
                     runtime.State == RoomState.Barrier &&
                     runtime.Barrier?.Stage == BarrierStage.Seek)
                 {

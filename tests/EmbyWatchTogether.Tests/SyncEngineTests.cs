@@ -564,6 +564,55 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void BarrierSeek_MixedSeekAndPauseFailure_UsesFullBarrierRetry()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now); // initial barrier pause commands
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // pause acknowledgement enters Seek
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Seek is pending for u2
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(BarrierStage.Seek, runtime.Barrier.Stage);
+            Assert.Equal(RemoteCommands.Seek, runtime.Pending["u2"].Command);
+
+            // Reproduce a same-round Seek + Pause failure. The Pause is the
+            // hold request issued while the anchor resumes during Barrier Seek.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            DateTimeOffset expiredAt = _clock.Now.AddSeconds(
+                -(SyncConstants.PendingTimeoutSeconds + 1));
+            runtime.Pending["u2"].IssuedAtUtc = expiredAt;
+            runtime.Pending["u1"] = new PendingCommand
+            {
+                UserId = "u1",
+                SessionId = "s1",
+                ItemId = "i1",
+                Command = RemoteCommands.Pause,
+                IssuedAtUtc = expiredAt,
+            };
+            _issuer.FailuresRemaining = 2;
+
+            _clock.Advance(1);
+            var failed = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, failed.State);
+            Assert.Equal("playback command was not acknowledged", failed.Error);
+            Assert.Null(runtime.Barrier);
+            Assert.NotNull(runtime.BarrierRetryAtUtc);
+        }
+
+        [Fact]
         public void BarrierSeek_ImmediateFailures_StopAtSharedRetryBudget()
         {
             var room = CreateRoom();
@@ -1803,23 +1852,34 @@ namespace Emby.Plugins.WatchTogether.Tests
             engine.PollOnce(_clock.Now);
             Assert.Equal(issuedAtLimit, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
 
-            // A new session identity clears the exhausted per-user records and
-            // allows both users to be tried again immediately.
+            Assert.True(runtime.WaitingPauseRetries["u1"].Exhausted);
+            Assert.True(runtime.WaitingPauseRetries["u2"].Exhausted);
+
+            // Changing only one identity permits that user to retry. The other
+            // exhausted user must remain suppressed and must keep the limit
+            // error visible.
+            SetCandidates(
+                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1"),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2"));
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(issuedAtLimit + 1, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.False(runtime.WaitingPauseRetries["u1"].Exhausted);
+            Assert.Equal(1, runtime.WaitingPauseRetries["u1"].Attempts);
+            Assert.True(runtime.WaitingPauseRetries["u2"].Exhausted);
+            Assert.Equal("waiting pause retry limit reached", runtime.Error);
+
+            // Only after the second exhausted user's identity changes may the
+            // limit error clear and a new retry cycle begin for that user.
             SetCandidates(
                 Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1"),
                 Snapshot("s2-reconnected", "u2", paused: false, position: 0, itemId: "i2"));
             _clock.Advance(0.1);
             engine.PollOnce(_clock.Now);
             Assert.Equal(issuedAtLimit + 2, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
-
-            // A capability change is also a new retry condition, even when the
-            // session and item remain the same.
-            SetCandidates(
-                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1", supportsRemoteControl: false),
-                Snapshot("s2-reconnected", "u2", paused: false, position: 0, itemId: "i2"));
-            _clock.Advance(0.1);
-            engine.PollOnce(_clock.Now);
-            Assert.Equal(issuedAtLimit + 3, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.False(runtime.WaitingPauseRetries["u1"].Exhausted);
+            Assert.False(runtime.WaitingPauseRetries["u2"].Exhausted);
+            Assert.NotEqual("waiting pause retry limit reached", runtime.Error);
         }
 
         private SyncEngine CreateEngine(
