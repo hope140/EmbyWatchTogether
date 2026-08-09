@@ -30,6 +30,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly PluginUpdateStatus _status;
         private VerifiedPluginRelease _verifiedRelease;
         private string _pendingVersionStatusOverride;
+        private string _postInstallDiagnosticOverride;
         private bool _disposed;
 
         private const string CurrentVersionUnavailableMessage =
@@ -44,10 +45,7 @@ namespace Emby.Plugins.WatchTogether
             : this(
                 () => plugin?.Configuration ?? new PluginConfiguration(),
                 GetSaveConfigurationAction(plugin),
-                // The DI-created plugin always has a version. Keep the
-                // assembly fallback for the existing task/test construction
-                // path that deliberately bypasses Plugin initialization.
-                () => plugin?.Version ?? typeof(PluginUpdateManager).Assembly.GetName().Version,
+                () => plugin?.Version,
                 releaseClient,
                 installationManager,
                 applicationHost,
@@ -119,12 +117,14 @@ namespace Emby.Plugins.WatchTogether
 
         public PluginUpdateStatus GetStatus()
         {
+            Exception currentVersionException = null;
+            PluginUpdateStatus snapshot;
             lock (_stateLock)
             {
                 var configuration = ReadConfiguration();
                 Version currentVersion;
-                Exception currentVersionException;
-                if (TryReadCurrentVersion(out currentVersion, out currentVersionException))
+                Exception versionException;
+                if (TryReadCurrentVersion(out currentVersion, out versionException))
                 {
                     _status.CurrentVersion = FormatVersion(currentVersion);
                     _status.RestartRequired = IsPendingRestartRequired(
@@ -136,12 +136,20 @@ namespace Emby.Plugins.WatchTogether
                     _status.CurrentVersion = null;
                     _status.UpdateAvailable = false;
                     _status.RestartRequired = _pendingVersionStatusOverride != null;
-                    _status.LastError = CurrentVersionUnavailableMessage;
+                    _status.LastError = _postInstallDiagnosticOverride ?? CurrentVersionUnavailableMessage;
+                    currentVersionException = versionException;
                 }
 
                 _status.PendingVersion = _pendingVersionStatusOverride ?? configuration.PendingUpdateVersion;
-                return _status.Clone();
+                snapshot = _status.Clone();
             }
+
+            if (currentVersionException != null)
+            {
+                LogException(CurrentVersionUnavailableMessage, currentVersionException);
+            }
+
+            return snapshot;
         }
 
         public Task<PluginUpdateStatus> CheckAsync(CancellationToken cancellationToken = default(CancellationToken))
@@ -203,7 +211,7 @@ namespace Emby.Plugins.WatchTogether
                     lock (_stateLock)
                     {
                         _status.IsInstalling = true;
-                        _status.LastError = null;
+                        _status.LastError = _postInstallDiagnosticOverride;
                     }
 
                     if (_verifiedRelease == null)
@@ -287,8 +295,9 @@ namespace Emby.Plugins.WatchTogether
             lock (_stateLock)
             {
                 _status.IsChecking = true;
-                _status.LastError = null;
+                _status.LastError = _postInstallDiagnosticOverride;
                 _status.LastCheckedAtUtc = checkedAt;
+                _verifiedRelease = null;
             }
 
             try
@@ -356,12 +365,17 @@ namespace Emby.Plugins.WatchTogether
             }
             catch (OperationCanceledException)
             {
+                lock (_stateLock)
+                {
+                    _verifiedRelease = null;
+                }
                 throw;
             }
             catch (ReleaseValidationException ex)
             {
                 lock (_stateLock)
                 {
+                    _verifiedRelease = null;
                     _status.UpdateAvailable = false;
                 }
                 SetError(ex.UserMessage, ex);
@@ -371,6 +385,7 @@ namespace Emby.Plugins.WatchTogether
             {
                 lock (_stateLock)
                 {
+                    _verifiedRelease = null;
                     _status.UpdateAvailable = false;
                 }
                 SetError("检查更新失败，请稍后重试。", ex);
@@ -392,7 +407,7 @@ namespace Emby.Plugins.WatchTogether
             lock (_stateLock)
             {
                 _status.IsInstalling = true;
-                _status.LastError = null;
+                _status.LastError = _postInstallDiagnosticOverride;
             }
 
             try
@@ -452,9 +467,10 @@ namespace Emby.Plugins.WatchTogether
                     if (!configurationSaved || notificationException != null)
                     {
                         _pendingVersionStatusOverride = configuration.PendingUpdateVersion;
-                        _status.LastError = BuildPostInstallDiagnostic(
+                        _postInstallDiagnosticOverride = BuildPostInstallDiagnostic(
                             configurationSaved,
                             notificationException != null);
+                        _status.LastError = _postInstallDiagnosticOverride;
                     }
                 }
 
@@ -582,7 +598,7 @@ namespace Emby.Plugins.WatchTogether
         {
             lock (_stateLock)
             {
-                _status.LastError = userMessage;
+                _status.LastError = _postInstallDiagnosticOverride ?? userMessage;
             }
 
             if (exception != null)
