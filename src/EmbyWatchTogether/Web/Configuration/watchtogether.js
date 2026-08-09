@@ -40,10 +40,17 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function errorMessage(error) {
-        if (error && error.message) {
-            return error.message;
+        var status = error && (error.status || error.statusCode);
+        if (status === 401 || status === 403) {
+            return '权限不足，请使用管理员账号重试。';
         }
-        return '未知错误';
+        if (status >= 500) {
+            return '服务器暂时不可用，请稍后重试。';
+        }
+        if (error && error.name === 'TypeError') {
+            return '网络连接失败，请稍后重试。';
+        }
+        return '操作未完成，请稍后重试。';
     }
 
     function setStatus(page, text, isError) {
@@ -78,12 +85,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function setConfigBusy(page, isBusy) {
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
+        var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
         var saveButton = page.querySelector('#wtSaveConfig');
         if (pauseCheckbox) {
             pauseCheckbox.disabled = isBusy;
         }
         if (notifyCheckbox) {
             notifyCheckbox.disabled = isBusy;
+        }
+        if (syncNotifyCheckbox) {
+            syncNotifyCheckbox.disabled = isBusy;
         }
         if (saveButton) {
             saveButton.disabled = isBusy || !page._wtConfigReady;
@@ -95,6 +106,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function applyPluginConfiguration(page, config) {
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
+        var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
         page._wtPluginConfiguration = config || {};
         page._wtConfigReady = true;
         if (pauseCheckbox) {
@@ -104,6 +116,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (notifyCheckbox) {
             notifyCheckbox.checked = page._wtPluginConfiguration.NotifyOtherOnPlaybackStop !== false;
             notifyCheckbox.disabled = false;
+        }
+        if (syncNotifyCheckbox) {
+            syncNotifyCheckbox.checked = page._wtPluginConfiguration.NotifyOnSyncActions !== false;
+            syncNotifyCheckbox.disabled = false;
         }
         var saveButton = page.querySelector('#wtSaveConfig');
         if (saveButton) {
@@ -122,12 +138,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             page._wtConfigReady = false;
             var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
             var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
+            var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
             var saveButton = page.querySelector('#wtSaveConfig');
             if (pauseCheckbox) {
                 pauseCheckbox.disabled = true;
             }
             if (notifyCheckbox) {
                 notifyCheckbox.disabled = true;
+            }
+            if (syncNotifyCheckbox) {
+                syncNotifyCheckbox.disabled = true;
             }
             if (saveButton) {
                 saveButton.disabled = true;
@@ -146,7 +166,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function savePluginConfiguration(page) {
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
-        if (!pauseCheckbox || !notifyCheckbox || !page._wtConfigReady) {
+        var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
+        if (!pauseCheckbox || !notifyCheckbox || !syncNotifyCheckbox || !page._wtConfigReady) {
             return Promise.resolve();
         }
 
@@ -156,12 +177,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             config = config || {};
             config.PauseOtherOnPlaybackStop = pauseCheckbox.checked;
             config.NotifyOtherOnPlaybackStop = notifyCheckbox.checked;
+            config.NotifyOnSyncActions = syncNotifyCheckbox.checked;
             return ApiClient.updatePluginConfiguration(pluginId, config);
         }).then(function () {
             return ApiClient.getPluginConfiguration(pluginId);
         }).then(function (config) {
             applyPluginConfiguration(page, config);
-            setConfigStatus(page, '配置已保存并重新读取');
+            setConfigStatus(page,
+                '配置已保存：停止暂停' + (pauseCheckbox.checked ? '开启' : '关闭') + '；停止提示' +
+                (notifyCheckbox.checked ? '开启' : '关闭') + '；同步操作提示' +
+                (syncNotifyCheckbox.checked ? '开启' : '关闭'));
         }).catch(function (error) {
             setConfigStatus(page,
                 isPermissionError(error) ? '保存被拒绝：只有管理员可以修改此设置。' : '配置保存失败：' + errorMessage(error),
@@ -356,6 +381,63 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         };
     }
 
+    var statusReasonMessages = {
+        server_unavailable: '房间所属服务器暂不可用，请确认当前服务器连接。',
+        different_video: '两位参与者打开了不同视频，请打开同一视频。',
+        playback_stopped: '播放已停止，请双方重新打开同一视频。',
+        command_failed: '播放控制未完成，请检查两位参与者的客户端。',
+        member_left: '仍有参与者未加入，请先让双方加入房间。',
+        aligning: '正在对齐播放位置，请稍候。',
+        watching: '两位参与者已连接，播放会自动同步。',
+        remote_control_unavailable: '当前客户端不支持远程控制，请更换或更新客户端。',
+        media_mismatch: '两位参与者的媒体信息不一致，请打开同一视频。',
+        unsupported_playback_rate: '播放速度不是 1 倍，请恢复正常速度后重试。',
+        waiting_for_playback: '等待双方打开同一视频并开始播放。'
+    };
+
+    function statusReasonMessage(reason) {
+        return statusReasonMessages[reason] || '当前房间状态需要检查，请刷新后重试。';
+    }
+
+    function roomFeedback(page, roomId, text, isError, persistent) {
+        page._wtRoomFeedback = page._wtRoomFeedback || {};
+        page._wtRoomFeedbackTimers = page._wtRoomFeedbackTimers || {};
+        if (page._wtRoomFeedbackTimers[roomId]) {
+            clearTimeout(page._wtRoomFeedbackTimers[roomId]);
+            delete page._wtRoomFeedbackTimers[roomId];
+        }
+        var token = String(Date.now()) + ':' + String(Math.random());
+        page._wtRoomFeedback[roomId] = { text: text, isError: !!isError, token: token };
+        if (!isError && !persistent) {
+            page._wtRoomFeedbackTimers[roomId] = setTimeout(function () {
+                if (page._wtRoomFeedback[roomId] && page._wtRoomFeedback[roomId].token === token) {
+                    delete page._wtRoomFeedback[roomId];
+                    renderRooms(page, page._wtRooms || []);
+                }
+                delete page._wtRoomFeedbackTimers[roomId];
+            }, 8000);
+        }
+    }
+
+    function clearRoomFeedback(page, roomId) {
+        if (page._wtRoomFeedbackTimers && page._wtRoomFeedbackTimers[roomId]) {
+            clearTimeout(page._wtRoomFeedbackTimers[roomId]);
+            delete page._wtRoomFeedbackTimers[roomId];
+        }
+        if (page._wtRoomFeedback) {
+            delete page._wtRoomFeedback[roomId];
+        }
+    }
+
+    function setRoomBusy(page, roomId, busy) {
+        page._wtRoomBusy = page._wtRoomBusy || {};
+        if (busy) {
+            page._wtRoomBusy[roomId] = true;
+        } else {
+            delete page._wtRoomBusy[roomId];
+        }
+    }
+
     function createActionButton(page, room, action) {
         var button = document.createElement('button', { is: 'emby-button' });
         button.type = 'button';
@@ -371,9 +453,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         button.dataset.action = action;
         button.textContent = action === 'delete' ? '删除房间' : action === 'leave' ? '退出房间' : action === 'join' ? '加入房间' : actionLabels[action];
         button.title = action === 'delete'
-            ? '删除这个房间'
+            ? '删除这个房间；只删除同步关系，不删除媒体'
             : action === 'leave'
-                ? '退出后将停止同步，主用户会暂停'
+                ? '退出后仍在房间的一方会暂停'
                 : action === 'join'
                     ? '加入后需要与另一位参与者打开同一视频'
             : actionLabels[action] + '：' + (getStateInfo(room.State).description || '');
@@ -386,6 +468,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 control(page, room.RoomId, action, button);
             }
         });
+        if (page._wtRoomBusy && page._wtRoomBusy[room.RoomId]) {
+            button.disabled = true;
+        }
         return button;
     }
 
@@ -428,8 +513,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             identity.appendChild(name);
 
             var info = getStateInfo(room.State);
-            if (room.Error && room.Error.indexOf('不同视频') !== -1) {
-                info = { label: '视频不一致', description: room.Error, className: 'waiting' };
+            info.description = statusReasonMessage(room.StatusReason);
+            if (room.StatusReason === 'different_video') {
+                info.label = '视频不一致';
             }
             var stateDescription = document.createElement('p');
             stateDescription.className = 'fieldDescription wt-roomStateDescription';
@@ -461,12 +547,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             membershipLine.textContent = '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已退出');
             card.appendChild(membershipLine);
 
-            if (room.Error) {
-                var error = document.createElement('div');
-                error.className = 'error wt-roomError';
-                error.textContent = '需要处理：' + room.Error;
-                card.appendChild(error);
-            }
+            var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
+            var feedbackEl = document.createElement('div');
+            feedbackEl.className = 'wt-roomFeedback' + (feedback && feedback.isError ? ' error' : '');
+            feedbackEl.setAttribute('role', feedback && feedback.isError ? 'alert' : 'status');
+            feedbackEl.setAttribute('aria-live', 'polite');
+            feedbackEl.textContent = feedback ? feedback.text : info.description;
+            card.appendChild(feedbackEl);
 
             var actions = document.createElement('div');
             actions.className = 'wt-roomActions';
@@ -475,6 +562,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 ['pause', 'resume', 'resync', 'delete'].forEach(function (action) {
                     actions.appendChild(createActionButton(page, room, action));
                 });
+            }
+            if (page._wtRoomBusy && page._wtRoomBusy[room.RoomId]) {
+                var busy = document.createElement('span');
+                busy.className = 'wt-roomFeedback';
+                busy.textContent = '正在处理此房间，请稍候…';
+                busy.setAttribute('role', 'status');
+                actions.insertBefore(busy, actions.firstChild);
             }
             card.appendChild(actions);
             container.appendChild(card);
@@ -536,64 +630,79 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function control(page, roomId, action, button) {
         var label = actionLabels[action] || '操作';
-        setButtonBusy(button, true, '处理中…');
-        setStatus(page, label + '…');
+        setRoomBusy(page, roomId, true);
+        clearRoomFeedback(page, roomId);
+        roomFeedback(page, roomId, label + '处理中…', false, true);
+        renderRooms(page, page._wtRooms || []);
         apiSend('WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Action', 'POST', { Action: action })
             .then(function (result) {
                 if (result && result.Error) {
-                    throw new Error(result.Error);
+                    roomFeedback(page, roomId, label + '已发起，但部分客户端未完成，请检查客户端。', true, true);
+                } else if (result && result.Users && result.Users.length > 0) {
+                    roomFeedback(page, roomId, label + '已向 ' + result.Users.length + ' 个当前会话发送。', false, false);
+                } else if (result && result.Users) {
+                    roomFeedback(page, roomId, label + '没有可控制的当前会话。', true, true);
+                } else {
+                    roomFeedback(page, roomId, label + '已开始，等待完成。', false, false);
                 }
-                setStatus(page, label + '指令已发送');
                 return loadRooms(page, false);
             })
             .catch(function (err) {
-                setStatus(page, label + '失败：' + errorMessage(err), true);
+                roomFeedback(page, roomId, label + '失败：' + errorMessage(err), true, true);
             })
             .then(function () {
-                setButtonBusy(button, false);
+                setRoomBusy(page, roomId, false);
+                renderRooms(page, page._wtRooms || []);
             });
     }
 
     function deleteRoom(page, room, button) {
         var roomName = room.Name || '未命名房间';
-        if (!window.confirm('确认删除“' + roomName + '”吗？删除后两位参与者将不再自动同步。')) {
+        if (!window.confirm('确认删除“' + roomName + '”吗？这只删除同步关系，不删除媒体。')) {
             return;
         }
 
-        setButtonBusy(button, true, '删除中…');
-        setStatus(page, '正在删除房间…');
+        setRoomBusy(page, room.RoomId, true);
+        roomFeedback(page, room.RoomId, '删除中…', false, true);
+        renderRooms(page, page._wtRooms || []);
         apiSend('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId), 'DELETE')
             .then(function (result) {
                 if (result && result.Deleted === false) {
                     throw new Error('房间不存在或已删除');
                 }
-                setStatus(page, '房间已删除');
+                roomFeedback(page, room.RoomId, '房间已删除；同步关系已移除，媒体未删除。', false, false);
                 return loadRooms(page, false);
             })
             .catch(function (err) {
-                setStatus(page, '删除失败：' + errorMessage(err), true);
+                roomFeedback(page, room.RoomId, '删除失败：' + errorMessage(err), true, true);
             })
             .then(function () {
-                setButtonBusy(button, false);
+                setRoomBusy(page, room.RoomId, false);
+                renderRooms(page, page._wtRooms || []);
             });
     }
 
     function membership(page, room, action, button) {
-        if (action === 'leave' && !window.confirm('退出“' + (room.Name || '未命名房间') + '”吗？退出后主用户会暂停。')) {
+        if (action === 'leave' && !window.confirm('退出“' + (room.Name || '未命名房间') + '”吗？仍在房间的一方会暂停。')) {
             return;
         }
-        setButtonBusy(button, true, action === 'join' ? '加入中…' : '退出中…');
-        setStatus(page, action === 'join' ? '正在加入房间…' : '正在退出房间…');
+        setRoomBusy(page, room.RoomId, true);
+        clearRoomFeedback(page, room.RoomId);
+        roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '退出中…', false, true);
+        renderRooms(page, page._wtRooms || []);
         apiSend('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/' + (action === 'join' ? 'Join' : 'Leave'), 'POST')
             .then(function () {
-                setStatus(page, action === 'join' ? '已加入房间' : '已退出房间');
+                roomFeedback(page, room.RoomId,
+                    action === 'join' ? '已加入房间，请与另一位参与者打开同一视频。' : '已退出房间，仍在房间的一方会暂停。',
+                    false, false);
                 return loadRooms(page, false);
             })
             .catch(function (err) {
-                setStatus(page, (action === 'join' ? '加入' : '退出') + '失败：' + errorMessage(err), true);
+                roomFeedback(page, room.RoomId, (action === 'join' ? '加入' : '退出') + '失败：' + errorMessage(err), true, true);
             })
             .then(function () {
-                setButtonBusy(button, false);
+                setRoomBusy(page, room.RoomId, false);
+                renderRooms(page, page._wtRooms || []);
             });
     }
 
@@ -641,8 +750,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             Name: name,
             ParticipantUserIds: [a, b],
             PrimaryUserId: primary.value
-        }).then(function () {
-            setStatus(page, '房间已创建');
+        }).then(function (result) {
+            var created = result || {};
+            page._wtPendingCreatedFeedback = {
+                name: name,
+                roomId: created.RoomId
+            };
             nameInput.value = '';
             syncForm(page);
             return loadRooms(page, true);
@@ -651,6 +764,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }).then(function () {
             setButtonBusy(createButton, false);
             syncForm(page);
+            if (page._wtPendingCreatedFeedback && page._wtPendingCreatedFeedback.roomId) {
+                roomFeedback(page, page._wtPendingCreatedFeedback.roomId,
+                    '房间“' + page._wtPendingCreatedFeedback.name + '”已创建，请让双方打开同一视频。', false, false);
+                page._wtPendingCreatedFeedback = null;
+                renderRooms(page, page._wtRooms || []);
+            }
         });
     }
 
@@ -666,6 +785,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             createRoom(page);
         });
         dom.addEventListener(page.querySelector('#wtRefresh'), 'click', function () {
+            page._wtRoomFeedback = {};
             loadRooms(page, true);
         });
         dom.addEventListener(page.querySelector('#wtRoomName'), 'input', function () {
