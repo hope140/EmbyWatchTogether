@@ -40,6 +40,8 @@ namespace Emby.Plugins.WatchTogether
     /// </summary>
     public sealed class RoomManager
     {
+        private const string RoomServerUnavailableError = "room server is unavailable";
+
         private readonly object _lock = new object();
         private readonly RoomStore _store;
         private readonly Dictionary<string, Room> _rooms = new Dictionary<string, Room>(StringComparer.OrdinalIgnoreCase);
@@ -213,6 +215,21 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        internal bool IsCurrentRoom(Room room)
+        {
+            if (room == null)
+            {
+                return false;
+            }
+
+            lock (_lock)
+            {
+                return _rooms.TryGetValue(room.Id, out var current) &&
+                    ReferenceEquals(current, room) &&
+                    _runtimes.ContainsKey(room.Id);
+            }
+        }
+
         /// <summary>
         /// Enters the atomic operation scope for an existing room. The room
         /// and runtime are revalidated after acquiring the per-room gate so a
@@ -329,7 +346,7 @@ namespace Emby.Plugins.WatchTogether
 
         /// <summary>
         /// Manual room action: pause, resume or resync (ported from Python action()).
-        /// Pause/resume issue the matching command to every online participant;
+        /// Pause/resume issue the matching command to every online joined participant;
         /// resync resets the runtime to waiting, allowing a new barrier.
         /// </summary>
         public RoomActionResult Action(
@@ -338,6 +355,32 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             ICommandIssuer issuer,
             DateTimeOffset now)
+        {
+            return Action(
+                roomId,
+                action,
+                snapshots,
+                issuer,
+                now,
+                currentServerIdProvider: null,
+                snapshotProvider: null);
+        }
+
+        /// <summary>
+        /// Manual action variant used by the REST service. The initial snapshot
+        /// may have been captured before the room gate was acquired; the
+        /// provider is therefore called again for each target while the gate is
+        /// held, and the current server identity is checked immediately before
+        /// any command can be issued.
+        /// </summary>
+        internal RoomActionResult Action(
+            string roomId,
+            string action,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            ICommandIssuer issuer,
+            DateTimeOffset now,
+            Func<string> currentServerIdProvider,
+            Func<Room, IReadOnlyDictionary<string, SessionSnapshot>> snapshotProvider)
         {
             action = (action ?? string.Empty).ToLowerInvariant();
             if (action != "pause" && action != "resume" && action != "resync")
@@ -354,6 +397,22 @@ namespace Emby.Plugins.WatchTogether
 
                 var room = access.Room;
                 var runtime = access.Runtime;
+                string command = action == "pause"
+                    ? RemoteCommands.Pause
+                    : action == "resume" ? RemoteCommands.Unpause : null;
+
+                if (currentServerIdProvider != null &&
+                    !IsSameServer(room.ServerId, currentServerIdProvider()))
+                {
+                    return new RoomActionResult
+                    {
+                        RoomId = roomId,
+                        State = runtime.State,
+                        Command = command,
+                        Error = RoomServerUnavailableError,
+                    };
+                }
+
                 if (action == "resync")
                 {
                     lock (_lock)
@@ -363,13 +422,30 @@ namespace Emby.Plugins.WatchTogether
                     }
                 }
 
-                string command = action == "pause" ? RemoteCommands.Pause : RemoteCommands.Unpause;
                 var issued = new List<string>();
-                foreach (var user in room.ParticipantUserIds)
+                var joinedUsers = room.JoinedParticipantUserIds.ToList();
+                foreach (var user in joinedUsers)
                 {
-                    if (!snapshots.TryGetValue(user, out var snapshot) || snapshot == null || !snapshot.Online)
+                    if (!room.IsJoined(user))
                     {
                         continue;
+                    }
+
+                    var currentSnapshots = snapshotProvider == null
+                        ? snapshots
+                        : snapshotProvider(room);
+                    if (currentSnapshots == null ||
+                        !currentSnapshots.TryGetValue(user, out var snapshot) ||
+                        snapshot == null || !snapshot.Online)
+                    {
+                        continue;
+                    }
+
+                    if (!IsCurrentRoom(room) || !room.IsJoined(user) ||
+                        (currentServerIdProvider != null &&
+                         !IsSameServer(room.ServerId, currentServerIdProvider())))
+                    {
+                        break;
                     }
 
                     if (issuer == null)
@@ -381,16 +457,19 @@ namespace Emby.Plugins.WatchTogether
                     {
                         lock (_lock)
                         {
-                            runtime.Pending[user] = new PendingCommand
+                            if (IsCurrentRoom(room) && room.IsJoined(user))
                             {
-                                UserId = user,
-                                SessionId = snapshot.SessionId,
-                                ItemId = snapshot.ItemId,
-                                Command = command,
-                                PositionTicks = null,
-                                IssuedAtUtc = now,
-                                Retries = 0,
-                            };
+                                runtime.Pending[user] = new PendingCommand
+                                {
+                                    UserId = user,
+                                    SessionId = snapshot.SessionId,
+                                    ItemId = snapshot.ItemId,
+                                    Command = command,
+                                    PositionTicks = null,
+                                    IssuedAtUtc = now,
+                                    Retries = 0,
+                                };
+                            }
                             issued.Add(user);
                         }
                     }
@@ -415,6 +494,13 @@ namespace Emby.Plugins.WatchTogether
                     };
                 }
             }
+        }
+
+        private static bool IsSameServer(string roomServerId, string currentServerId)
+        {
+            return !string.IsNullOrWhiteSpace(roomServerId) &&
+                !string.IsNullOrWhiteSpace(currentServerId) &&
+                string.Equals(roomServerId, currentServerId, StringComparison.OrdinalIgnoreCase);
         }
 
         internal sealed class RoomAccess : IDisposable

@@ -154,7 +154,13 @@ namespace Emby.Plugins.WatchTogether
 
             var snapshots = BuildSnapshots(plugin, room);
             var result = plugin.Rooms.Action(
-                request.Id, request.Action, snapshots, plugin.Issuer, DateTimeOffset.UtcNow);
+                request.Id,
+                request.Action,
+                snapshots,
+                plugin.Issuer,
+                DateTimeOffset.UtcNow,
+                plugin.ResolveServerId,
+                currentRoom => BuildSnapshots(plugin, currentRoom));
             return new
             {
                 RoomId = result.RoomId,
@@ -230,6 +236,7 @@ namespace Emby.Plugins.WatchTogether
             var room = plugin.Rooms.GetRoom(request.Id);
             if (room == null || !room.HasParticipant(userId)) throw new UnauthorizedAccessException("not a room participant");
 
+            var beforeLeaveSnapshots = BuildSnapshots(plugin, room);
             var transition = plugin.Rooms.LeaveParticipantResult(request.Id, userId);
             bool activeBeforeLeave = transition.PreviousState == RoomState.Barrier ||
                 transition.PreviousState == RoomState.Watching;
@@ -238,15 +245,50 @@ namespace Emby.Plugins.WatchTogether
 
             if (transition.Changed && activeBeforeLeave && sameServer)
             {
-                var snapshots = BuildSnapshots(plugin, room);
-                if (string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase))
+                using (var access = plugin.Rooms.TryEnterRoom(request.Id))
                 {
-                    PauseOnlineParticipants(plugin, room, snapshots);
-                }
-                else if (snapshots.TryGetValue(room.PrimaryUserId, out var primary) && primary != null && primary.Online)
-                {
-                    plugin.Issuer?.TryIssue(room.Id, room.AdminUserId, room.PrimaryUserId, primary,
-                        RemoteCommands.Pause, null, DateTimeOffset.UtcNow, out _);
+                    if (access != null && plugin.Rooms.IsCurrentRoom(access.Room) &&
+                        IsSameServer(access.Room.ServerId, plugin.ResolveServerId()))
+                    {
+                        var currentRoom = access.Room;
+                        var currentSnapshots = BuildSnapshots(plugin, currentRoom);
+                        IReadOnlyList<string> targetUserIds = string.Equals(
+                            userId,
+                            currentRoom.PrimaryUserId,
+                            StringComparison.OrdinalIgnoreCase)
+                            ? currentRoom.JoinedParticipantUserIds
+                            : new[] { currentRoom.PrimaryUserId };
+
+                        foreach (var targetUserId in targetUserIds.ToList())
+                        {
+                            if (!plugin.Rooms.IsCurrentRoom(currentRoom) ||
+                                !currentRoom.IsJoined(targetUserId) ||
+                                !IsSameServer(currentRoom.ServerId, plugin.ResolveServerId()))
+                            {
+                                break;
+                            }
+
+                            if (!beforeLeaveSnapshots.TryGetValue(targetUserId, out var beforeLeave) ||
+                                beforeLeave == null ||
+                                !currentSnapshots.TryGetValue(targetUserId, out var current) ||
+                                current == null ||
+                                !current.Online ||
+                                !HasSameSessionIdentity(beforeLeave, current))
+                            {
+                                continue;
+                            }
+
+                            plugin.Issuer?.TryIssue(
+                                currentRoom.Id,
+                                currentRoom.AdminUserId,
+                                targetUserId,
+                                current,
+                                RemoteCommands.Pause,
+                                null,
+                                DateTimeOffset.UtcNow,
+                                out _);
+                        }
+                    }
                 }
             }
 
@@ -268,23 +310,62 @@ namespace Emby.Plugins.WatchTogether
                 throw new InvalidOperationException("session bridge is not initialized");
             }
 
+            // Capture before waiting for the room gate so a delete/leave that
+            // wins this race can complete; all sends below use a fresh snapshot
+            // after the gate has revalidated the room and membership.
+            BuildSnapshots(plugin, room);
+
             int sent = 0;
-            foreach (var snapshot in BuildSnapshots(plugin, room).Values)
+            using (var access = plugin.Rooms.TryEnterRoom(request.Id))
             {
-                if (!snapshot.Online || !snapshot.Capabilities.CanDisplayMessage)
+                if (access == null)
                 {
-                    continue;
+                    return new { RoomId = request.Id, Sent = 0 };
                 }
 
-                plugin.Bridge.SendDisplayMessageAsync(
-                        room.AdminUserId,
-                        snapshot.SessionId,
-                        "Watch Together",
-                        request.Text ?? string.Empty,
-                        timeoutMs: 3000,
-                        cancellationToken: CancellationToken.None)
-                    .GetAwaiter().GetResult();
-                sent++;
+                room = access.Room;
+                if (!plugin.Rooms.IsCurrentRoom(room) ||
+                    !IsSameServer(room.ServerId, plugin.ResolveServerId()))
+                {
+                    return new { RoomId = room.Id, Sent = 0 };
+                }
+
+                foreach (var userId in room.JoinedParticipantUserIds.ToList())
+                {
+                    if (!plugin.Rooms.IsCurrentRoom(room) ||
+                        !room.IsJoined(userId) ||
+                        !IsSameServer(room.ServerId, plugin.ResolveServerId()))
+                    {
+                        break;
+                    }
+
+                    var snapshots = BuildSnapshots(plugin, room);
+                    if (!snapshots.TryGetValue(userId, out var snapshot) ||
+                        snapshot == null ||
+                        !snapshot.Online ||
+                        snapshot.Capabilities == null ||
+                        !snapshot.Capabilities.CanDisplayMessage)
+                    {
+                        continue;
+                    }
+
+                    if (!plugin.Rooms.IsCurrentRoom(room) ||
+                        !room.IsJoined(userId) ||
+                        !IsSameServer(room.ServerId, plugin.ResolveServerId()))
+                    {
+                        break;
+                    }
+
+                    plugin.Bridge.SendDisplayMessageAsync(
+                            room.AdminUserId,
+                            snapshot.SessionId,
+                            "Watch Together",
+                            request.Text ?? string.Empty,
+                            timeoutMs: 3000,
+                            cancellationToken: CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                    sent++;
+                }
             }
 
             return new { RoomId = room.Id, Sent = sent };
@@ -320,16 +401,19 @@ namespace Emby.Plugins.WatchTogether
             return SessionSelector.Select(candidates, room.JoinedParticipantUserIds);
         }
 
-        private static void PauseOnlineParticipants(Plugin plugin, Room room, Dictionary<string, SessionSnapshot> snapshots)
+        private static bool HasSameSessionIdentity(SessionSnapshot expected, SessionSnapshot current)
         {
-            foreach (var snapshot in snapshots.Values)
-            {
-                if (snapshot != null && snapshot.Online)
-                {
-                    plugin.Issuer?.TryIssue(room.Id, room.AdminUserId, snapshot.UserId, snapshot,
-                        RemoteCommands.Pause, null, DateTimeOffset.UtcNow, out _);
-                }
-            }
+            return expected != null && current != null &&
+                string.Equals(expected.UserId, current.UserId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(expected.SessionId, current.SessionId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(expected.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSameServer(string roomServerId, string currentServerId)
+        {
+            return !string.IsNullOrWhiteSpace(roomServerId) &&
+                !string.IsNullOrWhiteSpace(currentServerId) &&
+                string.Equals(roomServerId, currentServerId, StringComparison.OrdinalIgnoreCase);
         }
 
         private static Plugin RequirePlugin()
