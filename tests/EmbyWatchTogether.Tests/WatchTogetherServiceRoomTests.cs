@@ -287,6 +287,84 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Rooms_StatusReason_MapsRuntimeAndEligibilityReasons()
+        {
+            var user1 = Guid.NewGuid().ToString("N");
+            var user2 = Guid.NewGuid().ToString("N");
+            var user3 = Guid.NewGuid().ToString("N");
+            var user4 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("other-server", "", "room", user1, new[] { user1, user2 }, user1);
+            var plugin = NewPlugin(manager, null, new RecordingIssuer(), "server-1");
+            var service = NewService(user1, true);
+            manager.GetRuntime(room.Id).Error = "command failed";
+            var result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("server_unavailable", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+
+            room = manager.CreateRoom("server-1", "", "room2", user3, new[] { user3, user4 }, user3);
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.Error = "两位参与者打开了不同视频，暂不发送同步指令";
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("different_video", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.Error = "播放已停止，等待双方重新打开同一视频";
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("playback_stopped", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            manager.SetParticipantJoined(room.Id, user4, false);
+            runtime.Error = "command failed";
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("command_failed", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.Error = null;
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("member_left", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            manager.SetParticipantJoined(room.Id, user4, true);
+            runtime.State = RoomState.Barrier;
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("aligning", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.State = RoomState.Watching;
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("watching", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.State = RoomState.Waiting;
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("waiting_for_playback", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+        }
+
+        [Fact]
+        public void State_StatusReason_MapsEligibilityReasons()
+        {
+            var user1 = Guid.NewGuid().ToString("N");
+            var user2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", user1, new[] { user1, user2 }, user1);
+            var plugin = NewPlugin(manager, null, new RecordingIssuer(), "server-1");
+            var runtime = manager.GetRuntime(room.Id);
+            var service = NewService(user1, true);
+            SetEligibilityFailure(runtime, "RemoteControlUnsupportedOrMismatch");
+            Assert.Equal(
+                "remote_control_unavailable",
+                GetString(
+                    WithPlugin(plugin, () => service.Get(new GetRoomStateRequest { Id = room.Id })),
+                    "StatusReason"));
+            SetEligibilityFailure(runtime, "InvalidOrDifferentRuntime");
+            Assert.Equal(
+                "media_mismatch",
+                GetString(
+                    WithPlugin(plugin, () => service.Get(new GetRoomStateRequest { Id = room.Id })),
+                    "StatusReason"));
+            SetEligibilityFailure(runtime, "PlaybackRateNotOne");
+            Assert.Equal(
+                "unsupported_playback_rate",
+                GetString(
+                    WithPlugin(plugin, () => service.Get(new GetRoomStateRequest { Id = room.Id })),
+                    "StatusReason"));
+            SetEligibilityFailure(runtime, null);
+            Assert.Equal(
+                "waiting_for_playback",
+                GetString(
+                    WithPlugin(plugin, () => service.Get(new GetRoomStateRequest { Id = room.Id })),
+                    "StatusReason"));
+        }
+
+        [Fact]
         public void Leave_FromWaitingDoesNotPauseTheOtherParticipant()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
@@ -872,6 +950,25 @@ namespace Emby.Plugins.WatchTogether.Tests
         private static string GetString(object response, string propertyName)
         {
             return (string)response.GetType().GetProperty(propertyName).GetValue(response);
+        }
+
+        private static object GetRoomResponse(object response, string roomId)
+        {
+            return ((System.Collections.IEnumerable)response).Cast<object>()
+                .Single(item => string.Equals(GetString(item, "RoomId"), roomId, StringComparison.Ordinal));
+        }
+
+        private static void SetEligibilityFailure(RoomRuntime runtime, string reasonName)
+        {
+            var property = typeof(RoomRuntime).GetProperty(
+                "LastEligibilityFailureReason",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(property);
+
+            object value = reasonName == null
+                ? null
+                : Enum.Parse(property.PropertyType.GetGenericArguments()[0], reasonName);
+            property.SetValue(runtime, value);
         }
 
         private sealed class RecordingIssuer : ICommandIssuer
