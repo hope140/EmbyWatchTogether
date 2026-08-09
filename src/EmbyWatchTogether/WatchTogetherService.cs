@@ -97,6 +97,7 @@ namespace Emby.Plugins.WatchTogether
                     Name = r.Name,
                     State = runtime.State.ToString(),
                     Error = runtime.Error,
+                    StatusReason = GetStatusReason(plugin, r, runtime),
                     PrimaryUserId = r.PrimaryUserId,
                     ParticipantUserIds = r.ParticipantUserIds,
                     JoinedParticipantUserIds = r.JoinedParticipantUserIds,
@@ -152,6 +153,7 @@ namespace Emby.Plugins.WatchTogether
                 throw new KeyNotFoundException("room not found");
             }
 
+            IReadOnlyDictionary<string, SessionSnapshot> actionSnapshots = null;
             var result = plugin.Rooms.Action(
                 request.Id,
                 request.Action,
@@ -159,7 +161,16 @@ namespace Emby.Plugins.WatchTogether
                 plugin.Issuer,
                 DateTimeOffset.UtcNow,
                 plugin.ResolveServerId,
-                currentRoom => BuildSnapshots(plugin, currentRoom));
+                currentRoom => actionSnapshots = BuildSnapshots(plugin, currentRoom));
+            if ((request.Action ?? string.Empty).Equals("pause", StringComparison.OrdinalIgnoreCase) ||
+                (request.Action ?? string.Empty).Equals("resume", StringComparison.OrdinalIgnoreCase))
+            {
+                NotifyAdminPlaybackAction(plugin, result, request.Action, actionSnapshots);
+            }
+            else if ((request.Action ?? string.Empty).Equals("resync", StringComparison.OrdinalIgnoreCase))
+            {
+                NotifyAdminResync(plugin, request.Id);
+            }
             return new
             {
                 RoomId = result.RoomId,
@@ -199,6 +210,7 @@ namespace Emby.Plugins.WatchTogether
                 Name = room.Name,
                 State = runtime.State.ToString(),
                 Error = runtime.Error,
+                StatusReason = GetStatusReason(plugin, room, runtime),
                 Eligible = RoomEligibility.IsPairEligible(snapshots),
                 SyncItemId = runtime.SyncItemId,
                 PrimaryUserId = room.PrimaryUserId,
@@ -224,7 +236,12 @@ namespace Emby.Plugins.WatchTogether
             string userId = CurrentUserId();
             var room = plugin.Rooms.GetRoom(request.Id);
             if (room == null || !room.HasParticipant(userId)) throw new UnauthorizedAccessException("not a room participant");
-            plugin.Rooms.SetParticipantJoined(request.Id, userId, true);
+            var transition = plugin.Rooms.SetParticipantJoinedResult(request.Id, userId, true);
+            if (transition.Changed)
+            {
+                NotifyMembershipChange(plugin, request.Id, userId,
+                    "对方已加入房间，请打开同一视频");
+            }
             return Get(new GetRoomStateRequest { Id = request.Id });
         }
 
@@ -237,6 +254,11 @@ namespace Emby.Plugins.WatchTogether
 
             var beforeLeaveSnapshots = BuildSnapshots(plugin, room);
             var transition = plugin.Rooms.LeaveParticipantResult(request.Id, userId);
+            if (transition.Changed)
+            {
+                NotifyMembershipChange(plugin, request.Id, userId,
+                    "对方已退出房间，自动同步已停止");
+            }
             bool activeBeforeLeave = transition.PreviousState == RoomState.Barrier ||
                 transition.PreviousState == RoomState.Watching;
             bool sameServer = !string.IsNullOrWhiteSpace(transition.ServerId) &&
@@ -402,6 +424,95 @@ namespace Emby.Plugins.WatchTogether
                 ? new List<SessionSnapshot>()
                 : new SessionBridgeSnapshotProvider(plugin.Bridge).GetSessionSnapshots();
             return SessionSelector.Select(candidates, room.JoinedParticipantUserIds);
+        }
+
+        private static void NotifyMembershipChange(Plugin plugin, string roomId, string changedUserId, string text)
+        {
+            if (!IsSyncNotificationsEnabled(plugin) || plugin.Bridge == null)
+            {
+                return;
+            }
+
+            using (var access = plugin.Rooms.TryEnterRoom(roomId))
+            {
+                if (access == null) return;
+                var room = access.Room;
+                if (!plugin.Rooms.IsCurrentRoom(room) || !IsSameServer(room.ServerId, plugin.ResolveServerId())) return;
+                foreach (var userId in room.JoinedParticipantUserIds.ToList())
+                {
+                    if (string.Equals(userId, changedUserId, StringComparison.OrdinalIgnoreCase) ||
+                        !plugin.Rooms.IsCurrentRoom(room) || !room.IsJoined(userId)) continue;
+                    var snapshots = BuildSnapshots(plugin, room);
+                    if (!snapshots.TryGetValue(userId, out var snapshot) || snapshot == null || !snapshot.Online ||
+                        snapshot.Capabilities == null || !snapshot.Capabilities.CanDisplayMessage) continue;
+                    if (!plugin.Rooms.IsCurrentRoom(room) || !room.IsJoined(userId) || !IsSameServer(room.ServerId, plugin.ResolveServerId())) continue;
+                    try
+                    {
+                        plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "Watch Together", text, 3000, CancellationToken.None)
+                            .GetAwaiter().GetResult();
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        private static void NotifyAdminPlaybackAction(Plugin plugin, RoomActionResult result, string action, IReadOnlyDictionary<string, SessionSnapshot> actionSnapshots)
+        {
+            if (!IsSyncNotificationsEnabled(plugin) || plugin.Bridge == null || result?.Users == null) return;
+            using (var access = plugin.Rooms.TryEnterRoom(result.RoomId))
+            {
+                if (access == null) return;
+                var room = access.Room;
+                if (!plugin.Rooms.IsCurrentRoom(room) || !IsSameServer(room.ServerId, plugin.ResolveServerId())) return;
+                string text = string.Equals(action, "pause", StringComparison.OrdinalIgnoreCase)
+                    ? "管理员已暂停房间播放" : "管理员已继续房间播放";
+                foreach (var userId in result.Users)
+                {
+                    if (!room.IsJoined(userId)) continue;
+                    var snapshots = actionSnapshots;
+                    if (!snapshots.TryGetValue(userId, out var snapshot) || snapshot == null || !snapshot.Online || snapshot.Capabilities?.CanDisplayMessage != true) continue;
+                    try { plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "Watch Together", text, 3000, CancellationToken.None).GetAwaiter().GetResult(); } catch { }
+                }
+            }
+        }
+
+        private static void NotifyAdminResync(Plugin plugin, string roomId)
+        {
+            NotifyMembershipChange(plugin, roomId, null, "管理员已发起重新同步，请稍候");
+        }
+
+        private static bool IsSyncNotificationsEnabled(Plugin plugin)
+        {
+            try
+            {
+                return plugin?.Configuration?.NotifyOnSyncActions != false;
+            }
+            catch
+            {
+                // Test doubles and partially initialized plugins have no
+                // configuration object; retain the enabled default.
+                return true;
+            }
+        }
+
+        private static string GetStatusReason(Plugin plugin, Room room, RoomRuntime runtime)
+        {
+            if (room == null || runtime == null) return "waiting_for_playback";
+            if (!IsSameServer(room.ServerId, plugin.ResolveServerId())) return "server_unavailable";
+            if (runtime.LastEligibilityFailureReason == RoomEligibilityFailureReason.EmptyOrDifferentItem ||
+                string.Equals(runtime.Error, "两位参与者打开了不同视频，暂不发送同步指令", StringComparison.Ordinal)) return "different_video";
+            if (string.Equals(runtime.Error, "播放已停止，等待双方重新打开同一视频", StringComparison.Ordinal)) return "playback_stopped";
+            if (!string.IsNullOrEmpty(runtime.Error)) return "command_failed";
+            if (room.JoinedParticipantUserIds.Count < room.ParticipantUserIds.Count) return "member_left";
+            if (runtime.State == RoomState.Barrier) return "aligning";
+            if (runtime.State == RoomState.Watching) return "watching";
+            switch (runtime.LastEligibilityFailureReason)
+            {
+                case RoomEligibilityFailureReason.RemoteControlUnsupportedOrMismatch: return "remote_control_unavailable";
+                case RoomEligibilityFailureReason.InvalidOrDifferentRuntime: return "media_mismatch";
+                case RoomEligibilityFailureReason.PlaybackRateNotOne: return "unsupported_playback_rate";
+                default: return "waiting_for_playback";
+            }
         }
 
         private static bool HasSameSessionIdentity(SessionSnapshot expected, SessionSnapshot current)
