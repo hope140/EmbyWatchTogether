@@ -23,6 +23,10 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 - 不依赖外部运行时、脚本或额外服务；消息展示、远程控制和确认延迟仍取决于实际 Emby 客户端。
 - `Enabled` 和四个保留阈值字段在当前版本仍保留在 Emby 配置对象中，但不作为实时同步策略；请以本 README 描述的行为为准。
 
+## 版本号规则
+
+项目新发布统一使用四段版本 `MAJOR.MINOR.PATCH.REVISION`。四段分别表示主版本、功能版本、修复版本和发布修订号；具体递增条件、归零规则、tag 对应关系和发布检查见 [`docs/versioning.md`](docs/versioning.md)。项目的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`，Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.14` 对应 `v1.2.0.14`。
+
 ## 安装已构建插件
 
 1. 在 Emby Server 管理后台确认服务器已停止写入旧版本（升级前建议备份旧 DLL）。
