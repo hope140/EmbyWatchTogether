@@ -152,11 +152,10 @@ namespace Emby.Plugins.WatchTogether
                 throw new KeyNotFoundException("room not found");
             }
 
-            var snapshots = BuildSnapshots(plugin, room);
             var result = plugin.Rooms.Action(
                 request.Id,
                 request.Action,
-                snapshots,
+                null,
                 plugin.Issuer,
                 DateTimeOffset.UtcNow,
                 plugin.ResolveServerId,
