@@ -63,9 +63,9 @@ Git tag：v1.3.0.0
 
 1. 根据变更影响选择需要递增的段位，并将右侧段位归零；
 2. 在项目文件中同步更新 `Version`、`FileVersion`、`AssemblyVersion`；
-3. 在包含这些版本字段的提交上创建唯一的四段 `v` 前缀 tag；
-4. 为该 tag 准备并审核 `docs/releases/v<version>.md` 中文 Release Notes，确认内容覆盖用户可见变化、配置兼容性和升级注意；
-5. 运行构建、测试和发布校验；
+3. 为该版本准备并审核 `docs/releases/v<version>.md` 中文 Release Notes，确认内容覆盖用户可见变化、配置兼容性和升级注意；
+4. 运行构建、测试和发布校验；
+5. 在包含版本字段和 Release Notes 的提交上创建唯一的四段 `v` 前缀 tag；
 6. 手动发布 workflow 时，将同一个 tag 作为 `tag` 输入。
 
 相关实现和校验见：
