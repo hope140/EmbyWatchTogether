@@ -264,6 +264,7 @@ Assert-Matches -Text $runText -Pattern 'docs/releases/\{0\}\.md' -Message 'The r
 Assert-Matches -Text $runText -Pattern 'releaseNotesPath|releaseNotesBytes|strictUtf8|CJK|3400' -Message 'The workflow must validate release notes encoding, content, and Chinese characters.'
 Assert-Matches -Text $runText -Pattern '--notes-file\s+\$releaseNotesPath' -Message 'The release creation command must use the validated notes file.'
 Assert-NotMatches -Text $runText -Pattern '--generate-notes' -Message 'The release creation command must not generate unreviewed notes.'
+Assert-NotMatches -Text $runText -Pattern '(?im)^\s*(?:Write-Output|Write-Host|echo)\b.*\$(?:releaseNotesText|releaseNotesBytes)\b' -Message 'The workflow must not echo release notes content.'
 Assert-Matches -Text $runText -Pattern '--title\s+\(\x27Release\s*\x27\s+\+\s+\$env:RELEASE_TAG\)' -Message 'The release title must contain the requested tag.'
 
 $projectPath = Join-Path $repositoryRoot 'src/EmbyWatchTogether/EmbyWatchTogether.csproj'
