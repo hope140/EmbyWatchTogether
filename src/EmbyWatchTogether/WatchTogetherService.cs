@@ -494,6 +494,12 @@ namespace Emby.Plugins.WatchTogether
                     {
                         continue;
                     }
+                    if (!plugin.Rooms.IsCurrentRoom(room) ||
+                        !room.IsJoined(userId) ||
+                        !IsSameServer(room.ServerId, plugin.ResolveServerId()))
+                    {
+                        continue;
+                    }
                     try
                     {
                         plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "一起观看", text, 3000, CancellationToken.None).GetAwaiter().GetResult();
