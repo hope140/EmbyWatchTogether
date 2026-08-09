@@ -16,6 +16,7 @@ using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
 {
+    [Collection("Plugin singleton")]
     public class WatchTogetherUpdateTaskTests
     {
         [Fact]

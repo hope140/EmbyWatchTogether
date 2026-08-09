@@ -136,7 +136,9 @@ namespace Emby.Plugins.WatchTogether
                     _status.CurrentVersion = null;
                     _status.UpdateAvailable = false;
                     _status.RestartRequired = _pendingVersionStatusOverride != null;
-                    _status.LastError = _postInstallDiagnosticOverride ?? CurrentVersionUnavailableMessage;
+                    _status.LastError = CombineDiagnostics(
+                        _postInstallDiagnosticOverride,
+                        CurrentVersionUnavailableMessage);
                     currentVersionException = versionException;
                 }
 
@@ -598,7 +600,7 @@ namespace Emby.Plugins.WatchTogether
         {
             lock (_stateLock)
             {
-                _status.LastError = _postInstallDiagnosticOverride ?? userMessage;
+                _status.LastError = CombineDiagnostics(_postInstallDiagnosticOverride, userMessage);
             }
 
             if (exception != null)
@@ -634,6 +636,27 @@ namespace Emby.Plugins.WatchTogether
         private static bool IsNewer(Version candidate, Version current)
         {
             return candidate != null && current != null && CompareVersions(candidate, current) > 0;
+        }
+
+        private static string CombineDiagnostics(string persistentDiagnostic, string currentDiagnostic)
+        {
+            if (string.IsNullOrWhiteSpace(persistentDiagnostic))
+            {
+                return currentDiagnostic;
+            }
+
+            if (string.IsNullOrWhiteSpace(currentDiagnostic) ||
+                persistentDiagnostic.IndexOf(currentDiagnostic, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return persistentDiagnostic;
+            }
+
+            if (currentDiagnostic.IndexOf(persistentDiagnostic, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return currentDiagnostic;
+            }
+
+            return persistentDiagnostic + "；" + currentDiagnostic;
         }
 
         private static bool VersionsEqual(string pending, Version release)
