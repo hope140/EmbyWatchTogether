@@ -837,7 +837,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     };
 
     View.prototype.onPause = function () {
-        clearInterval(this.view._wtTimer);
+        var page = this.view;
+        clearInterval(page._wtTimer);
+        if (page._wtRoomFeedbackTimers) {
+            Object.keys(page._wtRoomFeedbackTimers).forEach(function (roomId) {
+                clearTimeout(page._wtRoomFeedbackTimers[roomId]);
+            });
+            page._wtRoomFeedbackTimers = {};
+        }
         BaseView.prototype.onPause.apply(this, arguments);
     };
 
