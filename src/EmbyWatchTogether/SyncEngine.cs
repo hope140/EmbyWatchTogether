@@ -1490,6 +1490,95 @@ namespace Emby.Plugins.WatchTogether
             });
         }
 
+        private static bool HasCurrentRemoteSeek(
+            RoomRuntime runtime,
+            string userId,
+            SessionSnapshot snapshot)
+        {
+            if (runtime == null || snapshot == null)
+            {
+                return false;
+            }
+
+            if (runtime.Pending.TryGetValue(userId, out var pending) &&
+                string.Equals(pending?.Command, RemoteCommands.Seek, StringComparison.Ordinal) &&
+                IsCurrentCommandIdentity(
+                    runtime,
+                    true,
+                    userId,
+                    pending.SessionId,
+                    pending.ItemId,
+                    snapshot))
+            {
+                return true;
+            }
+
+            return runtime.Suppressed.TryGetValue(userId, out var suppressed) &&
+                string.Equals(suppressed?.Command, RemoteCommands.Seek, StringComparison.Ordinal) &&
+                IsCurrentCommandIdentity(
+                    runtime,
+                    true,
+                    userId,
+                    suppressed.SessionId,
+                    suppressed.ItemId,
+                    snapshot);
+        }
+
+        private static bool IsExplicitBarrierAnchorSeek(
+            RoomRuntime runtime,
+            BarrierState barrier,
+            SessionSnapshot anchor,
+            DateTimeOffset now)
+        {
+            if (runtime == null || barrier == null || anchor == null ||
+                HasCurrentRemoteSeek(runtime, barrier.AnchorUserId, anchor))
+            {
+                return false;
+            }
+
+            if (!runtime.Previous.TryGetValue(barrier.AnchorUserId, out var previous) ||
+                previous == null ||
+                previous.IsPaused != anchor.IsPaused)
+            {
+                // A pause transition can include normal position movement while
+                // the client applies the hold request; keep that movement as
+                // the new observation baseline instead of re-anchoring.
+                return false;
+            }
+
+            if (Math.Abs(anchor.PositionTicks - barrier.PrimaryPositionTicks) <= SyncConstants.SeekToleranceTicks)
+            {
+                // Returning to the locked target is convergence, not a new
+                // anchor operation, even if the preceding snapshot was far
+                // away because of normal pause latency.
+                return false;
+            }
+
+            long threshold = GetSeekDetectionThresholdTicks(runtime, barrier.AnchorUserId);
+            double elapsedSeconds = Math.Max(0, (now - runtime.PreviousAtUtc.GetValueOrDefault()).TotalSeconds);
+            double expectedPosition = previous.PositionTicks;
+            if (!previous.IsPaused)
+            {
+                expectedPosition += elapsedSeconds * previous.PlaybackRate * SessionSnapshot.TicksPerSecond;
+            }
+
+            return Math.Abs(anchor.PositionTicks - expectedPosition) >= threshold;
+        }
+
+        private static void RememberBarrierSnapshots(
+            RoomRuntime runtime,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            runtime.Previous.Clear();
+            foreach (var pair in snapshots)
+            {
+                runtime.Previous[pair.Key] = pair.Value;
+            }
+
+            runtime.PreviousAtUtc = now;
+        }
+
         private void StartBarrier(
             RoomRuntime runtime,
             Room room,
@@ -1526,6 +1615,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.WaitingPauseRetries.Clear();
             runtime.Suppressed.Clear();
             runtime.PauseAlign.Clear();
+            RememberBarrierSnapshots(runtime, snapshots, now);
             _logger?.Info(
                 $"Room {room.Id}: barrier started, anchor={anchorUser}, " +
                 $"target={FormatPosition(anchor.PositionTicks)}s, paused={anchor.IsPaused}");
@@ -1604,6 +1694,7 @@ namespace Emby.Plugins.WatchTogether
                         barrier.Stage = BarrierStage.Seek;
                         barrier.StartedAtUtc = now;
                         EnsureSeekRetryDeadline(barrier, now);
+                        RememberBarrierSnapshots(runtime, snapshots, now);
                         return;
                     }
 
@@ -1617,13 +1708,31 @@ namespace Emby.Plugins.WatchTogether
 
                 case BarrierStage.Seek:
                     var follower = members.First(u => !string.Equals(u, barrier.AnchorUserId, StringComparison.OrdinalIgnoreCase));
+                    var anchor = snapshots[barrier.AnchorUserId];
                     long target = barrier.PrimaryPositionTicks;
                     bool anyUnpaused = snapshots.Values.Any(snapshot => !snapshot.IsPaused);
                     EnsureSeekRetryDeadline(barrier, now);
+                    if (IsExplicitBarrierAnchorSeek(runtime, barrier, anchor, now))
+                    {
+                        // A new, clearly out-of-band anchor seek replaces the
+                        // whole sequence. This deliberately clears the old
+                        // follower Seek instead of overwriting it with a
+                        // different command through Issue.
+                        StartBarrier(runtime, room, snapshots, now, barrier.AnchorUserId);
+                        _logger?.Info(
+                            $"Room {room.Id}: anchor moved during barrier Seek; " +
+                            "rebuilding barrier from the new anchor position");
+                        return;
+                    }
+
+                    RememberBarrierSnapshots(runtime, snapshots, now);
+
+                    bool anchorReached =
+                        Math.Abs(anchor.PositionTicks - target) <= SyncConstants.SeekToleranceTicks;
                     bool targetReached =
                         Math.Abs(snapshots[follower].PositionTicks - target) <= SyncConstants.SeekToleranceTicks;
 
-                    if (targetReached && !anyUnpaused)
+                    if (anchorReached && targetReached && !anyUnpaused)
                     {
                         barrier.Stage = BarrierStage.Restore;
                         barrier.StartedAtUtc = now;
@@ -1671,7 +1780,7 @@ namespace Emby.Plugins.WatchTogether
                         return;
                     }
 
-                    if (targetReached)
+                    if (anchorReached && targetReached)
                     {
                         barrier.Stage = BarrierStage.Restore;
                         barrier.StartedAtUtc = now;
