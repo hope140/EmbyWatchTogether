@@ -224,6 +224,68 @@ namespace Emby.Plugins.WatchTogether.Tests
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.Is<MessageCommand>(m => m.Text == "explicit"), It.IsAny<CancellationToken>()), Times.Exactly(2));
         }
 
+        [Theory]
+        [InlineData("offline")]
+        [InlineData("unsupported")]
+        [InlineData("server")]
+        public void SyncNotice_SkipsOfflineDisplayUnsupportedAndServerMismatch(string mode)
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var sm = new Mock<ISessionManager>();
+            var target = NewSession(sm, "s2", u2, mode == "unsupported" ? Array.Empty<string>() : new[] { "DisplayMessage" });
+            sm.Setup(s => s.Sessions).Returns(mode == "offline" ? new[] { NewSession(sm, "s1", u1) } : new[] { NewSession(sm, "s1", u1), target });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), mode == "server" ? "server-2" : "server-1");
+            var service = NewService(u1, true);
+            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" }));
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public void Control_SessionIdentityChangesAfterAction_DoesNotNotifyNewSession()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var sm = new Mock<ISessionManager>();
+            var reads = 0;
+            sm.Setup(s => s.Sessions).Returns(() =>
+            {
+                reads++;
+                return new[] { NewSession(sm, "s1", u1), NewSession(sm, reads <= 3 ? "old" : "new", u2) };
+            });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u1, true);
+            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "pause" }));
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "old", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "new", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public void SyncNoticeDeliveryFailure_DoesNotChangeActionResponse()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            manager.SetParticipantJoined(room.Id, u2, false);
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Throws(new InvalidOperationException("send failed"));
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u2);
+            var response = WithPlugin(plugin, () => service.Post(new JoinRoomRequest { Id = room.Id }));
+            Assert.True(manager.GetRoom(room.Id).IsJoined(u2));
+        }
+
         [Fact]
         public void Leave_FromWaitingDoesNotPauseTheOtherParticipant()
         {
