@@ -219,6 +219,13 @@ namespace Emby.Plugins.WatchTogether.Tests
             var service = NewService(u2, true);
             WithPlugin(plugin, () => service.Post(new JoinRoomRequest { Id = room.Id }));
             WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" }));
+            sm.Verify(
+                s => s.SendMessageCommand(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
             sm.Invocations.Clear();
             WithPlugin(plugin, () => service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "explicit" }));
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.Is<MessageCommand>(m => m.Text == "explicit"), It.IsAny<CancellationToken>()), Times.Exactly(2));
@@ -269,6 +276,101 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Control_MemberLeavesDuringNotificationSnapshot_DoesNotNotifyOldOrNewSession()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", u1, new[] { u1, u2 }, u1);
+            var reads = 0;
+            var memberLeft = false;
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(() =>
+            {
+                reads++;
+                // Read 1 captures action snapshots; read 2 refreshes the
+                // per-target action snapshot; read 3 is the notification
+                // snapshot immediately before SendDisplayMessageAsync.
+                if (reads >= 3 && !memberLeft)
+                {
+                    memberLeft = true;
+                    Assert.True(manager.SetParticipantJoined(room.Id, u1, false));
+                    Assert.True(manager.SetParticipantJoined(room.Id, u2, false));
+                }
+
+                return new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) };
+            });
+            sm.Setup(s => s.SendMessageCommand(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u1, true);
+
+            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "pause" }));
+
+            Assert.True(reads >= 3);
+            sm.Verify(
+                s => s.SendMessageCommand(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public void Control_RoomDeletedDuringNotificationSnapshot_DoesNotNotifyOldOrNewSession()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", u1, new[] { u1, u2 }, u1);
+            var reads = 0;
+            var roomDeleted = false;
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(() =>
+            {
+                reads++;
+                // Read 1 captures action snapshots; read 2 refreshes the
+                // per-target action snapshot; read 3 is the notification
+                // snapshot immediately before SendDisplayMessageAsync.
+                if (reads >= 3 && !roomDeleted)
+                {
+                    roomDeleted = true;
+                    Assert.True(manager.DeleteRoom(room.Id));
+                }
+
+                return new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) };
+            });
+            sm.Setup(s => s.SendMessageCommand(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u1, true);
+
+            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "resume" }));
+
+            // The room is invalidated during the first notification snapshot;
+            // any additional target reads must still skip both sends.
+            Assert.True(reads >= 3);
+            sm.Verify(
+                s => s.SendMessageCommand(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
         public void SyncNoticeDeliveryFailure_DoesNotChangeActionResponse()
         {
             var u1 = Guid.NewGuid().ToString("N");
@@ -283,6 +385,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
             var service = NewService(u2);
             var response = WithPlugin(plugin, () => service.Post(new JoinRoomRequest { Id = room.Id }));
+            Assert.Equal(room.Id, GetString(response, "RoomId"));
+            Assert.Equal("Waiting", GetString(response, "State"));
             Assert.True(manager.GetRoom(room.Id).IsJoined(u2));
         }
 
