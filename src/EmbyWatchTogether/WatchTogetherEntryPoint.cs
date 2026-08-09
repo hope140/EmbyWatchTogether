@@ -101,15 +101,14 @@ namespace Emby.Plugins.WatchTogether
                     // Close the small race between taking the startup snapshot
                     // and subscribing to the plugin event.
                     syncEngine.UpdateOptions(SyncEngineOptions.From(plugin.Configuration));
+                    plugin.ApplicationHost = _applicationHost;
+                    plugin.ResolveServerId();
                     syncEngine.Start();
 
                     if (!ReferenceEquals(Plugin.Instance, plugin))
                     {
                         throw new InvalidOperationException("插件实例在 Watch Together 启动期间发生变化。");
                     }
-
-                    plugin.ApplicationHost = _applicationHost;
-                    plugin.ResolveServerId();
 
                     // Publish the runtime graph only after every object has been
                     // constructed and the background engine has started.

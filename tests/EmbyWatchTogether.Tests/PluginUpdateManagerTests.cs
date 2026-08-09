@@ -287,6 +287,35 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task PostInstallDiagnostic_IsCombinedWithLaterCheckFailure()
+        {
+            var configuration = new PluginConfiguration();
+            var releaseClient = new FirstSuccessThenFailureReleaseClient(CreateRelease(2, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            Action save = () => throw new InvalidOperationException("save failed");
+            using (var manager = CreateManager(
+                configuration,
+                () => new Version(1, 0, 0),
+                save,
+                releaseClient,
+                installation))
+            {
+                var installedStatus = await manager.CheckForUpdatesAsync(true);
+                var failedCheckStatus = await manager.CheckForUpdatesAsync(false);
+
+                Assert.Contains("更新已安装", installedStatus.LastError);
+                Assert.Contains("保存", installedStatus.LastError);
+                Assert.Contains("更新已安装", failedCheckStatus.LastError);
+                Assert.Contains("检查更新失败", failedCheckStatus.LastError);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Once);
+            }
+        }
+
+        [Fact]
         public async Task InstallationSuccess_NotificationFailureExposesInstalledPendingDiagnostic()
         {
             var configuration = new PluginConfiguration();
