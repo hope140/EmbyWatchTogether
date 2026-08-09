@@ -202,7 +202,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void Control_SnapshotThenParticipantLeaves_DoesNotIssueToFormerMember()
+        public void Control_InGateSnapshotRevalidation_DoesNotIssueToFormerMember()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
             var leavingUserId = Guid.NewGuid().ToString("N");
@@ -211,11 +211,13 @@ namespace Emby.Plugins.WatchTogether.Tests
                 "server-1", "http://emby", "room", "admin-1",
                 new[] { primaryUserId, leavingUserId }, primaryUserId);
 
+            int sessionReads = 0;
             var issuer = new RecordingIssuer();
             var sessionManager = new Mock<ISessionManager>();
             sessionManager.Setup(s => s.Sessions).Returns(() =>
             {
-                manager.SetParticipantJoined(room.Id, leavingUserId, false);
+                Assert.Equal(1, Interlocked.Increment(ref sessionReads));
+                Assert.True(manager.LeaveParticipant(room.Id, leavingUserId));
                 return new List<SessionInfo>
                 {
                     NewSession(sessionManager, "session-primary", primaryUserId),
@@ -234,6 +236,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(
                 leavingUserId,
                 (IEnumerable<string>)response.GetType().GetProperty("Users").GetValue(response));
+            Assert.Equal(1, sessionReads);
         }
 
         [Fact]
