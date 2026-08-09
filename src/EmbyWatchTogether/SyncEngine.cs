@@ -48,6 +48,10 @@ namespace Emby.Plugins.WatchTogether
         private double _pollIntervalSeconds;
         private bool _pauseOtherOnPlaybackStop;
         private bool _notifyOtherOnPlaybackStop;
+        private bool _notifyOnSyncActions;
+        private bool _legacyAutomaticRetryNotifications;
+        private readonly HashSet<string> _differentVideoNoticeRooms =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly object _lock = new object();
         private readonly object _roomPollLogLock = new object();
         private readonly Dictionary<string, DateTimeOffset> _lastRoomPollErrorAtUtc =
@@ -69,7 +73,8 @@ namespace Emby.Plugins.WatchTogether
             bool pauseOtherOnPlaybackStop = true,
             bool notifyOtherOnPlaybackStop = true,
             IMessageIssuer messageIssuer = null,
-            ILogManager logManager = null)
+            ILogManager logManager = null,
+            bool notifyOnSyncActions = false)
         {
             _roomManager = roomManager ?? throw new ArgumentNullException(nameof(roomManager));
             _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
@@ -89,10 +94,13 @@ namespace Emby.Plugins.WatchTogether
             var options = new SyncEngineOptions(
                 pollIntervalSeconds,
                 pauseOtherOnPlaybackStop,
-                notifyOtherOnPlaybackStop);
+                notifyOtherOnPlaybackStop,
+                notifyOnSyncActions);
             _pollIntervalSeconds = options.PollIntervalSeconds;
             _pauseOtherOnPlaybackStop = options.PauseOtherOnPlaybackStop;
             _notifyOtherOnPlaybackStop = options.NotifyOtherOnPlaybackStop;
+            _notifyOnSyncActions = options.NotifyOnSyncActions;
+            _legacyAutomaticRetryNotifications = options.LegacyAutomaticRetryNotifications;
         }
 
         public void Start()
@@ -113,7 +121,8 @@ namespace Emby.Plugins.WatchTogether
                 _logger?.Info(
                     $"WatchTogether sync engine started: pollInterval={_pollIntervalSeconds:0.##}s, " +
                     $"pauseOtherOnPlaybackStop={_pauseOtherOnPlaybackStop}, " +
-                    $"notifyOtherOnPlaybackStop={_notifyOtherOnPlaybackStop}");
+                    $"notifyOtherOnPlaybackStop={_notifyOtherOnPlaybackStop}, " +
+                    $"notifyOnSyncActions={_notifyOnSyncActions}");
             }
         }
 
@@ -139,6 +148,8 @@ namespace Emby.Plugins.WatchTogether
                     options.PollIntervalSeconds);
                 _pauseOtherOnPlaybackStop = options.PauseOtherOnPlaybackStop;
                 _notifyOtherOnPlaybackStop = options.NotifyOtherOnPlaybackStop;
+                _notifyOnSyncActions = options.NotifyOnSyncActions;
+                _legacyAutomaticRetryNotifications = options.LegacyAutomaticRetryNotifications;
                 SignalWakeLocked();
             }
         }
@@ -362,6 +373,23 @@ namespace Emby.Plugins.WatchTogether
                         !runtime.MissingSessionSinceUtc.HasValue)
                     {
                         runtime.ResetToWaiting();
+                    }
+
+                    bool differentVideo = !sameItem && snapshots.Count == 2 &&
+                        snapshots.Values.All(s => s != null) &&
+                        snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+                    if (differentVideo && _differentVideoNoticeRooms.Add(room.Id))
+                    {
+                        NotifyParticipants(
+                            room,
+                            snapshots,
+                            "双方打开了不同视频，已暂停同步；请打开同一视频",
+                            now,
+                            includeAll: true);
+                    }
+                    else if (sameItem)
+                    {
+                        _differentVideoNoticeRooms.Remove(room.Id);
                     }
 
                     if (!sameItem && snapshots.Count == 2 &&
@@ -614,7 +642,8 @@ namespace Emby.Plugins.WatchTogether
                 return new SyncEngineOptions(
                     _pollIntervalSeconds,
                     _pauseOtherOnPlaybackStop,
-                    _notifyOtherOnPlaybackStop);
+                    _notifyOtherOnPlaybackStop,
+                    _notifyOnSyncActions);
             }
         }
 
@@ -800,7 +829,7 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
-            if (_messageIssuer == null || room == null || snapshots == null)
+            if ((!_notifyOnSyncActions && !_legacyAutomaticRetryNotifications) || _messageIssuer == null || room == null || snapshots == null)
             {
                 return;
             }
@@ -830,6 +859,52 @@ namespace Emby.Plugins.WatchTogether
                 catch
                 {
                     // Message delivery is best effort and must not block sync.
+                }
+            }
+        }
+
+        private void NotifyParticipants(
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            string text,
+            DateTimeOffset now,
+            bool includeAll,
+            string excludeUserId = null)
+        {
+            if (!_notifyOnSyncActions || _messageIssuer == null || room == null || snapshots == null)
+            {
+                return;
+            }
+
+            foreach (var userId in room.JoinedParticipantUserIds)
+            {
+                if (!includeAll && string.Equals(userId, excludeUserId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!snapshots.TryGetValue(userId, out var snapshot) ||
+                    snapshot == null || !snapshot.Online)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    TryIssueMessage(
+                        room.Id,
+                        room.AdminUserId,
+                        userId,
+                        snapshot,
+                        "一起观看",
+                        text,
+                        timeoutMs: NotificationTimeoutMs,
+                        now: now,
+                        out _);
+                }
+                catch
+                {
+                    // Advisory notification failures must not affect state.
                 }
             }
         }
@@ -2319,6 +2394,12 @@ namespace Emby.Plugins.WatchTogether
 
             runtime.PreviousAtUtc = now;
             runtime.SyncItemId = barrier.ItemId;
+            NotifyParticipants(
+                room,
+                snapshots,
+                "同步已完成，可以继续观看",
+                now,
+                includeAll: true);
             _logger?.Info(
                 $"Room {room.Id}: entered Watching, members={string.Join(",", snapshots.Keys)}, " +
                 $"primaryPaused={barrier.PrimaryPaused}");
@@ -2469,6 +2550,13 @@ namespace Emby.Plugins.WatchTogether
                 // avoids live lead/stuck decisions that caused repeated
                 // pause/seeks in real sessions.
                 StartBarrier(runtime, room, snapshots, now, anchorUserId: winner.userId);
+                NotifyParticipants(
+                    room,
+                    snapshots,
+                    "对方调整了播放进度，正在重新同步",
+                    now,
+                    includeAll: false,
+                    excludeUserId: winner.userId);
                 _logger?.Info(
                     $"Room {room.Id}: manual seek from {winner.userId} to " +
                     $"{FormatPosition(winner.positionTicks)}s; starting align barrier");
@@ -2555,6 +2643,13 @@ namespace Emby.Plugins.WatchTogether
 
                 _logger?.Info(
                     $"Room {room.Id}: pause change from {winner.userId} ({winner.paused}) propagated");
+                NotifyParticipants(
+                    room,
+                    snapshots,
+                    winner.paused ? "对方已暂停播放，已同步暂停" : "对方已继续播放，已同步继续",
+                    now,
+                    includeAll: false,
+                    excludeUserId: winner.userId);
             }
 
             AlignPausedPeers(runtime, room, snapshots, now);

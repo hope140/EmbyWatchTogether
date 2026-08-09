@@ -18,10 +18,22 @@ namespace Emby.Plugins.WatchTogether
             double pollIntervalSeconds,
             bool pauseOtherOnPlaybackStop,
             bool notifyOtherOnPlaybackStop)
+            : this(pollIntervalSeconds, pauseOtherOnPlaybackStop, notifyOtherOnPlaybackStop, false)
+        {
+            LegacyAutomaticRetryNotifications = true;
+        }
+
+        public SyncEngineOptions(
+            double pollIntervalSeconds,
+            bool pauseOtherOnPlaybackStop,
+            bool notifyOtherOnPlaybackStop,
+            bool notifyOnSyncActions)
         {
             PollIntervalSeconds = NormalizePollIntervalSeconds(pollIntervalSeconds);
             PauseOtherOnPlaybackStop = pauseOtherOnPlaybackStop;
             NotifyOtherOnPlaybackStop = notifyOtherOnPlaybackStop;
+            NotifyOnSyncActions = notifyOnSyncActions;
+            LegacyAutomaticRetryNotifications = false;
         }
 
         public double PollIntervalSeconds { get; }
@@ -29,6 +41,10 @@ namespace Emby.Plugins.WatchTogether
         public bool PauseOtherOnPlaybackStop { get; }
 
         public bool NotifyOtherOnPlaybackStop { get; }
+
+        public bool NotifyOnSyncActions { get; }
+
+        internal bool LegacyAutomaticRetryNotifications { get; }
 
         public static SyncEngineOptions From(PluginConfiguration configuration)
         {
@@ -40,7 +56,8 @@ namespace Emby.Plugins.WatchTogether
             return new SyncEngineOptions(
                 configuration.PollIntervalSeconds,
                 configuration.PauseOtherOnPlaybackStop,
-                configuration.NotifyOtherOnPlaybackStop);
+                configuration.NotifyOtherOnPlaybackStop,
+                configuration.NotifyOnSyncActions);
         }
 
         public static double NormalizePollIntervalSeconds(double value)
@@ -84,6 +101,8 @@ namespace Emby.Plugins.WatchTogether
         public bool PauseOtherOnPlaybackStop { get; set; } = true;
 
         public bool NotifyOtherOnPlaybackStop { get; set; } = true;
+
+        public bool NotifyOnSyncActions { get; set; } = true;
 
         public int MaxRuntimeDifferenceSeconds { get; set; } = 3;
 

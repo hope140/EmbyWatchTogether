@@ -80,6 +80,7 @@ namespace Emby.Plugins.WatchTogether
                         pollIntervalSeconds: options.PollIntervalSeconds,
                         pauseOtherOnPlaybackStop: options.PauseOtherOnPlaybackStop,
                         notifyOtherOnPlaybackStop: options.NotifyOtherOnPlaybackStop,
+                        notifyOnSyncActions: options.NotifyOnSyncActions,
                         messageIssuer: issuer,
                         logManager: _logManager);
 
