@@ -60,5 +60,19 @@ namespace Emby.Plugins.WatchTogether
         // resync action.
         public const double AutomaticBarrierRetryDelaySeconds = 3.0;
 
+        // A Barrier Seek may be retried after a delivery failure or an
+        // unconfirmed snapshot, but all attempts share one absolute budget.
+        // This preserves the frozen Barrier target without allowing a seek
+        // failure to loop forever.
+        public const double BarrierSeekRetryBudgetSeconds = 15.0;
+
+        // Waiting-state Pause failures are retried at a bounded cadence. The
+        // attempt count includes the initial issue, so a continuously failing
+        // session receives at most three Pause calls for one identity/ability
+        // condition.
+        public const double WaitingPauseRetryDelaySeconds = 3.0;
+
+        public const int MaxWaitingPauseAttempts = 3;
+
     }
 }
