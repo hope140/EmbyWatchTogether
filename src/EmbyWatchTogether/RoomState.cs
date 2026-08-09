@@ -73,6 +73,8 @@ namespace Emby.Plugins.WatchTogether
 
         public string AnchorPositionCandidateItemId { get; set; }
 
+        public bool AnchorPositionCandidatePaused { get; set; }
+
         public bool RestoreSent { get; set; }
     }
 

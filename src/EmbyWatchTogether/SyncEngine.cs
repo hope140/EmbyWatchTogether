@@ -1554,6 +1554,7 @@ namespace Emby.Plugins.WatchTogether
             barrier.AnchorPositionCandidateTicks = null;
             barrier.AnchorPositionCandidateSessionId = null;
             barrier.AnchorPositionCandidateItemId = null;
+            barrier.AnchorPositionCandidatePaused = false;
         }
 
         private static bool IsClearlyOutsideBarrierTarget(
@@ -1572,10 +1573,26 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now)
         {
             if (runtime == null || barrier == null || anchor == null ||
-                barrier.AnchorPositionCandidateTicks.HasValue ||
-                HasCurrentRemoteSeek(runtime, barrier.AnchorUserId, anchor) ||
-                !runtime.Previous.TryGetValue(barrier.AnchorUserId, out var previous) ||
+                HasCurrentRemoteSeek(runtime, barrier.AnchorUserId, anchor))
+            {
+                return;
+            }
+
+            if (barrier.AnchorPositionCandidateTicks.HasValue)
+            {
+                if (IsCurrentAnchorPositionCandidate(runtime, barrier, anchor) &&
+                    !anchor.IsPaused &&
+                    IsClearlyOutsideBarrierTarget(runtime, barrier, anchor.PositionTicks))
+                {
+                    barrier.AnchorPositionCandidateTicks = anchor.PositionTicks;
+                }
+
+                return;
+            }
+
+            if (!runtime.Previous.TryGetValue(barrier.AnchorUserId, out var previous) ||
                 previous == null ||
+                (!previous.IsPaused && !anchor.IsPaused) ||
                 !IsClearlyOutsideBarrierTarget(runtime, barrier, anchor.PositionTicks))
             {
                 return;
@@ -1597,6 +1614,7 @@ namespace Emby.Plugins.WatchTogether
             barrier.AnchorPositionCandidateTicks = anchor.PositionTicks;
             barrier.AnchorPositionCandidateSessionId = anchor.SessionId;
             barrier.AnchorPositionCandidateItemId = anchor.ItemId;
+            barrier.AnchorPositionCandidatePaused = anchor.IsPaused;
         }
 
         private static bool IsCurrentAnchorPositionCandidate(
@@ -1628,16 +1646,25 @@ namespace Emby.Plugins.WatchTogether
             BarrierState barrier,
             SessionSnapshot anchor)
         {
-            if (!IsCurrentAnchorPositionCandidate(runtime, barrier, anchor) ||
+            if (!IsAnchorPositionCandidateAtCurrentPosition(runtime, barrier, anchor) ||
                 !anchor.IsPaused ||
-                HasCurrentRemoteSeek(runtime, barrier.AnchorUserId, anchor) ||
                 !HasCurrentSuppressedCommand(runtime, barrier.AnchorUserId, anchor, RemoteCommands.Pause))
             {
                 return false;
             }
 
-            return Math.Abs(anchor.PositionTicks - barrier.AnchorPositionCandidateTicks.Value) <=
-                       SyncConstants.SeekToleranceTicks &&
+            return true;
+        }
+
+        private static bool IsAnchorPositionCandidateAtCurrentPosition(
+            RoomRuntime runtime,
+            BarrierState barrier,
+            SessionSnapshot anchor)
+        {
+            return IsCurrentAnchorPositionCandidate(runtime, barrier, anchor) &&
+                !HasCurrentRemoteSeek(runtime, barrier.AnchorUserId, anchor) &&
+                Math.Abs(anchor.PositionTicks - barrier.AnchorPositionCandidateTicks.Value) <=
+                    SyncConstants.SeekToleranceTicks &&
                 IsClearlyOutsideBarrierTarget(runtime, barrier, anchor.PositionTicks);
         }
 
@@ -1706,7 +1733,8 @@ namespace Emby.Plugins.WatchTogether
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now,
-            string anchorUserId = null)
+            string anchorUserId = null,
+            bool? primaryPausedOverride = null)
         {
             string anchorUser = anchorUserId ?? room.PrimaryUserId;
             var anchor = snapshots[anchorUser];
@@ -1718,7 +1746,7 @@ namespace Emby.Plugins.WatchTogether
                 StartedAtUtc = now,
                 AnchorUserId = anchorUser,
                 PrimaryPositionTicks = anchor.PositionTicks,
-                PrimaryPaused = anchor.IsPaused,
+                PrimaryPaused = primaryPausedOverride ?? anchor.IsPaused,
                 ItemId = anchor.ItemId,
                 PauseSent = false,
                 SeekSent = false,
@@ -1835,13 +1863,21 @@ namespace Emby.Plugins.WatchTogether
                     bool anyUnpaused = snapshots.Values.Any(snapshot => !snapshot.IsPaused);
                     EnsureSeekRetryDeadline(barrier, now);
                     CaptureAnchorPositionCandidate(runtime, barrier, anchor, now);
-                    if (IsExplicitBarrierAnchorSeek(runtime, barrier, anchor, now))
+                    bool candidateAtPosition = IsAnchorPositionCandidateAtCurrentPosition(runtime, barrier, anchor);
+                    bool candidateReady = IsReadyToPromoteAnchorPositionCandidate(runtime, barrier, anchor);
+                    if (candidateReady || IsExplicitBarrierAnchorSeek(runtime, barrier, anchor, now))
                     {
                         // A new, clearly out-of-band anchor seek replaces the
                         // whole sequence. This deliberately clears the old
                         // follower Seek instead of overwriting it with a
                         // different command through Issue.
-                        StartBarrier(runtime, room, snapshots, now, barrier.AnchorUserId);
+                        StartBarrier(
+                            runtime,
+                            room,
+                            snapshots,
+                            now,
+                            barrier.AnchorUserId,
+                            candidateAtPosition ? (bool?)barrier.AnchorPositionCandidatePaused : null);
                         _logger?.Info(
                             $"Room {room.Id}: anchor moved during barrier Seek; " +
                             "rebuilding barrier from the new anchor position");
