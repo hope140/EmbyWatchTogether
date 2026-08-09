@@ -65,7 +65,6 @@ namespace Emby.Plugins.WatchTogether
             bool preserveStopIdentity = MissingSessionSinceUtc.HasValue;
             State = RoomState.Waiting;
             Error = null;
-            LastEligibilityFailureReason = null;
             Barrier = null;
             Pending.Clear();
             WaitingPauseRetries.Clear();
