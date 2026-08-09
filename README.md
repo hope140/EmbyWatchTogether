@@ -1,6 +1,6 @@
 # Emby Watch Together 插件
 
-Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，当前项目版本为 `1.2.0.13`。它读取同一台服务器上的会话快照，并通过 Emby 远程控制命令协调起播、暂停/继续、用户手动拖动进度、切换视频和停止播放。
+Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，当前项目版本为 `1.2.0.15`。它读取同一台服务器上的会话快照，并通过 Emby 远程控制命令协调起播、暂停/继续、用户手动拖动进度、切换视频和停止播放。
 
 插件只负责房间内的协调，不会修改媒体库、转码设置或播放器客户端。正常播放期间不做周期性 Seek：网络延迟、SessionInfo 更新延迟和小幅播放速度差不会被反复纠正。
 
@@ -25,7 +25,7 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 
 ## 版本号规则
 
-项目新发布统一使用四段版本 `MAJOR.MINOR.PATCH.REVISION`。四段分别表示主版本、功能版本、修复版本和发布修订号；具体递增条件、归零规则、tag 对应关系和发布检查见 [`docs/versioning.md`](docs/versioning.md)。项目的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`，Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.14` 对应 `v1.2.0.14`。
+项目新发布统一使用四段版本 `MAJOR.MINOR.PATCH.REVISION`。四段分别表示主版本、功能版本、修复版本和发布修订号；具体递增条件、归零规则、tag 对应关系和发布检查见 [`docs/versioning.md`](docs/versioning.md)。项目的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`，Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。
 
 ## 安装已构建插件
 

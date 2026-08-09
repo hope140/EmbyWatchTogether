@@ -50,10 +50,26 @@
 - 规则：任何新增停止信号或未选中的候选会话都不得绕过当前会话选择与确认窗口；位置归零仍按正常 Seek 处理。确认停止后，暂停和通知副作用只执行一次。
 - 验证：真实 Emby Theater 与 embyToLocalPlayer 日志复现了短暂停止后恢复，以及旧 stopped Session 与当前播放并存导致的误判；`SyncEngineTests` 覆盖同用户同 Item 的旧 stopped Session、短暂 stopped/缺失恢复、持续异常确认和 seek-to-zero。
 
-## 7. Seek 失败必须冻结原 Barrier 目标
+## 7. Seek 失败必须冻结原目标并有界重试
 
-- 现象：Seek 无确认后双方状态分叉，从方保持暂停而主方继续前进，自动重试目标持续追逐移动中的主方位置。
-- 原因：Seek 失败时 `ResetToWaiting` 丢失 Barrier 的目标和原播放状态；Waiting/Barrier 又不会传播普通播放变化。
-- 结论：Seek 阶段失败必须保留 Barrier、固定目标与原播放状态；冷却期维持双方暂停，确认全员暂停后才按固定目标重试，成功后执行 Restore。混合非 Seek 失败仍走 full retry。
-- 规则：不得在 Seek 冷却期重新采样主方位置或用新的 Pending 覆盖未完成 Seek；只有全员确认暂停后才清除冷却并发送下一轮 Seek。
-- 验证：真实双客户端日志与 `SyncEngineTests` 新增的 Seek 失败冻结、冷却暂停、固定目标重试和最终 Restore 回归场景共同确认。
+- 现象：Seek 无确认后从方保持暂停而主方继续前进；若重试目标持续追逐主方位置，或未确认 Seek 被 Pause/Unpause 覆盖，双方会在快进、暂停和重新同步之间反复分叉。
+- 原因：失败时丢失 Barrier 目标会让后续重试重新采样；同一 Session 和 Item 只证明命令目标相同，不代表不同命令可以安全替换。
+- 结论：Seek 冷却期间保留 Barrier、固定目标和原播放状态；同一 identity 上的不同 Pending 命令拒绝覆盖，需要改变序列时显式重建 Barrier。Barrier Seek 的初次发送和重试共享绝对期限，Waiting Pause 仅按 session、item 和能力条件做有界重试。
+- 规则：不得在 Seek 冷却期重新采样主方位置，也不得刷新同一 Barrier 的绝对预算；身份或能力条件变化时才允许重新建立 Waiting Pause 重试状态。
+- 验证：真实双客户端日志与 `SyncEngineTests` 覆盖固定目标重试、最终 Restore、Pending 冲突、Seek 期间暂停变化、Seek 绝对预算、Waiting Pause 次数上限及条件变化恢复。
+
+## 8. 房间副作用必须在 gate 内重新授权
+
+- 现象：REST 请求在读取快照后，成员可能退出、房间可能删除重建、ServerId 或会话 identity 也可能变化；继续使用旧快照会向错误目标发送暂停或消息。
+- 原因：锁外快照只能描述历史状态，不能授权之后的外部副作用。
+- 结论：控制、消息和离开后的暂停必须在每房间 gate 内重新确认当前房间引用、joined 成员、ServerId 和目标 Session/Item；退出者不能再次成为副作用目标。
+- 规则：任何来自 gate 外的快照只能用于前后 identity 对比，不得单独决定发送命令。
+- 验证：`RoomManagerTests` 与 `WatchTogetherServiceRoomTests` 覆盖成员退出、重新加入、房间删除重建、跨服务器和会话切换竞态。
+
+## 9. 启动和更新状态必须按已完成事实发布
+
+- 现象：入口启动失败时提前发布半初始化对象，或更新检查失败后仍保留旧 release，会让 API 和安装动作使用过期状态；安装成功后的保存或重启通知失败也不能按完整成功报告。
+- 原因：对象构造、后台启动、release 校验、包安装、状态持久化和重启通知是不同完成阶段。
+- 结论：入口仅在同步引擎启动成功后发布运行时对象，并只清理自己拥有的引用；当前版本不可读时更新 fail closed，每次检查先失效旧 release；安装后的持久化或通知失败必须持续保留可见诊断。
+- 规则：不得用管理器程序集版本替代不可读的当前插件版本，也不得用新的检查结果掩盖“已安装但待处理”的状态。
+- 验证：`WatchTogetherEntryPointTests`、`PluginUpdateManagerTests` 与 `WatchTogetherUpdateTaskTests` 覆盖重复启动/释放、失败清理、版本尾零等价、版本读取失败、旧 release 失效和安装后诊断。
