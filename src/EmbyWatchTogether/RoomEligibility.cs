@@ -37,9 +37,14 @@ namespace Emby.Plugins.WatchTogether
         internal static RoomEligibilityEvaluation Evaluate(
             IReadOnlyDictionary<string, SessionSnapshot> snapshots)
         {
-            if (snapshots == null || snapshots.Count != 2)
+            if (snapshots == null || snapshots.Count > 2)
             {
                 return Failure(RoomEligibilityFailureReason.SnapshotCount);
+            }
+
+            if (snapshots.Count < 2)
+            {
+                return Failure(RoomEligibilityFailureReason.MissingSnapshot);
             }
 
             var values = snapshots.Values.Where(v => v != null).ToList();

@@ -675,8 +675,8 @@ namespace Emby.Plugins.WatchTogether
             if (shouldLog)
             {
                 _logger?.Warn(
-                    $"Room {key}: poll failed ({exception?.GetType().Name ?? "unknown"}): " +
-                    $"{exception?.Message ?? "unknown error"}");
+                    $"Room {key}: poll failed; exceptionType={exception?.GetType().Name ?? "unknown"}, " +
+                    $"failureDetailPresent={HasFailureDetail(exception?.Message)}");
             }
         }
 
@@ -1025,6 +1025,11 @@ namespace Emby.Plugins.WatchTogether
             return value.Length <= 8 ? value : value.Substring(0, 8);
         }
 
+        private static bool HasFailureDetail(string error)
+        {
+            return !string.IsNullOrEmpty(error);
+        }
+
         private void LogPendingUnacknowledged(
             Room room,
             PendingCommand pending,
@@ -1348,7 +1353,8 @@ namespace Emby.Plugins.WatchTogether
             runtime.ResetToWaiting();
             runtime.Error = error;
             runtime.BarrierRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
-            _logger?.Info($"Room {roomId}: barrier retry scheduled: {error}");
+            _logger?.Info(
+                $"Room {roomId}: barrier retry scheduled; failureDetailPresent={HasFailureDetail(error)}");
         }
 
         private void ScheduleSeekBarrierRetry(
@@ -1381,7 +1387,8 @@ namespace Emby.Plugins.WatchTogether
             }
 
             barrier.SeekRetryAtUtc = retryAt;
-            _logger?.Info($"Room {roomId}: seek retry scheduled: {error}");
+            _logger?.Info(
+                $"Room {roomId}: seek retry scheduled; failureDetailPresent={HasFailureDetail(error)}");
         }
 
         private static void EnsureSeekRetryDeadline(BarrierState barrier, DateTimeOffset now)
@@ -1568,7 +1575,7 @@ namespace Emby.Plugins.WatchTogether
                 failure = $"{command} command failed: {error}";
                 _logger?.Warn(
                     $"Room {room.Id}: immediate-issue-failure command={command}, targetUser={userId}, " +
-                    $"error={error ?? "unknown"}");
+                    $"failureDetailPresent={HasFailureDetail(error)}");
                 return false;
             }
 

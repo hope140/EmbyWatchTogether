@@ -188,7 +188,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             engine.PollOnce(_clock.Now);
             engine.PollOnce(_clock.Now);
             Assert.Single(warnings);
-            Assert.Contains("reason=SnapshotCount", warnings[0]);
+            Assert.Contains("reason=MissingSnapshot", warnings[0]);
             Assert.Contains("missing=u2", warnings[0]);
 
             SetCandidates(
@@ -213,21 +213,57 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void CommandDiagnostics_DistinguishImmediateFailureFromAcceptedUnacknowledged()
+        public void EligibilityDiagnostics_ResetToWaitingDoesNotForgetSameReason()
         {
             var room = CreateRoom();
             var warnings = new List<string>();
             var logManager = CreateLogManager(warnings);
+            var engine = CreateEngine(logManager: logManager.Object);
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("session-one", "u1", paused: false, position: 0, itemId: "item-a"),
+                Snapshot("session-two", "u2", paused: false, position: 0, itemId: "item-b"));
+            engine.PollOnce(_clock.Now);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Single(warnings);
+            Assert.Contains("reason=EmptyOrDifferentItem", warnings[0]);
+            Assert.Equal(RoomState.Waiting, _rooms.GetRuntime(room.Id).State);
+
+            SetCandidates(
+                Snapshot("session-one", "u1", paused: false, position: 0),
+                Snapshot("session-two", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("session-one", "u1", paused: false, position: 0, itemId: "item-a"),
+                Snapshot("session-two", "u2", paused: false, position: 0, itemId: "item-b"));
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(2, warnings.Count);
+            Assert.Contains("reason=EmptyOrDifferentItem", warnings[1]);
+        }
+
+        [Fact]
+        public void CommandDiagnostics_DistinguishImmediateFailureFromAcceptedUnacknowledged()
+        {
+            var room = CreateRoom();
+            var warnings = new List<string>();
+            var infos = new List<string>();
+            var logManager = CreateLogManager(warnings, infos);
             var engine = CreateEngine(logManager: logManager.Object);
             SetCandidates(
                 Snapshot("session-one", "u1", paused: false, position: 0),
                 Snapshot("session-two", "u2", paused: false, position: 0));
 
             _issuer.FailuresRemaining = 1;
+            _issuer.FailureMessage = "X-Emby-Token=secret&api_key=secret";
             engine.PollOnce(_clock.Now);
             Assert.Contains(warnings, warning => warning.Contains("immediate-issue-failure") &&
                 warning.Contains("command=Pause") && warning.Contains("targetUser=u1"));
             Assert.DoesNotContain(warnings, warning => warning.Contains("accepted-but-unacknowledged"));
+            Assert.DoesNotContain("X-Emby-Token=secret", string.Join("\n", warnings.Concat(infos)));
+            Assert.DoesNotContain("api_key=secret", string.Join("\n", warnings.Concat(infos)));
 
             warnings.Clear();
             _issuer.FailuresRemaining = 0;
@@ -243,6 +279,26 @@ namespace Emby.Plugins.WatchTogether.Tests
                 warning.Contains("command=Pause") && warning.Contains("targetUser=u2") &&
                 warning.Contains("paused=") && warning.Contains("position="));
             Assert.DoesNotContain(warnings, warning => warning.Contains("http://emby"));
+        }
+
+        [Fact]
+        public void PollExceptionDiagnostics_DoNotLogExceptionMessage()
+        {
+            var room = CreateRoom();
+            var warnings = new List<string>();
+            var logManager = CreateLogManager(warnings);
+            var engine = CreateEngine(logManager: logManager.Object);
+            _issuer.ThrowOnIssue = true;
+            _issuer.ExceptionMessage = "X-Emby-Token=secret&api_key=secret";
+            SetCandidates(
+                Snapshot("session-one", "u1", paused: false, position: 0),
+                Snapshot("session-two", "u2", paused: false, position: 0));
+
+            engine.PollOnce(_clock.Now);
+
+            Assert.Contains(warnings, warning => warning.Contains("poll failed"));
+            Assert.DoesNotContain("X-Emby-Token=secret", string.Join("\n", warnings));
+            Assert.DoesNotContain("api_key=secret", string.Join("\n", warnings));
         }
 
         [Fact]
@@ -2585,11 +2641,15 @@ namespace Emby.Plugins.WatchTogether.Tests
                 logManager: logManager);
         }
 
-        private static Mock<ILogManager> CreateLogManager(List<string> warnings)
+        private static Mock<ILogManager> CreateLogManager(
+            List<string> warnings,
+            List<string> infos = null)
         {
             var logger = new Mock<ILogger>();
             logger.Setup(x => x.Warn(It.IsAny<string>(), It.IsAny<object[]>()))
                 .Callback<string, object[]>((message, _) => warnings.Add(message));
+            logger.Setup(x => x.Info(It.IsAny<string>(), It.IsAny<object[]>()))
+                .Callback<string, object[]>((message, _) => infos?.Add(message));
             var logManager = new Mock<ILogManager>();
             logManager.Setup(x => x.GetLogger("WatchTogether.SyncEngine"))
                 .Returns(logger.Object);
@@ -2788,6 +2848,12 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             public int FailuresRemaining { get; set; }
 
+            public string FailureMessage { get; set; } = "command delivery failed";
+
+            public bool ThrowOnIssue { get; set; }
+
+            public string ExceptionMessage { get; set; } = "command delivery failed";
+
             public bool TryIssue(
                 string roomId,
                 string controllingUserId,
@@ -2799,10 +2865,15 @@ namespace Emby.Plugins.WatchTogether.Tests
                 out string error)
             {
                 Issued.Add((userId, command, positionTicks, snapshot?.SessionId, snapshot?.ItemId));
+                if (ThrowOnIssue)
+                {
+                    throw new InvalidOperationException(ExceptionMessage);
+                }
+
                 if (FailuresRemaining > 0)
                 {
                     FailuresRemaining--;
-                    error = "command delivery failed";
+                    error = FailureMessage;
                     return false;
                 }
 
