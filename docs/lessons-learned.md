@@ -54,9 +54,9 @@
 
 - 现象：Seek 无确认后从方保持暂停而主方继续前进；若重试目标持续追逐主方位置，或未确认 Seek 被 Pause/Unpause 覆盖，双方会在快进、暂停和重新同步之间反复分叉。
 - 原因：失败时丢失 Barrier 目标会让后续重试重新采样；同一 Session 和 Item 只证明命令目标相同，不代表不同命令可以安全替换。
-- 结论：Seek 冷却期间保留 Barrier、固定目标和原播放状态；同一 identity 上的不同 Pending 命令拒绝覆盖，需要改变序列时显式重建 Barrier。Barrier Seek 的初次发送和重试共享绝对期限，Waiting Pause 仅按 session、item 和能力条件做有界重试。
-- 规则：不得在 Seek 冷却期重新采样主方位置，也不得刷新同一 Barrier 的绝对预算；身份或能力条件变化时才允许重新建立 Waiting Pause 重试状态。
-- 验证：真实双客户端日志与 `SyncEngineTests` 覆盖固定目标重试、最终 Restore、Pending 冲突、Seek 期间暂停变化、Seek 绝对预算、Waiting Pause 次数上限及条件变化恢复。
+- 结论：无新的、且不能由当前远程命令解释的锚点位置操作时，Seek 冷却期间保留 Barrier、固定目标和原播放意图；同一 identity 上的不同 Pending 命令拒绝覆盖。若明确观察到锚点的新位置操作，则显式重建 Barrier，候选位置绑定当前 session、Item 和暂停/播放意图。Barrier Seek 的初次发送和重试共享绝对期限，Waiting Pause 仅按 session、item 和能力条件做有界重试。
+- 规则：无新操作时不得在 Seek 冷却期重新采样目标，也不得刷新同一失败序列的绝对预算；需要改变序列时必须显式重建 Barrier。该重建针对明确的新操作，不是周期性追帧。
+- 验证：`SyncEngineTests` 覆盖固定目标重试、锚点新位置显式重建、候选身份与播放意图、Restore 前双方容差、Pending 冲突、Seek 期间暂停变化、Seek 绝对预算、Waiting Pause 次数上限及条件变化恢复。
 
 ## 8. 房间副作用必须在 gate 内重新授权
 

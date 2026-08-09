@@ -87,7 +87,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 ## 5. 起播 Barrier
 
-Barrier 的四个阶段按顺序执行，每条远程命令都等待 SessionInfo 确认：
+Barrier 的三个阶段按顺序执行，每条远程命令都等待 SessionInfo 确认：
 
 ### Pause
 
@@ -95,15 +95,11 @@ Barrier 的四个阶段按顺序执行，每条远程命令都等待 SessionInfo
 
 ### Seek
 
-只向非主用户发送一次 `Seek`，目标为重新读取的主用户位置。目标位置在 Seek 容差内即视为确认；不会把两端都 Seek 到旧的起始快照。
+只向非锚点用户发送 `Seek`，目标为 Pause 确认后重新读取的锚点位置。锚点和另一端都在目标容差内且保持暂停时，才进入 Restore；不会把两端都 Seek 到旧的起始快照。Seek 未确认时保留 Barrier、固定目标和原播放意图，初次发送与重试共享同一绝对预算。若锚点出现不能由当前远程命令解释的明显新位置操作，则显式重建 Barrier；新位置候选绑定当前 session、Item 和暂停/播放意图，这不是周期性追帧。
 
 ### Restore
 
-按 Barrier 开始前主用户的暂停/播放状态向双方发送 `Pause` 或 `Unpause`。若原本在播放，恢复后进入最终对齐阶段；若原本暂停，双方状态确认后直接进入 `Watching`。
-
-### FinalAlign
-
-播放状态恢复后，如果两端位置差超过 1 秒，只向非主用户做一次最终 Seek，再等待确认。命令未确认或阶段超时会回到 `Waiting`，记录错误并安排自动重试冷却。
+按 Barrier 开始时锚点记录的暂停/播放意图向双方发送 `Pause` 或 `Unpause`。双方状态确认后直接进入 `Watching`，不再执行额外的最终 Seek。
 
 Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确认时错误为 `playback command was not acknowledged`，约 3 秒冷却后在条件仍满足时自动重新开始 Barrier。远程命令和提示消息都支持取消，并有约 5 秒的外部调用超时；引擎停止等待线程结束的时间有 10 秒上限。自动重试提示是尽力发送的消息，消息失败不会阻塞状态机。
 
@@ -111,21 +107,26 @@ Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确�
 
 ### 暂停和继续
 
-插件比较当前快照与上一轮快照的 `IsPaused`。主用户和另一端同时变化时，主用户优先；否则采用先观察到的变化，只向另一方发送一次相同的 `Pause` 或 `Unpause`。Pending 和 Suppressed 防止远端回传再次产生同一命令。
+插件比较当前快照与上一轮快照的 `IsPaused`。同一轮同时检测到明显手动 Seek 和暂停/继续时，Seek 优先，并以该轮最终快照的暂停/播放状态保存 Barrier 的恢复意图；只有没有 Seek 时才传播暂停/继续。Pending 和 Suppressed 防止远端回传再次产生同一命令。
 
 ### 手动 Seek 判定
 
 不能直接把两次快照的位置差当成 Seek，因为轮询间隔和播放速率会造成自然位移。当前逻辑先估算预期位置，并用每位用户已观测的命令确认延迟 EMA 提高判定阈值：
 
 ```text
-expected = previous.PositionTicks
-if previous 未暂停:
-    expected += elapsedSeconds × previous.PlaybackRate × TicksPerSecond
-threshold = max(4 秒, user_ack_latency_ema)
-manualSeek = abs(current.PositionTicks - expected) >= threshold
+threshold = max(4 秒, user_ack_latency_ema) × TicksPerSecond
+if previous.IsPaused == current.IsPaused:
+    expected = previous.PositionTicks
+    if previous 未暂停:
+        expected += elapsedSeconds × previous.PlaybackRate × TicksPerSecond
+    manualSeek = abs(current.PositionTicks - expected) >= threshold
+else:
+    natural = [previous.PositionTicks,
+               previous.PositionTicks + elapsedSeconds × previous.PlaybackRate × TicksPerSecond]
+    manualSeek = current.PositionTicks 在 natural 区间外，且到区间的距离 >= threshold
 ```
 
-暂停/继续或播放速率变化本身不会被误判为 Seek。只有明显的单次位置跳变才向另一端发送一次 Seek；长期的小幅速度差不会触发周期性纠偏。刚完成远程 Seek 后的短暂校准回退也不会重复触发 Seek。
+播放速率变化本身不会被误判为 Seek；暂停/继续时自然位置区间内的移动也不会被误判。Pending 或 Suppressed 的远程 `Pause`/`Unpause` 回传会继续抑制同轮位置变化的 Seek 检测。只有明显的单次位置跳变才向另一端发送一次 Seek；长期的小幅速度差不会触发周期性纠偏。刚完成远程 Seek 后 15 秒校准窗口内的小幅回退也不会重复触发 Seek，窗口外则按普通位置跳变判断。
 
 ### 不同 Item
 
@@ -262,9 +263,10 @@ git diff --check
 
 - 房间创建、成员互斥、持久化和服务路由权限；
 - 会话选择、远程能力探测和命令工厂；
-- Barrier 的暂停、重新锚定、Seek、恢复、最终对齐；
-- Pending acknowledgement、一次重试、失败冷却和消息失败隔离；
-- 主用户冲突裁决、手动 Seek 去重、长轮询和自然速率差不误判；
+- Barrier 的 Pause → Seek → Restore、暂停后重新锚定、目标容差、Seek 失败冻结与共享绝对预算；
+- Pending acknowledgement、一次重试、失败冷却、Pending 最终未确认与 immediate issue failure 区分，以及消息失败隔离；
+- 主用户冲突裁决、同轮 Seek 优先并保留最终播放意图、手动 Seek 去重、长轮询和自然速率差不误判；
+- 资格失败原因仅在变化时记录，日志身份摘要使用截短的 session/Item 标识且不记录认证参数；
 - 不同 Item 的安全暂停、单人保护、停止检测和重复通知抑制；
 - 嵌入式设置页资源和配置默认值；
 - 发布密钥生成、canonical manifest、RSA 签名校验和手动发布 workflow 约束。
