@@ -154,14 +154,17 @@ Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久
 
 ### 管理页
 
-嵌入式页面显示房间创建表单、房间状态卡片、加入/退出、暂停、继续、重新同步和删除操作。页面还显示两个停止行为复选框：
+嵌入式页面显示房间创建表单、房间状态卡片、加入/退出、暂停、继续、重新同步和删除操作。每个房间卡片维护独立的操作反馈和忙碌状态，5 秒轮询只刷新状态，不覆盖操作结果；成功提示约 8 秒后清除，错误提示保留到下一次同房间操作或手动刷新。`StatusReason` 会映射为安全、可执行的中文说明，不直接显示后端错误文本。
+
+页面还显示三个设置复选框：
 
 | 配置项 | 默认值 | 当前作用 |
 | --- | ---: | --- |
 | `PauseOtherOnPlaybackStop` | `true` | 会话快照持续确认停止后暂停另一方 |
 | `NotifyOtherOnPlaybackStop` | `true` | 会话快照持续确认停止后发送 DisplayMessage |
+| `NotifyOnSyncActions` | `true` | 暂停、继续、进度调整、重新同步、加入、退出、视频不一致和同步完成时向播放端发送约 3 秒提示 |
 
-Emby 负责保存配置；设置页只允许管理员修改。`PollIntervalSeconds` 默认 `0.5` 秒并由入口点传给同步引擎。配置事件会把 `PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop` 热更新到同步引擎，并唤醒等待中的循环，保存后下一轮轮询生效。`Enabled`、`MaxRuntimeDifferenceSeconds`、`SeekToleranceSeconds`、`BarrierSeekTimeoutSeconds` 和 `StaleSessionTimeoutSeconds` 仍是配置模型字段，但不作为实时同步策略，关键阈值按本节所述固定策略运行。
+Emby 负责保存配置；设置页只允许管理员修改。三个设置默认均为 `true`，保存后热更新；提示发送失败不会影响同步状态。`PollIntervalSeconds` 默认 `0.5` 秒并由入口点传给同步引擎。配置事件会把 `PollIntervalSeconds`、`PauseOtherOnPlaybackStop`、`NotifyOtherOnPlaybackStop` 和 `NotifyOnSyncActions` 热更新到同步引擎，并唤醒等待中的循环，保存后下一轮轮询生效。`Enabled`、`MaxRuntimeDifferenceSeconds`、`SeekToleranceSeconds`、`BarrierSeekTimeoutSeconds` 和 `StaleSessionTimeoutSeconds` 仍是配置模型字段，但不作为实时同步策略，关键阈值按本节所述固定策略运行。
 
 ### 服务路由和权限
 
@@ -283,6 +286,7 @@ git diff --check
 6. 一端停止或退出，分别切换两个停止行为开关，确认暂停和消息互相独立；
 7. 暂时阻断命令确认，确认只有限重试、进入冷却并能自动恢复；
 8. 在网络延迟、直播/STRM 或 CMS 场景观察 SessionInfo 是否稳定，并记录客户端能力差异。
+9. 管理页逐房间执行加入、退出、暂停、继续、重新同步和删除，确认反馈不会被轮询清掉；切换三个设置并确认保存摘要显示实际开启/关闭值。
 
 ## 10. 排错与残余风险
 

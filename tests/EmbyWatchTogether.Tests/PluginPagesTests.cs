@@ -25,6 +25,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
+            Assert.Contains("wtNotifyOnSyncActions", html);
+            Assert.Contains("同步操作时向播放端发送文字提示", html);
+            Assert.Contains("aria-live=\"polite\"", html);
             Assert.Contains("wtSaveConfig", html);
             Assert.Contains("wtPluginVersion", html);
             Assert.Contains("wtRepositoryLink", html);
@@ -38,6 +41,16 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("wtSaveUpdateConfig", html);
             Assert.Contains("PauseOtherOnPlaybackStop", javascript);
             Assert.Contains("NotifyOtherOnPlaybackStop", javascript);
+            Assert.Contains("NotifyOnSyncActions", javascript);
+            Assert.Contains("statusReasonMessages", javascript);
+            Assert.Contains("server_unavailable", javascript);
+            Assert.Contains("different_video", javascript);
+            Assert.Contains("remote_control_unavailable", javascript);
+            Assert.Contains("_wtRoomFeedback", javascript);
+            Assert.Contains("_wtRoomBusy", javascript);
+            Assert.Contains("仍在房间的一方会暂停", javascript);
+            Assert.Contains("只删除同步关系，不删除媒体", javascript);
+            Assert.DoesNotContain("room.Error", javascript);
             Assert.Contains("getPluginConfiguration", javascript);
             Assert.Contains("updatePluginConfiguration", javascript);
             Assert.Contains("WatchTogether/Info", javascript);

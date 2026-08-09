@@ -484,6 +484,11 @@
                     <input is="emby-checkbox" id="wtNotifyOtherOnPlaybackStop" type="checkbox" />
                     <span>停止或退出视频时发送文字提示</span>
                 </label>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" id="wtNotifyOnSyncActions" type="checkbox" />
+                    <span>同步操作时向播放端发送文字提示</span>
+                </label>
+                <div class="fieldDescription">覆盖暂停、继续、进度调整、重新同步、加入、退出、视频不一致和同步完成提示；播放端提示约 3 秒自动消失。</div>
                 <div class="fieldDescription">此设置由 Emby 服务器保存，仅管理员可以修改。</div>
                 <div class="wt-formActions">
                     <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
