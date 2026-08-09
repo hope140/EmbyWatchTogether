@@ -61,6 +61,18 @@ namespace Emby.Plugins.WatchTogether
         /// </summary>
         public DateTimeOffset? SeekRetryDeadlineAtUtc { get; set; }
 
+        /// <summary>
+        /// A candidate anchor position observed across a pause-state change
+        /// during Seek. It is promoted only after the plugin's Pause is
+        /// acknowledged at the same identity and position; the candidate is
+        /// cleared when the barrier is rebuilt or leaves Seek.
+        /// </summary>
+        public long? AnchorPositionCandidateTicks { get; set; }
+
+        public string AnchorPositionCandidateSessionId { get; set; }
+
+        public string AnchorPositionCandidateItemId { get; set; }
+
         public bool RestoreSent { get; set; }
     }
 
