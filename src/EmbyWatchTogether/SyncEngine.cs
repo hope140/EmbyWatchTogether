@@ -890,20 +890,31 @@ namespace Emby.Plugins.WatchTogether
             }
 
             double elapsedSeconds = Math.Max(0, (now - previousAtUtc).TotalSeconds);
-            double expectedPosition = previous.PositionTicks;
-            if (!previous.IsPaused)
+            if (previous.IsPaused != current.IsPaused)
             {
-                expectedPosition += elapsedSeconds * previous.PlaybackRate * SessionSnapshot.TicksPerSecond;
-            }
-            else if (!current.IsPaused)
-            {
-                // When playback resumes between snapshots, natural movement
-                // may occur during the same interval. Project with the current
-                // rate so a delayed normal resume is not mistaken for a seek,
-                // while an out-of-band seek remains outside the threshold.
-                expectedPosition += elapsedSeconds * current.PlaybackRate * SessionSnapshot.TicksPerSecond;
+                // The exact pause/resume moment is unknown between snapshots.
+                // Treat every position between the stopped and fully elapsed
+                // natural projections as explainable by that transition.
+                double naturalMin = previous.PositionTicks;
+                double naturalMax = naturalMin +
+                    elapsedSeconds * Math.Max(0, previous.PlaybackRate) *
+                    SessionSnapshot.TicksPerSecond;
+                if (current.PositionTicks >= naturalMin &&
+                    current.PositionTicks <= naturalMax)
+                {
+                    return false;
+                }
+
+                double distanceToNaturalInterval = current.PositionTicks < naturalMin
+                    ? naturalMin - current.PositionTicks
+                    : current.PositionTicks - naturalMax;
+                return distanceToNaturalInterval >= seekDetectionThresholdTicks;
             }
 
+            double expectedPosition = previous.IsPaused
+                ? previous.PositionTicks
+                : previous.PositionTicks +
+                  elapsedSeconds * previous.PlaybackRate * SessionSnapshot.TicksPerSecond;
             double difference = Math.Abs(current.PositionTicks - expectedPosition);
             return difference >= seekDetectionThresholdTicks;
         }

@@ -1536,6 +1536,87 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void WatchingTick_PlayingTenSecondsThenPauseAtNaturalPosition_OnlyPropagatesPause()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room, 50 * SessionSnapshot.TicksPerSecond);
+
+            // The pause may have happened at any point during the ten-second
+            // interval. 51s is inside the natural [50s, 60s] interval.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 60 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(10);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Null(runtime.Barrier);
+            Assert.Contains(_issuer.Issued, issued =>
+                issued.userId == "u2" && issued.command == RemoteCommands.Pause);
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingTick_PausedTenSecondsThenUnpauseAtNaturalPosition_OnlyPropagatesUnpause()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatchingPaused(engine, room, 50);
+
+            // The resume may have happened at any point during the ten-second
+            // interval. 51s is inside the natural [50s, 60s] interval.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(10);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Null(runtime.Barrier);
+            Assert.Contains(_issuer.Issued, issued =>
+                issued.userId == "u2" && issued.command == RemoteCommands.Unpause);
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingTick_PauseTransitionsAtNaturalIntervalBoundaries_DoNotSeek()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room, 50 * SessionSnapshot.TicksPerSecond);
+
+            // Lower boundary: playing -> paused at the previous position.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(10);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Seek);
+
+            // Acknowledge the propagated pause before testing the upper
+            // boundary of the reverse transition.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            // Upper boundary: paused -> playing at the fully elapsed natural
+            // position after ten seconds.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(10);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
         public void WatchingTick_SeekAndUnpause_StartsBarrierWithPlayingIntent()
         {
             var room = CreateRoom();
