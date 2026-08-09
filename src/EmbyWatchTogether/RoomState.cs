@@ -53,6 +53,8 @@ namespace Emby.Plugins.WatchTogether
 
         public bool SeekSent { get; set; }
 
+        public DateTimeOffset? SeekRetryAtUtc { get; set; }
+
         public bool RestoreSent { get; set; }
     }
 

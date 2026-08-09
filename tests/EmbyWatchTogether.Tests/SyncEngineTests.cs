@@ -448,6 +448,122 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void SeekFailure_PreservesBarrier_FreezesAndRetriesOriginalTarget()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            var originalBarrier = runtime.Barrier;
+            Assert.Equal(RemoteCommands.Seek, runtime.Pending["u2"].Command);
+
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + 0.1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + SyncConstants.PendingRetryGraceSeconds + 1.1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Same(originalBarrier, runtime.Barrier);
+            Assert.Equal(50 * SessionSnapshot.TicksPerSecond, runtime.Barrier.PrimaryPositionTicks);
+            Assert.NotNull(runtime.Barrier.SeekRetryAtUtc);
+            var issuedBeforeCooldown = _issuer.Issued.Count;
+
+            // The anchor resumes and moves during cooldown. It is paused again,
+            // but the failed seek target remains the original locked position.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(issuedBeforeCooldown + 1, _issuer.Issued.Count);
+            Assert.Equal(RemoteCommands.Pause, _issuer.Issued.Last().command);
+            Assert.Equal("u1", _issuer.Issued.Last().userId);
+            Assert.Equal(50 * SessionSnapshot.TicksPerSecond, runtime.Barrier.PrimaryPositionTicks);
+
+            _clock.Advance(SyncConstants.AutomaticBarrierRetryDelaySeconds - 1.1);
+            engine.PollOnce(_clock.Now);
+            Assert.DoesNotContain(_issuer.Issued.Skip(issuedBeforeCooldown + 1), i => i.command == RemoteCommands.Seek);
+            Assert.Empty(_messageIssuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(issuedBeforeCooldown + 2, _issuer.Issued.Count);
+            Assert.Equal(RemoteCommands.Pause, _issuer.Issued.Last().command);
+            Assert.Equal("u2", _issuer.Issued.Last().userId);
+            Assert.Empty(_messageIssuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            var retrySeek = _issuer.Issued.Last(i => i.command == RemoteCommands.Seek);
+            Assert.Equal(50 * SessionSnapshot.TicksPerSecond, retrySeek.positionTicks);
+            Assert.Equal(2, _messageIssuer.Issued.Count);
+            Assert.Equal(new[] { "u1", "u2" }, _messageIssuer.Issued.Select(message => message.userId).OrderBy(userId => userId));
+
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, _messageIssuer.Issued.Count);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Unpause));
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Watching, runtime.State);
+        }
+
+        [Fact]
+        public void SeekImmediateIssueFailure_PreservesBarrierUntilCooldownRetry()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _issuer.FailuresRemaining = 1;
+
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Equal(50 * SessionSnapshot.TicksPerSecond, runtime.Barrier.PrimaryPositionTicks);
+            Assert.NotNull(runtime.Barrier.SeekRetryAtUtc);
+            Assert.False(runtime.Pending.ContainsKey("u2"));
+        }
+
+        [Fact]
         public void SoloPlayer_IsNeverPausedWhileWaitingForSecond()
         {
             var room = CreateRoom();
