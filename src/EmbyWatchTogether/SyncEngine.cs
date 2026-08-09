@@ -364,7 +364,9 @@ namespace Emby.Plugins.WatchTogether
                         runtime.Error = null;
                     }
 
-                    if (pendingFailed)
+                    if (pendingFailed &&
+                        !(runtime.State == RoomState.Barrier &&
+                          runtime.Barrier?.Stage == BarrierStage.Seek))
                     {
                         ScheduleBarrierRetry(runtime, room.Id, "playback command was not acknowledged", now);
                         _logger?.Warn($"Room {room.Id}: pending playback command not acknowledged; waiting for retry");
@@ -1016,6 +1018,8 @@ namespace Emby.Plugins.WatchTogether
             out bool stalePendingCommand)
         {
             bool failed = false;
+            bool seekFailed = false;
+            bool nonSeekFailed = false;
             stalePendingCommand = false;
             foreach (var pair in runtime.Pending.ToList())
             {
@@ -1089,12 +1093,16 @@ namespace Emby.Plugins.WatchTogether
                     else
                     {
                         failed = true;
+                        seekFailed |= pending.Command == RemoteCommands.Seek;
+                        nonSeekFailed |= pending.Command != RemoteCommands.Seek;
                     }
                 }
                 else
                 {
                     runtime.Pending.Remove(userId);
                     failed = true;
+                    seekFailed |= pending.Command == RemoteCommands.Seek;
+                    nonSeekFailed |= pending.Command != RemoteCommands.Seek;
                     _logger?.Warn(
                         $"Room {room.Id}: pending {pending.Command} for {userId} failed " +
                         $"after {SyncConstants.MaxPendingRetries + 1} attempts");
@@ -1103,8 +1111,22 @@ namespace Emby.Plugins.WatchTogether
 
             if (failed)
             {
-                runtime.State = RoomState.Waiting;
-                runtime.Error = "playback command was not acknowledged";
+                if (seekFailed &&
+                    !nonSeekFailed &&
+                    runtime.State == RoomState.Barrier &&
+                    runtime.Barrier?.Stage == BarrierStage.Seek)
+                {
+                    ScheduleSeekBarrierRetry(
+                        runtime,
+                        room.Id,
+                        "playback command was not acknowledged",
+                        now);
+                }
+                else
+                {
+                    runtime.State = RoomState.Waiting;
+                    runtime.Error = "playback command was not acknowledged";
+                }
             }
 
             return failed;
@@ -1120,6 +1142,25 @@ namespace Emby.Plugins.WatchTogether
             runtime.Error = error;
             runtime.BarrierRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
             _logger?.Info($"Room {roomId}: barrier retry scheduled: {error}");
+        }
+
+        private void ScheduleSeekBarrierRetry(
+            RoomRuntime runtime,
+            string roomId,
+            string error,
+            DateTimeOffset now)
+        {
+            var barrier = runtime.Barrier;
+            if (runtime.State != RoomState.Barrier || barrier?.Stage != BarrierStage.Seek)
+            {
+                ScheduleBarrierRetry(runtime, roomId, error, now);
+                return;
+            }
+
+            runtime.Error = error;
+            barrier.SeekSent = false;
+            barrier.SeekRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
+            _logger?.Info($"Room {roomId}: seek retry scheduled: {error}");
         }
 
         private bool TryIssueCommand(
@@ -1419,6 +1460,56 @@ namespace Emby.Plugins.WatchTogether
                 case BarrierStage.Seek:
                     var follower = members.First(u => !string.Equals(u, barrier.AnchorUserId, StringComparison.OrdinalIgnoreCase));
                     long target = barrier.PrimaryPositionTicks;
+                    bool anyUnpaused = snapshots.Values.Any(snapshot => !snapshot.IsPaused);
+
+                    foreach (var user in members)
+                    {
+                        if (!snapshots[user].IsPaused &&
+                            !(runtime.Pending.TryGetValue(user, out var pending) &&
+                              pending.Command == RemoteCommands.Seek))
+                        {
+                            if (!Issue(
+                                runtime,
+                                room,
+                                user,
+                                snapshots[user],
+                                RemoteCommands.Pause,
+                                null,
+                                now,
+                                out var pauseFailure))
+                            {
+                                ScheduleBarrierRetry(
+                                    runtime,
+                                    room.Id,
+                                    pauseFailure ?? "barrier pause command failed",
+                                    now);
+                                return;
+                            }
+                        }
+                    }
+
+                    // A pause issued in this round is only a hold request; the
+                    // snapshot is still unpaused until the next poll. Never
+                    // clear the seek cooldown or issue/replace a seek until all
+                    // members have confirmed paused.
+                    if (anyUnpaused)
+                    {
+                        return;
+                    }
+
+                    if (barrier.SeekRetryAtUtc.HasValue)
+                    {
+                        if (now < barrier.SeekRetryAtUtc.Value)
+                        {
+                            return;
+                        }
+
+                        barrier.SeekRetryAtUtc = null;
+                        barrier.StartedAtUtc = now;
+                        runtime.Error = null;
+                        NotifyAutomaticBarrierRetry(room, snapshots, now);
+                    }
+
                     if (!barrier.SeekSent)
                     {
                         if (!Issue(
@@ -1431,7 +1522,7 @@ namespace Emby.Plugins.WatchTogether
                             now,
                             out var failure))
                         {
-                            ScheduleBarrierRetry(
+                            ScheduleSeekBarrierRetry(
                                 runtime,
                                 room.Id,
                                 failure ?? "barrier seek command failed",
@@ -1453,7 +1544,7 @@ namespace Emby.Plugins.WatchTogether
                     if (runtime.Pending.Count == 0 &&
                         (now - barrier.StartedAtUtc).TotalSeconds >= SyncConstants.BarrierTimeoutSeconds)
                     {
-                        ScheduleBarrierRetry(runtime, room.Id, "barrier seek timed out", now);
+                        ScheduleSeekBarrierRetry(runtime, room.Id, "barrier seek timed out", now);
                     }
 
                     return;
