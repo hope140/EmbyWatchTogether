@@ -165,6 +165,66 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Leave_ChangedNotifiesRemainingParticipant_AndRepeatedLeaveDoesNotNotify()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u2);
+            WithPlugin(plugin, () => service.Post(new LeaveRoomRequest { Id = room.Id }));
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Header == "一起观看" && m.Text == "对方已退出房间，自动同步已停止" && m.TimeoutMs == 3000), It.IsAny<CancellationToken>()), Times.Once);
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+            WithPlugin(plugin, () => service.Post(new LeaveRoomRequest { Id = room.Id }));
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public void Control_Resync_NotifiesCurrentJoinedDisplayCapableSessions()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[] { NewSession(sm, "s1", u1, new[] { "DisplayMessage" }), NewSession(sm, "s2", u2, Array.Empty<string>()) });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u1, true);
+            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" }));
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Header == "一起观看" && m.Text == "管理员已发起重新同步，请稍候" && m.TimeoutMs == 3000), It.IsAny<CancellationToken>()), Times.Once);
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public void SyncNoticesDisabled_SuppressesMembershipAndControl_ButExplicitMessageStillSends()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            manager.SetParticipantJoined(room.Id, u2, false);
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            SetPluginConfiguration(plugin, new PluginConfiguration { NotifyOnSyncActions = false });
+            var service = NewService(u2, true);
+            WithPlugin(plugin, () => service.Post(new JoinRoomRequest { Id = room.Id }));
+            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" }));
+            sm.Invocations.Clear();
+            WithPlugin(plugin, () => service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "explicit" }));
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.Is<MessageCommand>(m => m.Text == "explicit"), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        }
+
+        [Fact]
         public void Leave_FromWaitingDoesNotPauseTheOtherParticipant()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
@@ -654,6 +714,17 @@ namespace Emby.Plugins.WatchTogether.Tests
             return session;
         }
 
+        private static SessionInfo NewSession(
+            Mock<ISessionManager> sessionManager,
+            string sessionId,
+            string userId,
+            string[] supportedCommands)
+        {
+            var session = NewSession(sessionManager, sessionId, userId);
+            session.Capabilities.SupportedCommands = supportedCommands;
+            return session;
+        }
+
         private static Plugin NewPlugin(
             RoomManager manager,
             SessionBridge bridge,
@@ -708,6 +779,22 @@ namespace Emby.Plugins.WatchTogether.Tests
             typeof(Plugin).GetProperty(
                 name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .SetValue(plugin, value);
+        }
+
+        private static void SetPluginConfiguration(Plugin plugin, PluginConfiguration configuration)
+        {
+            for (var type = typeof(Plugin); type != null; type = type.BaseType)
+            {
+                foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
+                {
+                    if (field.FieldType == typeof(PluginConfiguration))
+                    {
+                        field.SetValue(plugin, configuration);
+                        return;
+                    }
+                }
+            }
+            throw new MissingFieldException("PluginConfiguration backing field not found");
         }
 
         private static bool GetBoolean(object response, string propertyName)
