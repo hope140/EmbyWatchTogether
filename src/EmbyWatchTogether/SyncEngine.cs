@@ -267,7 +267,13 @@ namespace Emby.Plugins.WatchTogether
                     }
 
                     var snapshots = SessionSelector.Select(candidates, room.JoinedParticipantUserIds);
-                    bool eligible = RoomEligibility.IsPairEligible(snapshots);
+                    var eligibility = RoomEligibility.Evaluate(snapshots);
+                    bool eligible = eligibility.IsEligible;
+                    LogEligibilityFailureIfChanged(
+                        runtime,
+                        room,
+                        snapshots,
+                        eligibility);
                     bool sameItem = snapshots.Count == 2 &&
                         snapshots.Values.All(s => s != null) &&
                         snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
@@ -940,6 +946,102 @@ namespace Emby.Plugins.WatchTogether
             };
         }
 
+        private void LogEligibilityFailureIfChanged(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            RoomEligibilityEvaluation eligibility)
+        {
+            if (eligibility.IsEligible)
+            {
+                runtime.LastEligibilityFailureReason = null;
+                return;
+            }
+
+            if (runtime.LastEligibilityFailureReason == eligibility.FailureReason)
+            {
+                return;
+            }
+
+            runtime.LastEligibilityFailureReason = eligibility.FailureReason;
+            _logger?.Warn(
+                $"Room {room.Id}: eligibility failure reason={eligibility.FailureReason}; " +
+                FormatEligibilitySnapshotSummary(room, snapshots));
+        }
+
+        private static string FormatEligibilitySnapshotSummary(
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots)
+        {
+            var participants = room.JoinedParticipantUserIds ?? Array.Empty<string>();
+            var parts = new List<string>();
+            foreach (var userId in participants)
+            {
+                snapshots.TryGetValue(userId, out var snapshot);
+                string role = string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase)
+                    ? "primary"
+                    : "secondary";
+                parts.Add($"{role}/user={userId}:{FormatSnapshotSummary(snapshot)}");
+            }
+
+            long? runtimeDelta = null;
+            var runtimeValues = snapshots.Values.Where(s => s != null).Select(s => s.RunTimeTicks).ToList();
+            if (runtimeValues.Count == 2)
+            {
+                runtimeDelta = Math.Abs(runtimeValues[0] - runtimeValues[1]);
+            }
+
+            return $"snapshotCount={snapshots.Count}, missing={string.Join(",", participants.Where(u => !snapshots.ContainsKey(u)))}, " +
+                $"runTimeDiff={FormatRuntime(runtimeDelta)}; {string.Join("; ", parts)}";
+        }
+
+        private static string FormatSnapshotSummary(SessionSnapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                return "snapshot=null";
+            }
+
+            return $"session={ShortIdentity(snapshot.SessionId)}, item={ShortIdentity(snapshot.ItemId)}, " +
+                $"online={snapshot.Online}, stopped={snapshot.Stopped}, " +
+                $"supportsRemoteControl={snapshot.SupportsRemoteControl}, paused={snapshot.IsPaused}, " +
+                $"playbackRate={snapshot.PlaybackRate:0.###}, runTimeTicks={FormatRuntime(snapshot.RunTimeTicks)}";
+        }
+
+        private static string FormatRuntime(long? runtimeTicks)
+        {
+            return runtimeTicks.HasValue
+                ? $"{runtimeTicks.Value}ticks"
+                : "-";
+        }
+
+        private static string ShortIdentity(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "-";
+            }
+
+            return value.Length <= 8 ? value : value.Substring(0, 8);
+        }
+
+        private void LogPendingUnacknowledged(
+            Room room,
+            PendingCommand pending,
+            SessionSnapshot snapshot,
+            string detail)
+        {
+            _logger?.Warn(
+                $"Room {room.Id}: accepted-but-unacknowledged command={pending?.Command}, " +
+                $"targetUser={pending?.UserId}, session={ShortIdentity(pending?.SessionId)}, " +
+                $"item={ShortIdentity(pending?.ItemId)}, detail={detail}; " +
+                (snapshot == null
+                    ? "currentSnapshot=missing"
+                    : $"currentSnapshot=session={ShortIdentity(snapshot.SessionId)}, " +
+                      $"item={ShortIdentity(snapshot.ItemId)}, paused={snapshot.IsPaused}, " +
+                      $"position={FormatPosition(snapshot.PositionTicks)}s"));
+        }
+
         private static bool HasSameIdentity(
             string sessionId,
             string itemId,
@@ -1152,8 +1254,7 @@ namespace Emby.Plugins.WatchTogether
                     runtime.Pending.Remove(userId);
                     failed = true;
                     seekFailed = true;
-                    _logger?.Warn(
-                        $"Room {room.Id}: pending Seek for {userId} reached the barrier retry deadline");
+                    LogPendingUnacknowledged(room, pending, snapshot, "barrier retry deadline");
                     continue;
                 }
 
@@ -1200,8 +1301,10 @@ namespace Emby.Plugins.WatchTogether
                     failed = true;
                     seekFailed |= pending.Command == RemoteCommands.Seek;
                     nonSeekFailed |= pending.Command != RemoteCommands.Seek;
-                    _logger?.Warn(
-                        $"Room {room.Id}: pending {pending.Command} for {userId} failed " +
+                    LogPendingUnacknowledged(
+                        room,
+                        pending,
+                        snapshot,
                         $"after {SyncConstants.MaxPendingRetries + 1} attempts");
                 }
             }
@@ -1463,7 +1566,9 @@ namespace Emby.Plugins.WatchTogether
             if (!ok)
             {
                 failure = $"{command} command failed: {error}";
-                _logger?.Warn($"Room {room.Id}: {failure}");
+                _logger?.Warn(
+                    $"Room {room.Id}: immediate-issue-failure command={command}, targetUser={userId}, " +
+                    $"error={error ?? "unknown"}");
                 return false;
             }
 

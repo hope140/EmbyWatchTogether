@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Session;
 using Moq;
 using Xunit;
@@ -173,6 +174,75 @@ namespace Emby.Plugins.WatchTogether.Tests
             var results = engine.PollOnce(_clock.Now);
 
             Assert.Empty(results);
+        }
+
+        [Fact]
+        public void EligibilityDiagnostics_LogOnReasonChangeOnly_AndResumeAfterRecovery()
+        {
+            var room = CreateRoom();
+            var warnings = new List<string>();
+            var logManager = CreateLogManager(warnings);
+            var engine = CreateEngine(logManager: logManager.Object);
+
+            SetCandidates(Snapshot("session-one", "u1", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+            engine.PollOnce(_clock.Now);
+            Assert.Single(warnings);
+            Assert.Contains("reason=SnapshotCount", warnings[0]);
+            Assert.Contains("missing=u2", warnings[0]);
+
+            SetCandidates(
+                Snapshot("session-one", "u1", paused: false, position: 0, itemId: "item-a"),
+                Snapshot("session-two", "u2", paused: false, position: 0, itemId: "item-b"));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, warnings.Count);
+            Assert.Contains("reason=EmptyOrDifferentItem", warnings[1]);
+
+            SetCandidates(
+                Snapshot("session-one", "u1", paused: false, position: 0),
+                Snapshot("session-two", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("session-one", "u1", paused: false, position: 0, itemId: "item-a"),
+                Snapshot("session-two", "u2", paused: false, position: 0, itemId: "item-b"));
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(3, warnings.Count);
+            Assert.Contains("reason=EmptyOrDifferentItem", warnings[2]);
+            Assert.DoesNotContain("http://emby", string.Join("\n", warnings));
+        }
+
+        [Fact]
+        public void CommandDiagnostics_DistinguishImmediateFailureFromAcceptedUnacknowledged()
+        {
+            var room = CreateRoom();
+            var warnings = new List<string>();
+            var logManager = CreateLogManager(warnings);
+            var engine = CreateEngine(logManager: logManager.Object);
+            SetCandidates(
+                Snapshot("session-one", "u1", paused: false, position: 0),
+                Snapshot("session-two", "u2", paused: false, position: 0));
+
+            _issuer.FailuresRemaining = 1;
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(warnings, warning => warning.Contains("immediate-issue-failure") &&
+                warning.Contains("command=Pause") && warning.Contains("targetUser=u1"));
+            Assert.DoesNotContain(warnings, warning => warning.Contains("accepted-but-unacknowledged"));
+
+            warnings.Clear();
+            _issuer.FailuresRemaining = 0;
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(4);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(4);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Contains(warnings, warning => warning.Contains("accepted-but-unacknowledged") &&
+                warning.Contains("command=Pause") && warning.Contains("targetUser=u2") &&
+                warning.Contains("paused=") && warning.Contains("position="));
+            Assert.DoesNotContain(warnings, warning => warning.Contains("http://emby"));
         }
 
         [Fact]
@@ -2503,14 +2573,27 @@ namespace Emby.Plugins.WatchTogether.Tests
             string serverId = "server-1",
             bool pauseOtherOnPlaybackStop = true,
             bool notifyOtherOnPlaybackStop = true,
-            IMessageIssuer messageIssuer = null)
+            IMessageIssuer messageIssuer = null,
+            ILogManager logManager = null)
         {
             return new SyncEngine(
                 _rooms, _provider, _issuer, () => serverId, () => _clock.Now,
                 pollIntervalSeconds: 1.0,
                 pauseOtherOnPlaybackStop: pauseOtherOnPlaybackStop,
                 notifyOtherOnPlaybackStop: notifyOtherOnPlaybackStop,
-                messageIssuer: messageIssuer ?? _messageIssuer);
+                messageIssuer: messageIssuer ?? _messageIssuer,
+                logManager: logManager);
+        }
+
+        private static Mock<ILogManager> CreateLogManager(List<string> warnings)
+        {
+            var logger = new Mock<ILogger>();
+            logger.Setup(x => x.Warn(It.IsAny<string>(), It.IsAny<object[]>()))
+                .Callback<string, object[]>((message, _) => warnings.Add(message));
+            var logManager = new Mock<ILogManager>();
+            logManager.Setup(x => x.GetLogger("WatchTogether.SyncEngine"))
+                .Returns(logger.Object);
+            return logManager;
         }
 
         private Room CreateRoom()

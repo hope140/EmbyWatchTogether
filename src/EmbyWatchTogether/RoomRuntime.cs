@@ -13,6 +13,8 @@ namespace Emby.Plugins.WatchTogether
 
         public string Error { get; set; }
 
+        internal RoomEligibilityFailureReason? LastEligibilityFailureReason { get; set; }
+
         public Dictionary<string, PendingCommand> Pending { get; } = new Dictionary<string, PendingCommand>();
 
         public Dictionary<string, WaitingPauseRetryState> WaitingPauseRetries { get; } =
@@ -63,6 +65,7 @@ namespace Emby.Plugins.WatchTogether
             bool preserveStopIdentity = MissingSessionSinceUtc.HasValue;
             State = RoomState.Waiting;
             Error = null;
+            LastEligibilityFailureReason = null;
             Barrier = null;
             Pending.Clear();
             WaitingPauseRetries.Clear();
