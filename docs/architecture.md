@@ -22,7 +22,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 - `SessionBridge` 将 Emby 会话和事件适配为快照、命令和立即轮询唤醒。
 - `SessionSelector` 为参与者选择有效会话并绑定 session identity，避免旧会话确认新设备命令。
-- `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；`RoomStore` 只持久化房间元数据。
+- `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份；`RoomStore` 只持久化房间元数据。
 - `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Barrier`、`Watching`、`Unavailable`。
 - `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；管理页按钮不是安全边界。
 
@@ -32,7 +32,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 ## 发布信任边界
 
-更新组件由 `GitHubReleaseClient`、`PluginUpdateManager`、`ReleaseSignatureVerifier` 和 `ReleaseTrustStore` 协作：manifest 的版本、大小、SHA-256、tag 与 detached RSA 签名均需通过校验，未知 key 或校验失败时 fail closed。发布 workflow 负责构建和资产发布，不负责服务器部署。
+更新组件由 `GitHubReleaseClient`、`PluginUpdateManager`、`ReleaseSignatureVerifier` 和 `ReleaseTrustStore` 协作：manifest 的版本、大小、SHA-256、tag 与 detached RSA 签名均需通过校验，未知 key、当前插件版本不可读或校验失败时 fail closed；每次检查会使旧的已验证 release 缓存失效。发布 workflow 负责构建和资产发布，不负责服务器部署。
 
 ## 证据与维护
 
