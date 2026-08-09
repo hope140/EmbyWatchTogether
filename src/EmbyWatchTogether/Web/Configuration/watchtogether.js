@@ -695,6 +695,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 if (result && result.Deleted === false) {
                     throw new Error('房间不存在或已删除');
                 }
+                clearRoomFeedback(page, room.RoomId);
                 setTransientStatus(page, '房间“' + roomName + '”已删除；只移除同步关系，媒体未删除。', false);
                 return loadRooms(page, false);
             })
