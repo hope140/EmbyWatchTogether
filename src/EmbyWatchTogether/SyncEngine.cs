@@ -1524,6 +1524,123 @@ namespace Emby.Plugins.WatchTogether
                     snapshot);
         }
 
+        private static bool HasCurrentSuppressedCommand(
+            RoomRuntime runtime,
+            string userId,
+            SessionSnapshot snapshot,
+            string command)
+        {
+            return runtime != null &&
+                snapshot != null &&
+                runtime.Suppressed.TryGetValue(userId, out var suppressed) &&
+                string.Equals(suppressed?.Command, command, StringComparison.Ordinal) &&
+                IsCurrentCommandIdentity(
+                    runtime,
+                    true,
+                    userId,
+                    suppressed.SessionId,
+                    suppressed.ItemId,
+                    snapshot) &&
+                PendingMatcher.Matches(suppressed.Command, suppressed.PositionTicks, snapshot);
+        }
+
+        private static void ClearAnchorPositionCandidate(BarrierState barrier)
+        {
+            if (barrier == null)
+            {
+                return;
+            }
+
+            barrier.AnchorPositionCandidateTicks = null;
+            barrier.AnchorPositionCandidateSessionId = null;
+            barrier.AnchorPositionCandidateItemId = null;
+        }
+
+        private static bool IsClearlyOutsideBarrierTarget(
+            RoomRuntime runtime,
+            BarrierState barrier,
+            long positionTicks)
+        {
+            return Math.Abs(positionTicks - barrier.PrimaryPositionTicks) >=
+                GetSeekDetectionThresholdTicks(runtime, barrier.AnchorUserId);
+        }
+
+        private static void CaptureAnchorPositionCandidate(
+            RoomRuntime runtime,
+            BarrierState barrier,
+            SessionSnapshot anchor,
+            DateTimeOffset now)
+        {
+            if (runtime == null || barrier == null || anchor == null ||
+                barrier.AnchorPositionCandidateTicks.HasValue ||
+                HasCurrentRemoteSeek(runtime, barrier.AnchorUserId, anchor) ||
+                !runtime.Previous.TryGetValue(barrier.AnchorUserId, out var previous) ||
+                previous == null ||
+                !IsClearlyOutsideBarrierTarget(runtime, barrier, anchor.PositionTicks))
+            {
+                return;
+            }
+
+            double elapsedSeconds = Math.Max(0, (now - runtime.PreviousAtUtc.GetValueOrDefault()).TotalSeconds);
+            double expectedPosition = previous.PositionTicks;
+            if (!previous.IsPaused)
+            {
+                expectedPosition += elapsedSeconds * previous.PlaybackRate * SessionSnapshot.TicksPerSecond;
+            }
+
+            if (Math.Abs(anchor.PositionTicks - expectedPosition) <
+                GetSeekDetectionThresholdTicks(runtime, barrier.AnchorUserId))
+            {
+                return;
+            }
+
+            barrier.AnchorPositionCandidateTicks = anchor.PositionTicks;
+            barrier.AnchorPositionCandidateSessionId = anchor.SessionId;
+            barrier.AnchorPositionCandidateItemId = anchor.ItemId;
+        }
+
+        private static bool IsCurrentAnchorPositionCandidate(
+            RoomRuntime runtime,
+            BarrierState barrier,
+            SessionSnapshot anchor)
+        {
+            return barrier?.AnchorPositionCandidateTicks.HasValue == true &&
+                anchor != null &&
+                string.Equals(
+                    barrier.AnchorPositionCandidateSessionId,
+                    anchor.SessionId,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    barrier.AnchorPositionCandidateItemId,
+                    anchor.ItemId,
+                    StringComparison.OrdinalIgnoreCase) &&
+                IsCurrentCommandIdentity(
+                    runtime,
+                    true,
+                    barrier.AnchorUserId,
+                    barrier.AnchorPositionCandidateSessionId,
+                    barrier.AnchorPositionCandidateItemId,
+                    anchor);
+        }
+
+        private static bool IsReadyToPromoteAnchorPositionCandidate(
+            RoomRuntime runtime,
+            BarrierState barrier,
+            SessionSnapshot anchor)
+        {
+            if (!IsCurrentAnchorPositionCandidate(runtime, barrier, anchor) ||
+                !anchor.IsPaused ||
+                HasCurrentRemoteSeek(runtime, barrier.AnchorUserId, anchor) ||
+                !HasCurrentSuppressedCommand(runtime, barrier.AnchorUserId, anchor, RemoteCommands.Pause))
+            {
+                return false;
+            }
+
+            return Math.Abs(anchor.PositionTicks - barrier.AnchorPositionCandidateTicks.Value) <=
+                       SyncConstants.SeekToleranceTicks &&
+                IsClearlyOutsideBarrierTarget(runtime, barrier, anchor.PositionTicks);
+        }
+
         private static bool IsExplicitBarrierAnchorSeek(
             RoomRuntime runtime,
             BarrierState barrier,
@@ -1536,6 +1653,11 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
+            if (IsReadyToPromoteAnchorPositionCandidate(runtime, barrier, anchor))
+            {
+                return true;
+            }
+
             if (!runtime.Previous.TryGetValue(barrier.AnchorUserId, out var previous) ||
                 previous == null ||
                 previous.IsPaused != anchor.IsPaused)
@@ -1546,7 +1668,7 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
-            if (Math.Abs(anchor.PositionTicks - barrier.PrimaryPositionTicks) <= SyncConstants.SeekToleranceTicks)
+            if (!IsClearlyOutsideBarrierTarget(runtime, barrier, anchor.PositionTicks))
             {
                 // Returning to the locked target is convergence, not a new
                 // anchor operation, even if the preceding snapshot was far
@@ -1712,6 +1834,7 @@ namespace Emby.Plugins.WatchTogether
                     long target = barrier.PrimaryPositionTicks;
                     bool anyUnpaused = snapshots.Values.Any(snapshot => !snapshot.IsPaused);
                     EnsureSeekRetryDeadline(barrier, now);
+                    CaptureAnchorPositionCandidate(runtime, barrier, anchor, now);
                     if (IsExplicitBarrierAnchorSeek(runtime, barrier, anchor, now))
                     {
                         // A new, clearly out-of-band anchor seek replaces the
@@ -1734,6 +1857,7 @@ namespace Emby.Plugins.WatchTogether
 
                     if (anchorReached && targetReached && !anyUnpaused)
                     {
+                        ClearAnchorPositionCandidate(barrier);
                         barrier.Stage = BarrierStage.Restore;
                         barrier.StartedAtUtc = now;
                         return;
@@ -1782,6 +1906,7 @@ namespace Emby.Plugins.WatchTogether
 
                     if (anchorReached && targetReached)
                     {
+                        ClearAnchorPositionCandidate(barrier);
                         barrier.Stage = BarrierStage.Restore;
                         barrier.StartedAtUtc = now;
                         return;

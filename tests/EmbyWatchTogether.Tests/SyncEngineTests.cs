@@ -483,7 +483,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             // The anchor resumes and moves during cooldown. It is paused again,
             // but the failed seek target remains the original locked position.
             SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: true, position: 0));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
@@ -498,7 +498,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Empty(_messageIssuer.Issued);
 
             SetCandidates(
-                Snapshot("s1", "u1", paused: true, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s1", "u1", paused: true, position: 51 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 0));
             _clock.Advance(0.1);
             engine.PollOnce(_clock.Now);
@@ -508,7 +508,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Empty(_messageIssuer.Issued);
 
             SetCandidates(
-                Snapshot("s1", "u1", paused: true, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s1", "u1", paused: true, position: 51 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: true, position: 0));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
@@ -599,6 +599,88 @@ namespace Emby.Plugins.WatchTogether.Tests
             engine.PollOnce(_clock.Now);
             Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Unpause);
             Assert.Contains(_issuer.Issued, issued => issued.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void BarrierSeek_AnchorUnpauseJump_PauseAcknowledgementPromotesCandidate()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 0),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // enter Seek
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 1729 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // record candidate and issue Pause
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(0, runtime.Barrier.PrimaryPositionTicks);
+            Assert.Equal(
+                1729 * SessionSnapshot.TicksPerSecond,
+                runtime.Barrier.AnchorPositionCandidateTicks);
+            Assert.Contains(_issuer.Issued, issued =>
+                issued.userId == "u1" && issued.command == RemoteCommands.Pause);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 1729 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Equal(BarrierStage.Pause, runtime.Barrier.Stage);
+            Assert.Equal(1729 * SessionSnapshot.TicksPerSecond, runtime.Barrier.PrimaryPositionTicks);
+            Assert.Null(runtime.Barrier.AnchorPositionCandidateTicks);
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Unpause);
+        }
+
+        [Fact]
+        public void BarrierSeek_AnchorPauseLandingSmallMovement_KeepsOriginalTarget()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 0),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // enter Seek
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 1 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Pause is issued for the small movement
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 1 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Pause lands; original target remains locked
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Equal(BarrierStage.Seek, runtime.Barrier.Stage);
+            Assert.Equal(0, runtime.Barrier.PrimaryPositionTicks);
+            Assert.Null(runtime.Barrier.AnchorPositionCandidateTicks);
+            Assert.Contains(_issuer.Issued, issued =>
+                issued.command == RemoteCommands.Seek &&
+                issued.positionTicks == 0);
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Unpause);
         }
 
         [Fact]
