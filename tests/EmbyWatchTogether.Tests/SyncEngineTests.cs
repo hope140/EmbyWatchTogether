@@ -642,6 +642,120 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(1729 * SessionSnapshot.TicksPerSecond, runtime.Barrier.PrimaryPositionTicks);
             Assert.Null(runtime.Barrier.AnchorPositionCandidateTicks);
             Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Unpause);
+
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // new barrier issues Pause as its hold
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // both Pause commands acknowledge; enter Seek
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // seek follower to the promoted target
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 1729 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 1729 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Seek acknowledges; enter Restore
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // intended playing state issues Unpause
+            Assert.Contains(_issuer.Issued, issued => issued.command == RemoteCommands.Unpause);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 1729 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 1729 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Null(runtime.Barrier);
+        }
+
+        [Fact]
+        public void BarrierSeek_AnchorCandidateUpdatesWhileStillPlaying()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 0),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // enter Seek
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 1729 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // create candidate and issue Pause
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 1732 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // update candidate before Pause acknowledgement
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(1732 * SessionSnapshot.TicksPerSecond, runtime.Barrier.AnchorPositionCandidateTicks);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 1732 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(BarrierStage.Pause, runtime.Barrier.Stage);
+            Assert.Equal(1732 * SessionSnapshot.TicksPerSecond, runtime.Barrier.PrimaryPositionTicks);
+        }
+
+        [Fact]
+        public void BarrierSeek_PausedAnchorSeek_PreservesPausedIntentAfterRebuild()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 0),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // enter Seek
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 1729 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 10 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // rebuild from paused anchor seek
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(BarrierStage.Pause, runtime.Barrier.Stage);
+            Assert.True(runtime.Barrier.PrimaryPaused);
+            Assert.Equal(1729 * SessionSnapshot.TicksPerSecond, runtime.Barrier.PrimaryPositionTicks);
+
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // new barrier issues Pause hold
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Pause acknowledgement enters Seek
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // seek follower
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 1729 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 1729 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Seek acknowledgement enters Restore
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Restore keeps both paused
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Unpause);
+
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            var result = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Watching, result.State);
         }
 
         [Fact]
