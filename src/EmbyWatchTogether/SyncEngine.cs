@@ -867,11 +867,12 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
-            // A position change observed together with play/pause or playback-rate
-            // changes belongs to that user action. Do not reinterpret the elapsed
-            // movement as a seek, especially when the next poll is delayed.
-            if (previous.IsPaused != current.IsPaused ||
-                Math.Abs(previous.PlaybackRate - current.PlaybackRate) > SyncConstants.PlaybackRateTolerance)
+            // A playback-rate change is a separate control action. Keep the
+            // projection conservative for that case, but do not discard a
+            // position jump just because the same poll also observed a
+            // play/pause transition: a user can seek and pause/resume in one
+            // client update.
+            if (Math.Abs(previous.PlaybackRate - current.PlaybackRate) > SyncConstants.PlaybackRateTolerance)
             {
                 return false;
             }
@@ -893,6 +894,14 @@ namespace Emby.Plugins.WatchTogether
             if (!previous.IsPaused)
             {
                 expectedPosition += elapsedSeconds * previous.PlaybackRate * SessionSnapshot.TicksPerSecond;
+            }
+            else if (!current.IsPaused)
+            {
+                // When playback resumes between snapshots, natural movement
+                // may occur during the same interval. Project with the current
+                // rate so a delayed normal resume is not mistaken for a seek,
+                // while an out-of-band seek remains outside the threshold.
+                expectedPosition += elapsedSeconds * current.PlaybackRate * SessionSnapshot.TicksPerSecond;
             }
 
             double difference = Math.Abs(current.PositionTicks - expectedPosition);
@@ -2268,24 +2277,33 @@ namespace Emby.Plugins.WatchTogether
                     {
                         suppressPause = suppressed.Command == RemoteCommands.Pause ||
                                         suppressed.Command == RemoteCommands.Unpause;
-                        suppressSeek = suppressed.Command == RemoteCommands.Seek;
+                        suppressSeek = suppressed.Command == RemoteCommands.Seek ||
+                                       suppressPause;
                         runtime.Suppressed.Remove(user);
                     }
                 }
 
+                bool alreadyPendingPause = pending != null &&
+                    (pending.Command == RemoteCommands.Pause || pending.Command == RemoteCommands.Unpause) &&
+                    IsCurrentCommandIdentity(
+                        runtime,
+                        true,
+                        user,
+                        pending.SessionId,
+                        pending.ItemId,
+                        current) &&
+                    PendingMatcher.Matches(pending, current);
+                if (alreadyPendingPause)
+                {
+                    // A remote pause/resume acknowledgement may expose a
+                    // large position movement in the same snapshot. It is
+                    // still the command landing, not a local seek.
+                    suppressSeek = true;
+                }
+
                 if (current.IsPaused != old.IsPaused)
                 {
-                    bool alreadyPending = pending != null &&
-                        (pending.Command == RemoteCommands.Pause || pending.Command == RemoteCommands.Unpause) &&
-                        IsCurrentCommandIdentity(
-                            runtime,
-                            true,
-                            user,
-                            pending.SessionId,
-                            pending.ItemId,
-                            current) &&
-                        PendingMatcher.Matches(pending, current);
-                    if (!suppressPause && !alreadyPending)
+                    if (!suppressPause && !alreadyPendingPause)
                     {
                         pauseChanges.Add((user, current.IsPaused));
                     }
