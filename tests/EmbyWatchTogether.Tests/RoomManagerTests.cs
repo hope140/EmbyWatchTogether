@@ -135,6 +135,26 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Action_DoesNotIssueToParticipantWhoHasLeft()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            manager.SetParticipantJoined(room.Id, "u2", false);
+            var issuer = new FakeIssuer();
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = TestSnapshots.Online("u1"),
+                ["u2"] = TestSnapshots.Online("u2"),
+            };
+
+            var result = manager.Action(room.Id, "pause", snapshots, issuer, DateTimeOffset.UtcNow);
+
+            Assert.Equal(new[] { "u1" }, result.Users);
+            Assert.Single(issuer.Issued);
+            Assert.Equal("u1", issuer.Issued[0].userId);
+        }
+
+        [Fact]
         public void Action_Resume_IssuesUnpause()
         {
             var manager = new RoomManager();
