@@ -246,9 +246,11 @@ $writePublicKeyIndex = $runText.IndexOf('WriteAllText($publicKeyPath', [System.S
 $readPublicKeyIndex = $runText.IndexOf('ReadAllBytes($publicKeyPath', [System.StringComparison]::Ordinal)
 $verifySignatureIndex = $runText.IndexOf('VerifyData(', [System.StringComparison]::Ordinal)
 $createReleaseIndex = $runText.IndexOf('gh release create', [System.StringComparison]::Ordinal)
+$releaseNotesValidationIndex = $runText.IndexOf('$releaseNotesText', [System.StringComparison]::Ordinal)
 $cleanupPublicKeyIndex = $runText.IndexOf('Remove-Item -LiteralPath $publicKeyPath', [System.StringComparison]::Ordinal)
 Assert-True -Condition ($writePublicKeyIndex -ge 0 -and $writePublicKeyIndex -lt $readPublicKeyIndex) -Message 'The asset step must read the public key after validation writes it.'
 Assert-True -Condition ($readPublicKeyIndex -lt $verifySignatureIndex -and $verifySignatureIndex -lt $createReleaseIndex) -Message 'Signature verification must occur before release creation.'
+Assert-True -Condition ($releaseNotesValidationIndex -ge 0 -and $releaseNotesValidationIndex -lt $createReleaseIndex) -Message 'Release notes validation must occur before release creation.'
 Assert-True -Condition ($createReleaseIndex -lt $cleanupPublicKeyIndex) -Message 'Temporary public-key cleanup must follow the release step.'
 
 Assert-Matches -Text $runText -Pattern 'dotnet\s+build\s+src[\\/]EmbyWatchTogether\.sln\s+-c\s+Release\s+--nologo' -Message 'The Release solution build command is missing.'
@@ -258,8 +260,24 @@ Assert-Matches -Text $runText -Pattern 'pwsh\s+tests[\\/]release-signing\.tests\
 Assert-Matches -Text $runText -Pattern 'Sign-ReleaseManifest\.ps1' -Message 'The release manifest signing command is missing.'
 Assert-Matches -Text $runText -Pattern 'gh\s+release\s+create\s+\$env:RELEASE_TAG' -Message 'The gh release create command is missing.'
 Assert-Matches -Text $runText -Pattern '--verify-tag' -Message 'The release creation command must use --verify-tag.'
-Assert-Matches -Text $runText -Pattern '--generate-notes' -Message 'The release creation command must generate notes.'
+Assert-Matches -Text $runText -Pattern 'docs/releases/\{0\}\.md' -Message 'The release notes path must be derived from the canonical tag.'
+Assert-Matches -Text $runText -Pattern 'releaseNotesPath|releaseNotesBytes|strictUtf8|CJK|3400' -Message 'The workflow must validate release notes encoding, content, and Chinese characters.'
+Assert-Matches -Text $runText -Pattern '--notes-file\s+\$releaseNotesPath' -Message 'The release creation command must use the validated notes file.'
+Assert-NotMatches -Text $runText -Pattern '--generate-notes' -Message 'The release creation command must not generate unreviewed notes.'
 Assert-Matches -Text $runText -Pattern '--title\s+\(\x27Release\s*\x27\s+\+\s+\$env:RELEASE_TAG\)' -Message 'The release title must contain the requested tag.'
+
+$projectPath = Join-Path $repositoryRoot 'src/EmbyWatchTogether/EmbyWatchTogether.csproj'
+$projectText = Get-Content -LiteralPath $projectPath -Raw
+$versionMatch = [System.Text.RegularExpressions.Regex]::Match($projectText, '<Version>(?<version>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)</Version>')
+Assert-True -Condition $versionMatch.Success -Message 'The project Version is missing or not four-part canonical.'
+$notesPath = Join-Path $repositoryRoot ('docs/releases/v{0}.md' -f $versionMatch.Groups['version'].Value)
+Assert-True -Condition ([System.IO.File]::Exists($notesPath)) -Message 'The version release notes file is missing.'
+$notesBytes = [System.IO.File]::ReadAllBytes($notesPath)
+Assert-True -Condition ($notesBytes.Length -gt 0) -Message 'The version release notes file is empty.'
+Assert-True -Condition (-not ($notesBytes.Length -ge 3 -and $notesBytes[0] -eq 0xEF -and $notesBytes[1] -eq 0xBB -and $notesBytes[2] -eq 0xBF)) -Message 'The version release notes must not contain a UTF-8 BOM.'
+try { $notesText = $strictUtf8.GetString($notesBytes) } catch { throw 'The version release notes are not strict UTF-8.' }
+Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($notesText)) -Message 'The version release notes must be non-empty.'
+Assert-Matches -Text $notesText -Pattern '[\u3400-\u9FFF]' -Message 'The version release notes must contain Chinese text.'
 
 foreach ($assetPath in @(
         'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll'
