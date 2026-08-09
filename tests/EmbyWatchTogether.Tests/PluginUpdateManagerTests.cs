@@ -1,8 +1,11 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Updates;
+using MediaBrowser.Controller;
+using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Updates;
 using Moq;
 using Xunit;
@@ -75,6 +78,146 @@ namespace Emby.Plugins.WatchTogether.Tests
                     true,
                     It.IsAny<IProgress<double>>(),
                     It.IsAny<CancellationToken>()), Times.Once);
+            }
+        }
+
+        [Fact]
+        public async Task EquivalentThreeAndFourPartVersionsDoNotOfferAnUpdate()
+        {
+            var configuration = new PluginConfiguration();
+            var release = CreateRelease(1, 2, 0);
+            release.Version = new Version(1, 2, 0, 0);
+            var releaseClient = new FakeReleaseClient(release);
+            var installation = CreateInstallationManager(out var installMock);
+            using (var manager = new PluginUpdateManager(
+                configuration,
+                new Version(1, 2, 0),
+                releaseClient,
+                installation))
+            {
+                var status = await manager.CheckForUpdatesAsync(false);
+
+                Assert.False(status.UpdateAvailable);
+                Assert.Null(status.LastError);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Never);
+            }
+        }
+
+        [Fact]
+        public async Task NullCurrentVersion_RejectsCheckAndInstall()
+        {
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            using (var manager = CreateManager(
+                new PluginConfiguration(),
+                () => null,
+                null,
+                releaseClient,
+                installation))
+            {
+                var checkedStatus = await manager.CheckForUpdatesAsync(false);
+                var installedStatus = await manager.InstallAsync();
+
+                Assert.Contains("无法读取当前插件版本", checkedStatus.LastError);
+                Assert.Contains("无法读取当前插件版本", installedStatus.LastError);
+                Assert.False(checkedStatus.UpdateAvailable);
+                Assert.Equal(0, releaseClient.CheckCount);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Never);
+            }
+        }
+
+        [Fact]
+        public async Task ThrowingCurrentVersion_RejectsCheckAndInstall()
+        {
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            using (var manager = CreateManager(
+                new PluginConfiguration(),
+                () => throw new InvalidOperationException("version accessor failed"),
+                null,
+                releaseClient,
+                installation))
+            {
+                var checkedStatus = await manager.CheckForUpdatesAsync(false);
+                var installedStatus = await manager.InstallAsync();
+
+                Assert.Contains("无法读取当前插件版本", checkedStatus.LastError);
+                Assert.Contains("无法读取当前插件版本", installedStatus.LastError);
+                Assert.False(checkedStatus.UpdateAvailable);
+                Assert.Equal(0, releaseClient.CheckCount);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Never);
+            }
+        }
+
+        [Fact]
+        public async Task InstallationSuccess_SaveFailureExposesInstalledPendingDiagnostic()
+        {
+            var configuration = new PluginConfiguration();
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            Action save = () => throw new InvalidOperationException("save failed");
+            using (var manager = CreateManager(
+                configuration,
+                () => new Version(1, 0, 0),
+                save,
+                releaseClient,
+                installation))
+            {
+                var status = await manager.CheckForUpdatesAsync(true);
+
+                Assert.True(status.RestartRequired);
+                Assert.Contains("更新已安装", status.LastError);
+                Assert.Contains("保存", status.LastError);
+                Assert.Equal("2.0.0", status.PendingVersion);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Once);
+            }
+        }
+
+        [Fact]
+        public async Task InstallationSuccess_NotificationFailureExposesInstalledPendingDiagnostic()
+        {
+            var configuration = new PluginConfiguration();
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            var applicationHost = new Mock<IServerApplicationHost>();
+            applicationHost.Setup(x => x.NotifyPendingRestart())
+                .Throws(new InvalidOperationException("notification failed"));
+            using (var manager = CreateManager(
+                configuration,
+                () => new Version(1, 0, 0),
+                null,
+                releaseClient,
+                installation,
+                applicationHost.Object))
+            {
+                var status = await manager.CheckForUpdatesAsync(true);
+
+                Assert.True(status.RestartRequired);
+                Assert.Contains("更新已安装", status.LastError);
+                Assert.Contains("通知", status.LastError);
+                Assert.Equal("2.0.0", status.PendingVersion);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Once);
+                applicationHost.Verify(x => x.NotifyPendingRestart(), Times.Once);
             }
         }
 
@@ -163,6 +306,40 @@ namespace Emby.Plugins.WatchTogether.Tests
             return mock.Object;
         }
 
+        private static PluginUpdateManager CreateManager(
+            PluginConfiguration configuration,
+            Func<Version> currentVersionAccessor,
+            Action saveConfiguration,
+            IPluginReleaseClient releaseClient,
+            IInstallationManager installationManager,
+            IServerApplicationHost applicationHost = null)
+        {
+            var constructor = typeof(PluginUpdateManager).GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                types: new[]
+                {
+                    typeof(Func<PluginConfiguration>),
+                    typeof(Action),
+                    typeof(Func<Version>),
+                    typeof(IPluginReleaseClient),
+                    typeof(IInstallationManager),
+                    typeof(IServerApplicationHost),
+                    typeof(ILogManager),
+                },
+                modifiers: null);
+            return (PluginUpdateManager)constructor.Invoke(new object[]
+            {
+                new Func<PluginConfiguration>(() => configuration),
+                saveConfiguration,
+                currentVersionAccessor,
+                releaseClient,
+                installationManager,
+                applicationHost,
+                null,
+            });
+        }
+
         private static GitHubReleaseInfo CreateRelease(int major, int minor, int build)
         {
             return new GitHubReleaseInfo
@@ -187,6 +364,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             private readonly GitHubReleaseInfo _release;
 
+            public int CheckCount { get; private set; }
+
             public FakeReleaseClient(GitHubReleaseInfo release)
             {
                 _release = release;
@@ -195,6 +374,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             public Task<VerifiedPluginRelease> CheckForLatestAsync(
                 CancellationToken cancellationToken)
             {
+                CheckCount++;
                 return Task.FromResult(new VerifiedPluginRelease
                 {
                     Release = _release,
