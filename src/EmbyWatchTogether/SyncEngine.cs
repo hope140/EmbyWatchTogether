@@ -29,6 +29,8 @@ namespace Emby.Plugins.WatchTogether
         private const string StoppedPlaybackMessageText = "对方已停止播放，请重新打开视频";
         private const string AutomaticResyncMessageHeader = "一起观看";
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
+        private const string BarrierSeekRetryBudgetError = "barrier seek retry budget exhausted";
+        private const string WaitingPauseRetryLimitError = "waiting pause retry limit reached";
         private const int NotificationTimeoutMs = 3000;
         private const double RoomPollErrorLogIntervalSeconds = 30.0;
         private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
@@ -330,6 +332,7 @@ namespace Emby.Plugins.WatchTogether
                         }
                     }
 
+                    PruneWaitingPauseRetries(runtime, snapshots);
                     bool staleDeferredCommand = DiscardStaleDeferredCommands(
                         runtime,
                         snapshots,
@@ -366,7 +369,8 @@ namespace Emby.Plugins.WatchTogether
 
                     if (pendingFailed &&
                         !(runtime.State == RoomState.Barrier &&
-                          runtime.Barrier?.Stage == BarrierStage.Seek))
+                          runtime.Barrier?.Stage == BarrierStage.Seek) &&
+                        !string.Equals(runtime.Error, BarrierSeekRetryBudgetError, StringComparison.Ordinal))
                     {
                         ScheduleBarrierRetry(runtime, room.Id, "playback command was not acknowledged", now);
                         _logger?.Warn($"Room {room.Id}: pending playback command not acknowledged; waiting for retry");
@@ -1009,6 +1013,63 @@ namespace Emby.Plugins.WatchTogether
             return discarded;
         }
 
+        private static string GetPauseCapabilityKey(SessionSnapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                return string.Empty;
+            }
+
+            var capabilities = snapshot.Capabilities;
+            string commands = capabilities?.SupportedCommands == null
+                ? string.Empty
+                : string.Join(",", capabilities.SupportedCommands.OrderBy(
+                    command => command,
+                    StringComparer.OrdinalIgnoreCase));
+            return string.Concat(
+                snapshot.SupportsRemoteControl ? "1" : "0",
+                "|",
+                capabilities?.SupportsRemoteControl == true ? "1" : "0",
+                "|",
+                capabilities?.CanPause == true ? "1" : "0",
+                "|",
+                commands);
+        }
+
+        private static bool IsCurrentWaitingPauseRetry(
+            WaitingPauseRetryState retry,
+            SessionSnapshot snapshot)
+        {
+            return retry != null && snapshot != null && snapshot.Online && !snapshot.IsPaused &&
+                string.Equals(retry.SessionId, snapshot.SessionId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(retry.ItemId, snapshot.ItemId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(retry.CapabilityKey, GetPauseCapabilityKey(snapshot), StringComparison.Ordinal);
+        }
+
+        private static void PruneWaitingPauseRetries(
+            RoomRuntime runtime,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots)
+        {
+            bool clearedCondition = false;
+            foreach (var pair in runtime.WaitingPauseRetries.ToList())
+            {
+                snapshots.TryGetValue(pair.Key, out var snapshot);
+                if (IsCurrentWaitingPauseRetry(pair.Value, snapshot))
+                {
+                    continue;
+                }
+
+                runtime.WaitingPauseRetries.Remove(pair.Key);
+                clearedCondition = true;
+            }
+
+            if (clearedCondition &&
+                string.Equals(runtime.Error, WaitingPauseRetryLimitError, StringComparison.Ordinal))
+            {
+                runtime.Error = null;
+            }
+        }
+
         private bool ObservePending(
             RoomRuntime runtime,
             Room room,
@@ -1019,7 +1080,6 @@ namespace Emby.Plugins.WatchTogether
         {
             bool failed = false;
             bool seekFailed = false;
-            bool nonSeekFailed = false;
             stalePendingCommand = false;
             foreach (var pair in runtime.Pending.ToList())
             {
@@ -1060,6 +1120,20 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
+                bool seekBudgetExpired = pending.Command == RemoteCommands.Seek &&
+                    runtime.State == RoomState.Barrier &&
+                    runtime.Barrier?.Stage == BarrierStage.Seek &&
+                    IsSeekRetryBudgetExpired(runtime.Barrier, now);
+                if (seekBudgetExpired)
+                {
+                    runtime.Pending.Remove(userId);
+                    failed = true;
+                    seekFailed = true;
+                    _logger?.Warn(
+                        $"Room {room.Id}: pending Seek for {userId} reached the barrier retry deadline");
+                    continue;
+                }
+
                 double timeoutSeconds = SyncConstants.PendingTimeoutSeconds;
                 if (runtime.State == RoomState.Barrier &&
                     pending.Retries >= SyncConstants.MaxPendingRetries)
@@ -1094,7 +1168,6 @@ namespace Emby.Plugins.WatchTogether
                     {
                         failed = true;
                         seekFailed |= pending.Command == RemoteCommands.Seek;
-                        nonSeekFailed |= pending.Command != RemoteCommands.Seek;
                     }
                 }
                 else
@@ -1102,7 +1175,6 @@ namespace Emby.Plugins.WatchTogether
                     runtime.Pending.Remove(userId);
                     failed = true;
                     seekFailed |= pending.Command == RemoteCommands.Seek;
-                    nonSeekFailed |= pending.Command != RemoteCommands.Seek;
                     _logger?.Warn(
                         $"Room {room.Id}: pending {pending.Command} for {userId} failed " +
                         $"after {SyncConstants.MaxPendingRetries + 1} attempts");
@@ -1112,15 +1184,21 @@ namespace Emby.Plugins.WatchTogether
             if (failed)
             {
                 if (seekFailed &&
-                    !nonSeekFailed &&
                     runtime.State == RoomState.Barrier &&
                     runtime.Barrier?.Stage == BarrierStage.Seek)
                 {
-                    ScheduleSeekBarrierRetry(
-                        runtime,
-                        room.Id,
-                        "playback command was not acknowledged",
-                        now);
+                    if (IsSeekRetryBudgetExpired(runtime.Barrier, now))
+                    {
+                        FailSeekBarrier(runtime, room.Id);
+                    }
+                    else
+                    {
+                        ScheduleSeekBarrierRetry(
+                            runtime,
+                            room.Id,
+                            "playback command was not acknowledged",
+                            now);
+                    }
                 }
                 else
                 {
@@ -1159,8 +1237,45 @@ namespace Emby.Plugins.WatchTogether
 
             runtime.Error = error;
             barrier.SeekSent = false;
-            barrier.SeekRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
+            EnsureSeekRetryDeadline(barrier, now);
+            if (IsSeekRetryBudgetExpired(barrier, now))
+            {
+                FailSeekBarrier(runtime, roomId);
+                return;
+            }
+
+            DateTimeOffset retryAt = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
+            if (barrier.SeekRetryDeadlineAtUtc.HasValue &&
+                retryAt > barrier.SeekRetryDeadlineAtUtc.Value)
+            {
+                retryAt = barrier.SeekRetryDeadlineAtUtc.Value;
+            }
+
+            barrier.SeekRetryAtUtc = retryAt;
             _logger?.Info($"Room {roomId}: seek retry scheduled: {error}");
+        }
+
+        private static void EnsureSeekRetryDeadline(BarrierState barrier, DateTimeOffset now)
+        {
+            if (barrier != null && !barrier.SeekRetryDeadlineAtUtc.HasValue)
+            {
+                barrier.SeekRetryDeadlineAtUtc = now.AddSeconds(
+                    SyncConstants.BarrierSeekRetryBudgetSeconds);
+            }
+        }
+
+        private static bool IsSeekRetryBudgetExpired(BarrierState barrier, DateTimeOffset now)
+        {
+            return barrier?.SeekRetryDeadlineAtUtc.HasValue == true &&
+                now >= barrier.SeekRetryDeadlineAtUtc.Value;
+        }
+
+        private void FailSeekBarrier(RoomRuntime runtime, string roomId)
+        {
+            runtime.ResetToWaiting();
+            runtime.Error = BarrierSeekRetryBudgetError;
+            runtime.BarrierRetryAtUtc = null;
+            _logger?.Warn($"Room {roomId}: {BarrierSeekRetryBudgetError}");
         }
 
         private bool TryIssueCommand(
@@ -1285,17 +1400,28 @@ namespace Emby.Plugins.WatchTogether
             out string failure)
         {
             failure = null;
-            if (runtime.Pending.TryGetValue(userId, out var existing) &&
-                string.Equals(existing.Command, command, StringComparison.Ordinal))
+            if (runtime.Pending.TryGetValue(userId, out var existing))
             {
-                if (HasSameIdentity(existing.SessionId, existing.ItemId, snapshot))
+                if (!HasSameIdentity(existing.SessionId, existing.ItemId, snapshot))
+                {
+                    // Never let a command captured for an old device/item suppress
+                    // a command for the current snapshot.
+                    runtime.Pending.Remove(userId);
+                }
+                else if (string.Equals(existing.Command, command, StringComparison.Ordinal))
                 {
                     return true;
                 }
-
-                // Never let a command captured for an old device/item suppress
-                // a command for the current snapshot.
-                runtime.Pending.Remove(userId);
+                else
+                {
+                    // A Seek waiting for acknowledgement must not be replaced by
+                    // Pause/Unpause (or vice versa) for the same session and item.
+                    // Callers can rebuild a Barrier explicitly when the command
+                    // sequence has to change.
+                    failure =
+                        $"{existing.Command} command is pending for {userId}; cannot issue {command}";
+                    return false;
+                }
             }
 
             bool ok = TryIssueCommand(
@@ -1335,6 +1461,29 @@ namespace Emby.Plugins.WatchTogether
             return true;
         }
 
+        private static bool HasPendingSeekForCurrentIdentity(
+            RoomRuntime runtime,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots)
+        {
+            return runtime.Pending.Any(pair =>
+            {
+                if (pair.Value == null ||
+                    !string.Equals(pair.Value.Command, RemoteCommands.Seek, StringComparison.Ordinal) ||
+                    !snapshots.TryGetValue(pair.Key, out var snapshot))
+                {
+                    return false;
+                }
+
+                return IsCurrentCommandIdentity(
+                    runtime,
+                    true,
+                    pair.Key,
+                    pair.Value.SessionId,
+                    pair.Value.ItemId,
+                    snapshot);
+            });
+        }
+
         private void StartBarrier(
             RoomRuntime runtime,
             Room room,
@@ -1356,6 +1505,7 @@ namespace Emby.Plugins.WatchTogether
                 ItemId = anchor.ItemId,
                 PauseSent = false,
                 SeekSent = false,
+                SeekRetryDeadlineAtUtc = null,
                 RestoreSent = false,
             };
             runtime.SyncItemId = anchor.ItemId;
@@ -1367,6 +1517,7 @@ namespace Emby.Plugins.WatchTogether
                 }
             }
             runtime.Pending.Clear();
+            runtime.WaitingPauseRetries.Clear();
             runtime.Suppressed.Clear();
             runtime.PauseAlign.Clear();
             _logger?.Info(
@@ -1446,6 +1597,7 @@ namespace Emby.Plugins.WatchTogether
                         barrier.PrimaryPositionTicks = snapshots[barrier.AnchorUserId].PositionTicks;
                         barrier.Stage = BarrierStage.Seek;
                         barrier.StartedAtUtc = now;
+                        EnsureSeekRetryDeadline(barrier, now);
                         return;
                     }
 
@@ -1461,6 +1613,22 @@ namespace Emby.Plugins.WatchTogether
                     var follower = members.First(u => !string.Equals(u, barrier.AnchorUserId, StringComparison.OrdinalIgnoreCase));
                     long target = barrier.PrimaryPositionTicks;
                     bool anyUnpaused = snapshots.Values.Any(snapshot => !snapshot.IsPaused);
+                    EnsureSeekRetryDeadline(barrier, now);
+                    bool targetReached =
+                        Math.Abs(snapshots[follower].PositionTicks - target) <= SyncConstants.SeekToleranceTicks;
+
+                    if (targetReached && !anyUnpaused)
+                    {
+                        barrier.Stage = BarrierStage.Restore;
+                        barrier.StartedAtUtc = now;
+                        return;
+                    }
+
+                    if (IsSeekRetryBudgetExpired(barrier, now))
+                    {
+                        FailSeekBarrier(runtime, room.Id);
+                        return;
+                    }
 
                     foreach (var user in members)
                     {
@@ -1494,6 +1662,13 @@ namespace Emby.Plugins.WatchTogether
                     // members have confirmed paused.
                     if (anyUnpaused)
                     {
+                        return;
+                    }
+
+                    if (targetReached)
+                    {
+                        barrier.Stage = BarrierStage.Restore;
+                        barrier.StartedAtUtc = now;
                         return;
                     }
 
@@ -1531,13 +1706,6 @@ namespace Emby.Plugins.WatchTogether
                         }
 
                         barrier.SeekSent = true;
-                        return;
-                    }
-
-                    if (Math.Abs(snapshots[follower].PositionTicks - target) <= SyncConstants.SeekToleranceTicks)
-                    {
-                        barrier.Stage = BarrierStage.Restore;
-                        barrier.StartedAtUtc = now;
                         return;
                     }
 
@@ -1607,6 +1775,7 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
+            PruneWaitingPauseRetries(runtime, snapshots);
             var onlinePlaying = snapshots
                 .Where(p => p.Value != null && p.Value.Online && !p.Value.IsPaused)
                 .ToList();
@@ -1648,7 +1817,76 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var pair in targets)
             {
-                Issue(runtime, room, pair.Key, pair.Value, RemoteCommands.Pause, null, now);
+                if (runtime.Pending.TryGetValue(pair.Key, out var pending) &&
+                    HasSameIdentity(pending.SessionId, pending.ItemId, pair.Value) &&
+                    string.Equals(pending.Command, RemoteCommands.Pause, StringComparison.Ordinal))
+                {
+                    // The successful issue is already waiting for acknowledgement;
+                    // do not turn the normal poll interval into another attempt.
+                    runtime.WaitingPauseRetries.Remove(pair.Key);
+                    continue;
+                }
+
+                if (runtime.WaitingPauseRetries.TryGetValue(pair.Key, out var retry))
+                {
+                    if (!IsCurrentWaitingPauseRetry(retry, pair.Value))
+                    {
+                        runtime.WaitingPauseRetries.Remove(pair.Key);
+                        retry = null;
+                    }
+                    else if (retry.Exhausted || now < retry.NextAttemptAtUtc)
+                    {
+                        continue;
+                    }
+                }
+
+                if (Issue(
+                    runtime,
+                    room,
+                    pair.Key,
+                    pair.Value,
+                    RemoteCommands.Pause,
+                    null,
+                    now,
+                    out _))
+                {
+                    runtime.WaitingPauseRetries.Remove(pair.Key);
+                    if (!runtime.WaitingPauseRetries.Values.Any(state => state.Exhausted) &&
+                        string.Equals(runtime.Error, WaitingPauseRetryLimitError, StringComparison.Ordinal))
+                    {
+                        runtime.Error = null;
+                    }
+                    continue;
+                }
+
+                RecordWaitingPauseFailure(runtime, pair.Key, pair.Value, now);
+            }
+        }
+
+        private static void RecordWaitingPauseFailure(
+            RoomRuntime runtime,
+            string userId,
+            SessionSnapshot snapshot,
+            DateTimeOffset now)
+        {
+            if (!runtime.WaitingPauseRetries.TryGetValue(userId, out var retry) ||
+                !IsCurrentWaitingPauseRetry(retry, snapshot))
+            {
+                retry = new WaitingPauseRetryState
+                {
+                    SessionId = snapshot.SessionId,
+                    ItemId = snapshot.ItemId,
+                    CapabilityKey = GetPauseCapabilityKey(snapshot),
+                };
+                runtime.WaitingPauseRetries[userId] = retry;
+            }
+
+            retry.Attempts++;
+            retry.Exhausted = retry.Attempts >= SyncConstants.MaxWaitingPauseAttempts;
+            retry.NextAttemptAtUtc = now.AddSeconds(SyncConstants.WaitingPauseRetryDelaySeconds);
+            if (retry.Exhausted)
+            {
+                runtime.Error = WaitingPauseRetryLimitError;
             }
         }
 
@@ -1662,6 +1900,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.State = RoomState.Watching;
             runtime.Barrier = null;
             runtime.Pending.Clear();
+            runtime.WaitingPauseRetries.Clear();
             runtime.Suppressed.Clear();
             runtime.PauseAlign.Clear();
             runtime.Previous.Clear();
@@ -1825,6 +2064,19 @@ namespace Emby.Plugins.WatchTogether
                     winner = pauseChanges[0];
                 }
 
+                if (HasPendingSeekForCurrentIdentity(runtime, snapshots))
+                {
+                    // Do not let a resume overwrite a Seek whose acknowledgement
+                    // has not arrived. Rebuild the explicit Pause -> Seek ->
+                    // confirmation -> Restore sequence from current snapshots.
+                    StartBarrier(runtime, room, snapshots, now, winner.userId);
+                    _logger?.Info(
+                        $"Room {room.Id}: pause change while Seek is pending; rebuilding align barrier");
+                    return;
+                }
+
+                CancelSupersededPausePending(runtime, snapshots, members, winner.paused);
+
                 if (winner.paused)
                 {
                     // Defer alignment of the other side to the paused anchor's
@@ -1897,6 +2149,31 @@ namespace Emby.Plugins.WatchTogether
             }
 
             runtime.PreviousAtUtc = now;
+        }
+
+        private static void CancelSupersededPausePending(
+            RoomRuntime runtime,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            IReadOnlyList<string> members,
+            bool desiredPaused)
+        {
+            string desiredCommand = desiredPaused ? RemoteCommands.Pause : RemoteCommands.Unpause;
+            foreach (var user in members)
+            {
+                if (!runtime.Pending.TryGetValue(user, out var pending) ||
+                    !snapshots.TryGetValue(user, out var snapshot) ||
+                    !HasSameIdentity(pending.SessionId, pending.ItemId, snapshot) ||
+                    (pending.Command != RemoteCommands.Pause && pending.Command != RemoteCommands.Unpause) ||
+                    string.Equals(pending.Command, desiredCommand, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // This is an explicit user pause/resume transition observed in
+                // WatchingTick, so a stale opposite Pause/Unpause may be
+                // cancelled deliberately. Seek is never cancelled here.
+                runtime.Pending.Remove(user);
+            }
         }
 
         private void AlignPausedPeers(

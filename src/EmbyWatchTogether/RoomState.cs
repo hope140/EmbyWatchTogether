@@ -55,6 +55,12 @@ namespace Emby.Plugins.WatchTogether
 
         public DateTimeOffset? SeekRetryAtUtc { get; set; }
 
+        /// <summary>
+        /// Absolute deadline shared by the initial Barrier Seek and all of its
+        /// retries. A retry must never create a new budget for the same barrier.
+        /// </summary>
+        public DateTimeOffset? SeekRetryDeadlineAtUtc { get; set; }
+
         public bool RestoreSent { get; set; }
     }
 
@@ -73,6 +79,26 @@ namespace Emby.Plugins.WatchTogether
         public DateTimeOffset IssuedAtUtc { get; set; }
 
         public int Retries { get; set; }
+    }
+
+    /// <summary>
+    /// Bounded retry state for a Pause issued while a room is Waiting. The
+    /// identity and capability key prevent a failed client from suppressing a
+    /// later session or a changed command-capability condition.
+    /// </summary>
+    public sealed class WaitingPauseRetryState
+    {
+        public string SessionId { get; set; }
+
+        public string ItemId { get; set; }
+
+        public string CapabilityKey { get; set; }
+
+        public int Attempts { get; set; }
+
+        public DateTimeOffset NextAttemptAtUtc { get; set; }
+
+        public bool Exhausted { get; set; }
     }
 
     public sealed class SuppressedCommand

@@ -564,6 +564,83 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void BarrierSeek_ImmediateFailures_StopAtSharedRetryBudget()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // enter Seek after Pause acknowledgement
+
+            _issuer.FailuresRemaining = 1000;
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // first immediate Seek failure
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            int seekCountAtFailure = _issuer.Issued.Count(i => i.command == RemoteCommands.Seek);
+            int messageCountAtFailure = _messageIssuer.Issued.Count;
+            for (int attempt = 0; attempt < 20 && runtime.State == RoomState.Barrier; attempt++)
+            {
+                _clock.Advance(SyncConstants.AutomaticBarrierRetryDelaySeconds);
+                engine.PollOnce(_clock.Now);
+            }
+
+            Assert.Equal(RoomState.Waiting, runtime.State);
+            Assert.Contains("seek", runtime.Error.ToLowerInvariant());
+            Assert.Contains("budget", runtime.Error.ToLowerInvariant());
+            Assert.Equal(seekCountAtFailure + 4, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+
+            _clock.Advance(100);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(seekCountAtFailure + 4, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+            Assert.Equal(messageCountAtFailure + 8, _messageIssuer.Issued.Count);
+        }
+
+        [Fact]
+        public void BarrierSeek_UnconfirmedAttempts_StopAtSharedRetryBudget()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 0));
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 0));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // enter Seek
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // initial Seek remains unconfirmed
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            for (int attempt = 0; attempt < 40 && runtime.State == RoomState.Barrier; attempt++)
+            {
+                _clock.Advance(1);
+                engine.PollOnce(_clock.Now);
+            }
+
+            Assert.Equal(RoomState.Waiting, runtime.State);
+            Assert.Contains("seek", runtime.Error.ToLowerInvariant());
+            Assert.Contains("budget", runtime.Error.ToLowerInvariant());
+            int seekCountAtFailure = _issuer.Issued.Count(i => i.command == RemoteCommands.Seek);
+            int messageCountAtFailure = _messageIssuer.Issued.Count;
+
+            _clock.Advance(100);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(seekCountAtFailure, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
+            Assert.Equal(messageCountAtFailure, _messageIssuer.Issued.Count);
+        }
+
+        [Fact]
         public void SoloPlayer_IsNeverPausedWhileWaitingForSecond()
         {
             var room = CreateRoom();
@@ -1623,6 +1700,126 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
             Assert.Empty(_rooms.GetRuntime(room.Id).PauseAlign);
+        }
+
+        [Fact]
+        public void PauseAlignSeekPending_AnchorResume_RebuildsBarrierBeforeUnpause()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _rooms.GetRuntime(room.Id).AckLatencySeconds["u2"] = 10.0;
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 59 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 59 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RemoteCommands.Seek, runtime.Pending["u2"].Command);
+            int issuedBeforeAnchorResume = _issuer.Issued.Count;
+
+            // The anchor resumes while the follower's Seek is still pending.
+            // The resume must not overwrite that Pending Seek with Unpause.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 59 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var rebuilt = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, rebuilt.State);
+            Assert.Equal("u1", runtime.Barrier.AnchorUserId);
+            Assert.DoesNotContain(
+                _issuer.Issued.Skip(issuedBeforeAnchorResume),
+                issued => issued.command == RemoteCommands.Unpause);
+
+            // Complete the rebuilt Pause -> Seek -> acknowledgement -> Restore
+            // path; only now is Unpause allowed to be issued.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 59 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // rebuilt barrier issues Pause
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Pause acknowledgement enters Seek
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Seek is issued
+            Assert.Equal(RemoteCommands.Seek, runtime.Pending["u2"].Command);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 52 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Seek acknowledgement enters Restore
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Restore issues Unpause
+            Assert.Contains(_issuer.Issued, issued => issued.command == RemoteCommands.Unpause);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 52 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Watching, runtime.State);
+        }
+
+        [Fact]
+        public void WaitingPauseImmediateFailure_IsCooledBoundedAndRecoversOnIdentityOrCapabilityChange()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            _issuer.FailuresRemaining = 1000;
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1"),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2"));
+
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+
+            // A short polling interval must not resend an immediately failed
+            // Pause before the retry cooldown.
+            _clock.Advance(0.5);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+
+            _clock.Advance(SyncConstants.WaitingPauseRetryDelaySeconds - 0.5);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(4, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            _clock.Advance(SyncConstants.WaitingPauseRetryDelaySeconds);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(6, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal("waiting pause retry limit reached", runtime.Error);
+            int issuedAtLimit = _issuer.Issued.Count(i => i.command == RemoteCommands.Pause);
+            _clock.Advance(100);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(issuedAtLimit, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+
+            // A new session identity clears the exhausted per-user records and
+            // allows both users to be tried again immediately.
+            SetCandidates(
+                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1"),
+                Snapshot("s2-reconnected", "u2", paused: false, position: 0, itemId: "i2"));
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(issuedAtLimit + 2, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+
+            // A capability change is also a new retry condition, even when the
+            // session and item remain the same.
+            SetCandidates(
+                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1", supportsRemoteControl: false),
+                Snapshot("s2-reconnected", "u2", paused: false, position: 0, itemId: "i2"));
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(issuedAtLimit + 3, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
         }
 
         private SyncEngine CreateEngine(

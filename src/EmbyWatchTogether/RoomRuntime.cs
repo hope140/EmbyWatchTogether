@@ -15,6 +15,9 @@ namespace Emby.Plugins.WatchTogether
 
         public Dictionary<string, PendingCommand> Pending { get; } = new Dictionary<string, PendingCommand>();
 
+        public Dictionary<string, WaitingPauseRetryState> WaitingPauseRetries { get; } =
+            new Dictionary<string, WaitingPauseRetryState>(StringComparer.OrdinalIgnoreCase);
+
         public Dictionary<string, SuppressedCommand> Suppressed { get; } = new Dictionary<string, SuppressedCommand>();
 
         /// <summary>
@@ -62,6 +65,7 @@ namespace Emby.Plugins.WatchTogether
             Error = null;
             Barrier = null;
             Pending.Clear();
+            WaitingPauseRetries.Clear();
             Suppressed.Clear();
             PauseAlign.Clear();
             LastSeekAtUtc.Clear();
