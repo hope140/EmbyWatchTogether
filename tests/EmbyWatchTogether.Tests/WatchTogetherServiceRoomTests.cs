@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Net;
 using MediaBrowser.Controller.Session;
@@ -116,6 +117,51 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.False(GetBoolean(repeatedResponse, "Changed"));
             Assert.Empty(issuer.Issued);
+        }
+
+        [Fact]
+        public void Join_ChangedNotifiesOnlyOtherJoinedParticipant()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            manager.SetParticipantJoined(room.Id, u2, false);
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u2);
+            WithPlugin(plugin, () => service.Post(new JoinRoomRequest { Id = room.Id }));
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Header == "一起观看" && m.Text == "对方已加入房间，请打开同一视频" && m.TimeoutMs == 3000), It.IsAny<CancellationToken>()), Times.Once);
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+            WithPlugin(plugin, () => service.Post(new JoinRoomRequest { Id = room.Id }));
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Theory]
+        [InlineData("pause", "管理员已暂停房间播放")]
+        [InlineData("resume", "管理员已继续房间播放")]
+        public void Control_PauseAndResume_NotifyOnlyIssuedCurrentSessions(string action, string text)
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var issuer = new RecordingIssuer();
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, issuer, "server-1");
+            var service = NewService(u1, true);
+            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = action }));
+            var expectedTargets = issuer.Issued.Select(x => x.userId == u1 ? "s1" : "s2").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var actualTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            sm.Invocations.Where(i => i.Method.Name == nameof(ISessionManager.SendMessageCommand)).ToList().ForEach(i => actualTargets.Add((string)i.Arguments[1]));
+            Assert.Equal(expectedTargets, actualTargets);
+            sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.Is<MessageCommand>(m => m.Header == "一起观看" && m.Text == text && m.TimeoutMs == 3000), It.IsAny<CancellationToken>()), Times.Exactly(expectedTargets.Count));
         }
 
         [Fact]
