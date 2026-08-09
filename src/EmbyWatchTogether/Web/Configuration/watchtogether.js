@@ -54,6 +54,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function setStatus(page, text, isError) {
+        if (page._wtStatusTimer) {
+            clearTimeout(page._wtStatusTimer);
+            page._wtStatusTimer = null;
+        }
         var el = page.querySelector('#wtStatus');
         if (el) {
             el.textContent = text;
@@ -429,6 +433,28 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function clearAllRoomFeedback(page) {
+        if (page._wtRoomFeedbackTimers) {
+            Object.keys(page._wtRoomFeedbackTimers).forEach(function (roomId) {
+                clearTimeout(page._wtRoomFeedbackTimers[roomId]);
+            });
+        }
+        page._wtRoomFeedbackTimers = {};
+        page._wtRoomFeedback = {};
+    }
+
+    function setTransientStatus(page, text, isError) {
+        setStatus(page, text, isError);
+        page._wtStatusTimer = setTimeout(function () {
+            page._wtStatusTimer = null;
+            var el = page.querySelector('#wtStatus');
+            if (el) {
+                el.textContent = '';
+                el.classList.remove('error');
+            }
+        }, 8000);
+    }
+
     function setRoomBusy(page, roomId, busy) {
         page._wtRoomBusy = page._wtRoomBusy || {};
         if (busy) {
@@ -552,7 +578,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             feedbackEl.className = 'wt-roomFeedback' + (feedback && feedback.isError ? ' error' : '');
             feedbackEl.setAttribute('role', feedback && feedback.isError ? 'alert' : 'status');
             feedbackEl.setAttribute('aria-live', 'polite');
-            feedbackEl.textContent = feedback ? feedback.text : info.description;
+            feedbackEl.textContent = feedback ? feedback.text : '';
+            feedbackEl.hidden = !feedback;
             card.appendChild(feedbackEl);
 
             var actions = document.createElement('div');
@@ -562,13 +589,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 ['pause', 'resume', 'resync', 'delete'].forEach(function (action) {
                     actions.appendChild(createActionButton(page, room, action));
                 });
-            }
-            if (page._wtRoomBusy && page._wtRoomBusy[room.RoomId]) {
-                var busy = document.createElement('span');
-                busy.className = 'wt-roomFeedback';
-                busy.textContent = '正在处理此房间，请稍候…';
-                busy.setAttribute('role', 'status');
-                actions.insertBefore(busy, actions.firstChild);
             }
             card.appendChild(actions);
             container.appendChild(card);
@@ -630,6 +650,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function control(page, roomId, action, button) {
         var label = actionLabels[action] || '操作';
+        if (action === 'resync' && !window.confirm('重新同步会暂时暂停双方并重新对齐，确认继续吗？')) {
+            return;
+        }
         setRoomBusy(page, roomId, true);
         clearRoomFeedback(page, roomId);
         roomFeedback(page, roomId, label + '处理中…', false, true);
@@ -638,6 +661,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             .then(function (result) {
                 if (result && result.Error) {
                     roomFeedback(page, roomId, label + '已发起，但部分客户端未完成，请检查客户端。', true, true);
+                } else if (action === 'resync') {
+                    roomFeedback(page, roomId, '重新同步已开始，播放可能暂时暂停，请等待同步完成。', false, false);
                 } else if (result && result.Users && result.Users.length > 0) {
                     roomFeedback(page, roomId, label + '已向 ' + result.Users.length + ' 个当前会话发送。', false, false);
                 } else if (result && result.Users) {
@@ -670,7 +695,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 if (result && result.Deleted === false) {
                     throw new Error('房间不存在或已删除');
                 }
-                roomFeedback(page, room.RoomId, '房间已删除；同步关系已移除，媒体未删除。', false, false);
+                setTransientStatus(page, '房间“' + roomName + '”已删除；只移除同步关系，媒体未删除。', false);
                 return loadRooms(page, false);
             })
             .catch(function (err) {
@@ -785,7 +810,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             createRoom(page);
         });
         dom.addEventListener(page.querySelector('#wtRefresh'), 'click', function () {
-            page._wtRoomFeedback = {};
+            clearAllRoomFeedback(page);
             loadRooms(page, true);
         });
         dom.addEventListener(page.querySelector('#wtRoomName'), 'input', function () {
@@ -839,11 +864,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     View.prototype.onPause = function () {
         var page = this.view;
         clearInterval(page._wtTimer);
-        if (page._wtRoomFeedbackTimers) {
-            Object.keys(page._wtRoomFeedbackTimers).forEach(function (roomId) {
-                clearTimeout(page._wtRoomFeedbackTimers[roomId]);
-            });
-            page._wtRoomFeedbackTimers = {};
+        clearAllRoomFeedback(page);
+        if (page._wtStatusTimer) {
+            clearTimeout(page._wtStatusTimer);
+            page._wtStatusTimer = null;
         }
         BaseView.prototype.onPause.apply(this, arguments);
     };

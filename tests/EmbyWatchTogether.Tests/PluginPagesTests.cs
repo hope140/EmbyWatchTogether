@@ -50,6 +50,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("_wtRoomBusy", javascript);
             Assert.Contains("仍在房间的一方会暂停", javascript);
             Assert.Contains("只删除同步关系，不删除媒体", javascript);
+            Assert.Contains("会暂时暂停双方并重新对齐，确认继续吗", javascript);
+            Assert.Contains("重新同步已开始，播放可能暂时暂停，请等待同步完成", javascript);
+            Assert.Contains("clearAllRoomFeedback", javascript);
+            Assert.Contains("_wtStatusTimer", javascript);
+            Assert.DoesNotContain("正在处理此房间，请稍候", javascript);
+            Assert.Contains("房间“' + roomName + '”已删除；只移除同步关系，媒体未删除", javascript);
             Assert.DoesNotContain("room.Error", javascript);
             Assert.Contains("getPluginConfiguration", javascript);
             Assert.Contains("updatePluginConfiguration", javascript);
