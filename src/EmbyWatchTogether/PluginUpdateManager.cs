@@ -29,7 +29,11 @@ namespace Emby.Plugins.WatchTogether
 
         private readonly PluginUpdateStatus _status;
         private VerifiedPluginRelease _verifiedRelease;
+        private string _pendingVersionStatusOverride;
         private bool _disposed;
+
+        private const string CurrentVersionUnavailableMessage =
+            "无法读取当前插件版本，已拒绝更新检查和安装。";
 
         public PluginUpdateManager(
             Plugin plugin,
@@ -39,7 +43,10 @@ namespace Emby.Plugins.WatchTogether
             ILogManager logManager = null)
             : this(
                 () => plugin?.Configuration ?? new PluginConfiguration(),
-                () => plugin?.SaveConfiguration(),
+                GetSaveConfigurationAction(plugin),
+                // The DI-created plugin always has a version. Keep the
+                // assembly fallback for the existing task/test construction
+                // path that deliberately bypasses Plugin initialization.
                 () => plugin?.Version ?? typeof(PluginUpdateManager).Assembly.GetName().Version,
                 releaseClient,
                 installationManager,
@@ -58,7 +65,7 @@ namespace Emby.Plugins.WatchTogether
             : this(
                 () => configuration ?? new PluginConfiguration(),
                 null,
-                () => currentVersion ?? typeof(PluginUpdateManager).Assembly.GetName().Version,
+                () => currentVersion,
                 releaseClient,
                 installationManager,
                 applicationHost,
@@ -91,24 +98,48 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var configuration = ReadConfiguration();
-            var currentVersion = ReadCurrentVersion();
+            Version currentVersion;
+            Exception currentVersionException;
+            var currentVersionAvailable = TryReadCurrentVersion(out currentVersion, out currentVersionException);
             _status = new PluginUpdateStatus
             {
-                CurrentVersion = FormatVersion(currentVersion),
+                CurrentVersion = currentVersionAvailable ? FormatVersion(currentVersion) : null,
                 PendingVersion = configuration.PendingUpdateVersion,
-                RestartRequired = IsPendingRestartRequired(configuration.PendingUpdateVersion, currentVersion),
+                RestartRequired = currentVersionAvailable &&
+                    IsPendingRestartRequired(configuration.PendingUpdateVersion, currentVersion),
                 RepositoryUrl = GitHubReleaseClient.RepositoryUrl,
             };
+
+            if (!currentVersionAvailable)
+            {
+                _status.LastError = CurrentVersionUnavailableMessage;
+                LogException(CurrentVersionUnavailableMessage, currentVersionException);
+            }
         }
 
         public PluginUpdateStatus GetStatus()
         {
             lock (_stateLock)
             {
-                RefreshCurrentVersionLocked();
                 var configuration = ReadConfiguration();
-                _status.PendingVersion = configuration.PendingUpdateVersion;
-                _status.RestartRequired = IsPendingRestartRequired(configuration.PendingUpdateVersion, ReadCurrentVersion());
+                Version currentVersion;
+                Exception currentVersionException;
+                if (TryReadCurrentVersion(out currentVersion, out currentVersionException))
+                {
+                    _status.CurrentVersion = FormatVersion(currentVersion);
+                    _status.RestartRequired = IsPendingRestartRequired(
+                        _pendingVersionStatusOverride ?? configuration.PendingUpdateVersion,
+                        currentVersion);
+                }
+                else
+                {
+                    _status.CurrentVersion = null;
+                    _status.UpdateAvailable = false;
+                    _status.RestartRequired = _pendingVersionStatusOverride != null;
+                    _status.LastError = CurrentVersionUnavailableMessage;
+                }
+
+                _status.PendingVersion = _pendingVersionStatusOverride ?? configuration.PendingUpdateVersion;
                 return _status.Clone();
             }
         }
@@ -181,8 +212,14 @@ namespace Emby.Plugins.WatchTogether
                     }
                     else
                     {
-                        var currentVersion = ReadCurrentVersion();
-                        if (!IsNewer(_verifiedRelease.Release.Version, currentVersion))
+                        Version currentVersion;
+                        Exception currentVersionException;
+                        if (!TryReadCurrentVersion(out currentVersion, out currentVersionException))
+                        {
+                            _verifiedRelease = null;
+                            SetError(CurrentVersionUnavailableMessage, currentVersionException);
+                        }
+                        else if (!IsNewer(_verifiedRelease.Release.Version, currentVersion))
                         {
                             SetError("当前已经是最新正式版。", null);
                         }
@@ -256,6 +293,20 @@ namespace Emby.Plugins.WatchTogether
 
             try
             {
+                Version currentVersion;
+                Exception currentVersionException;
+                if (!TryReadCurrentVersion(out currentVersion, out currentVersionException))
+                {
+                    lock (_stateLock)
+                    {
+                        _verifiedRelease = null;
+                        _status.UpdateAvailable = false;
+                    }
+
+                    SetError(CurrentVersionUnavailableMessage, currentVersionException);
+                    return GetStatus();
+                }
+
                 var verifiedRelease = await _releaseClient
                     .CheckForLatestAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -267,7 +318,6 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 var release = verifiedRelease.Release;
-                var currentVersion = ReadCurrentVersion();
                 lock (_stateLock)
                 {
                     _status.LatestVersion = FormatVersion(release.Version);
@@ -381,14 +431,16 @@ namespace Emby.Plugins.WatchTogether
 
                 var configuration = ReadConfiguration();
                 configuration.PendingUpdateVersion = FormatVersion(release.Version);
-                SaveConfigurationSafely(configuration);
+                var configurationSaved = SaveConfigurationSafely(configuration, out var saveException);
+                Exception notificationException = null;
                 try
                 {
                     _applicationHost?.NotifyPendingRestart();
                 }
                 catch (Exception ex)
                 {
-                    LogException("通知 Emby 等待重启失败。", ex);
+                    notificationException = ex;
+                    LogException("更新已安装，但通知 Emby 等待重启失败。", ex);
                 }
                 lock (_stateLock)
                 {
@@ -396,8 +448,29 @@ namespace Emby.Plugins.WatchTogether
                     _status.RestartRequired = true;
                     _status.UpdateAvailable = false;
                     _status.ReleaseUrl = release.HtmlUrl;
+
+                    if (!configurationSaved || notificationException != null)
+                    {
+                        _pendingVersionStatusOverride = configuration.PendingUpdateVersion;
+                        _status.LastError = BuildPostInstallDiagnostic(
+                            configurationSaved,
+                            notificationException != null);
+                    }
                 }
-                LogInfo("已安装 v" + FormatVersion(release.Version) + "，重启 Emby 后生效。");
+
+                if (!configurationSaved)
+                {
+                    LogException("更新已安装，但保存待重启状态失败。", saveException);
+                }
+
+                if (configurationSaved && notificationException == null)
+                {
+                    LogInfo("已安装 v" + FormatVersion(release.Version) + "，重启 Emby 后生效。");
+                }
+                else
+                {
+                    LogInfo(BuildPostInstallDiagnostic(configurationSaved, notificationException != null));
+                }
             }
             catch
             {
@@ -428,6 +501,19 @@ namespace Emby.Plugins.WatchTogether
             File.Copy(sourcePath, Path.Combine(backupDir, "previous-version.dll"), true);
         }
 
+        private static Action GetSaveConfigurationAction(Plugin plugin)
+        {
+            // A DI-created plugin has a data folder. The null path is only the
+            // deliberately uninitialized test/task construction, which cannot
+            // persist configuration and should retain the prior no-op behavior.
+            if (plugin == null || string.IsNullOrWhiteSpace(plugin.DataFolderPath))
+            {
+                return null;
+            }
+
+            return plugin.SaveConfiguration;
+        }
+
         private PluginConfiguration ReadConfiguration()
         {
             try
@@ -440,33 +526,56 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private Version ReadCurrentVersion()
+        private bool TryReadCurrentVersion(out Version version, out Exception exception)
         {
+            version = null;
+            exception = null;
             try
             {
-                return _currentVersionAccessor() ?? new Version(0, 0, 0, 0);
-            }
-            catch
-            {
-                return new Version(0, 0, 0, 0);
-            }
-        }
+                version = _currentVersionAccessor();
+                if (version == null)
+                {
+                    exception = new InvalidOperationException("当前插件版本为空。");
+                    return false;
+                }
 
-        private void RefreshCurrentVersionLocked()
-        {
-            _status.CurrentVersion = FormatVersion(ReadCurrentVersion());
-        }
-
-        private void SaveConfigurationSafely(PluginConfiguration configuration)
-        {
-            try
-            {
-                _saveConfiguration?.Invoke();
+                return true;
             }
             catch (Exception ex)
             {
-                LogException("保存插件更新状态失败。", ex);
+                exception = ex;
+                return false;
             }
+        }
+
+        private bool SaveConfigurationSafely(PluginConfiguration configuration, out Exception exception)
+        {
+            exception = null;
+            try
+            {
+                _saveConfiguration?.Invoke();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                exception = ex;
+                return false;
+            }
+        }
+
+        private static string BuildPostInstallDiagnostic(bool configurationSaved, bool notificationFailed)
+        {
+            if (!configurationSaved && notificationFailed)
+            {
+                return "更新已安装，但保存待重启状态和通知 Emby 均失败；更新已安装但待处理。";
+            }
+
+            if (!configurationSaved)
+            {
+                return "更新已安装，但保存待重启状态失败；更新已安装但待处理。";
+            }
+
+            return "更新已安装，但通知 Emby 等待重启失败；更新已安装但待处理。";
         }
 
         private void SetError(string userMessage, Exception exception)
@@ -508,19 +617,58 @@ namespace Emby.Plugins.WatchTogether
 
         private static bool IsNewer(Version candidate, Version current)
         {
-            return candidate != null && current != null && candidate > current;
+            return candidate != null && current != null && CompareVersions(candidate, current) > 0;
         }
 
         private static bool VersionsEqual(string pending, Version release)
         {
             return Version.TryParse(pending, out var pendingVersion) &&
-                GitHubReleaseClient.VersionsEqual(pendingVersion, release);
+                CompareVersions(pendingVersion, release) == 0;
         }
 
         private static bool IsPendingRestartRequired(string pending, Version current)
         {
             return !string.IsNullOrWhiteSpace(pending) &&
-                (!Version.TryParse(pending, out var pendingVersion) || !GitHubReleaseClient.VersionsEqual(pendingVersion, current));
+                current != null &&
+                (!Version.TryParse(pending, out var pendingVersion) || CompareVersions(pendingVersion, current) != 0);
+        }
+
+        private static int CompareVersions(Version left, Version right)
+        {
+            if (left == null)
+            {
+                return right == null ? 0 : -1;
+            }
+
+            if (right == null)
+            {
+                return 1;
+            }
+
+            var comparison = left.Major.CompareTo(right.Major);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+
+            comparison = left.Minor.CompareTo(right.Minor);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+
+            comparison = NormalizeVersionPart(left.Build).CompareTo(NormalizeVersionPart(right.Build));
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+
+            return NormalizeVersionPart(left.Revision).CompareTo(NormalizeVersionPart(right.Revision));
+        }
+
+        private static int NormalizeVersionPart(int value)
+        {
+            return value < 0 ? 0 : value;
         }
 
         private static string FormatVersion(Version version)
