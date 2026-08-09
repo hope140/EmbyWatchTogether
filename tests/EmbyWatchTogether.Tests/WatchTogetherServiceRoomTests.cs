@@ -340,7 +340,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void Message_ParticipantLeavesBeforeGate_IsNotTargeted()
+        public async Task Message_ParticipantLeavesWhileWaitingForGate_IsNotTargeted()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
             var leavingUserId = Guid.NewGuid().ToString("N");
@@ -350,14 +350,10 @@ namespace Emby.Plugins.WatchTogether.Tests
                 new[] { primaryUserId, leavingUserId }, primaryUserId);
 
             var sessionManager = new Mock<ISessionManager>();
-            sessionManager.Setup(s => s.Sessions).Returns(() =>
+            sessionManager.Setup(s => s.Sessions).Returns(new List<SessionInfo>
             {
-                manager.SetParticipantJoined(room.Id, leavingUserId, false);
-                return new List<SessionInfo>
-                {
-                    NewSession(sessionManager, "session-primary", primaryUserId),
-                    NewSession(sessionManager, "session-leaving", leavingUserId),
-                };
+                NewSession(sessionManager, "session-primary", primaryUserId),
+                NewSession(sessionManager, "session-leaving", leavingUserId),
             });
             sessionManager.Setup(s => s.SendMessageCommand(
                     It.IsAny<string>(),
@@ -369,8 +365,26 @@ namespace Emby.Plugins.WatchTogether.Tests
             var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
             var service = NewService(primaryUserId, administrator: true);
 
-            object response = WithPlugin(plugin, () =>
-                service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "hello" }));
+            IDisposable gate = EnterRoomGate(manager, room.Id);
+            using var started = new ManualResetEventSlim(false);
+            Task<object> messageTask = Task.Run(() =>
+            {
+                started.Set();
+                return WithPlugin(plugin, () =>
+                    service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "hello" }));
+            });
+
+            try
+            {
+                Assert.True(started.Wait(TimeSpan.FromSeconds(5)));
+                Assert.True(manager.LeaveParticipant(room.Id, leavingUserId));
+            }
+            finally
+            {
+                gate.Dispose();
+            }
+
+            object response = await messageTask;
 
             Assert.Equal(1, GetInt(response, "Sent"));
             sessionManager.Verify(s => s.SendMessageCommand(
@@ -386,7 +400,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void Message_DeleteDuringSnapshotRevalidationDoesNotSend()
+        public void Message_DeleteDuringInGateSnapshotRevalidationDoesNotSend()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
             var otherUserId = Guid.NewGuid().ToString("N");
@@ -465,6 +479,90 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.True(GetBoolean(response, "Changed"));
             Assert.Empty(issuer.Issued);
+        }
+
+        [Fact]
+        public void Leave_RejoinDuringSecondSnapshotRead_CancelsOldPause()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var leavingUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, leavingUserId }, primaryUserId);
+            manager.GetRuntime(room.Id).State = RoomState.Watching;
+
+            int sessionReads = 0;
+            var issuer = new RecordingIssuer();
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(() =>
+            {
+                if (Interlocked.Increment(ref sessionReads) == 1)
+                {
+                    return new List<SessionInfo>
+                    {
+                        NewSession(sessionManager, "session-primary", primaryUserId),
+                        NewSession(sessionManager, "session-leaving", leavingUserId),
+                    };
+                }
+
+                Assert.True(manager.SetParticipantJoined(room.Id, leavingUserId, true));
+                return new List<SessionInfo>
+                {
+                    NewSession(sessionManager, "session-primary", primaryUserId),
+                    NewSession(sessionManager, "session-leaving", leavingUserId),
+                };
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, issuer, "server-1");
+            var service = NewService(leavingUserId);
+
+            object response = WithPlugin(plugin, () =>
+                service.Post(new LeaveRoomRequest { Id = room.Id }));
+
+            Assert.True(GetBoolean(response, "Changed"));
+            Assert.Empty(issuer.Issued);
+            Assert.Equal(2, sessionReads);
+        }
+
+        [Fact]
+        public void Leave_ServerIdMismatch_DoesNotIssuePauseAfterPrimaryLeaves()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var otherUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, otherUserId }, primaryUserId);
+            manager.GetRuntime(room.Id).State = RoomState.Watching;
+
+            var issuer = new RecordingIssuer();
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new List<SessionInfo>
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+                NewSession(sessionManager, "session-other", otherUserId),
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, issuer, "server-2");
+            var service = NewService(primaryUserId);
+
+            object response = WithPlugin(plugin, () =>
+                service.Post(new LeaveRoomRequest { Id = room.Id }));
+
+            Assert.True(GetBoolean(response, "Changed"));
+            Assert.Empty(issuer.Issued);
+        }
+
+        private static IDisposable EnterRoomGate(RoomManager manager, string roomId)
+        {
+            var method = typeof(RoomManager).GetMethod(
+                "TryEnterRoom",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            var access = method.Invoke(manager, new object[] { roomId });
+            Assert.NotNull(access);
+            return (IDisposable)access;
         }
 
         private static SessionInfo NewSession(
