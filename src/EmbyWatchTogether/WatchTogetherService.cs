@@ -435,23 +435,41 @@ namespace Emby.Plugins.WatchTogether
 
             using (var access = plugin.Rooms.TryEnterRoom(roomId))
             {
-                if (access == null) return;
+                if (access == null)
+                {
+                    return;
+                }
                 var room = access.Room;
-                if (!plugin.Rooms.IsCurrentRoom(room) || !IsSameServer(room.ServerId, plugin.ResolveServerId())) return;
+                if (!plugin.Rooms.IsCurrentRoom(room) || !IsSameServer(room.ServerId, plugin.ResolveServerId()))
+                {
+                    return;
+                }
                 foreach (var userId in room.JoinedParticipantUserIds.ToList())
                 {
                     if (string.Equals(userId, changedUserId, StringComparison.OrdinalIgnoreCase) ||
-                        !plugin.Rooms.IsCurrentRoom(room) || !room.IsJoined(userId)) continue;
+                        !plugin.Rooms.IsCurrentRoom(room) || !room.IsJoined(userId))
+                    {
+                        continue;
+                    }
                     var snapshots = BuildSnapshots(plugin, room);
                     if (!snapshots.TryGetValue(userId, out var snapshot) || snapshot == null || !snapshot.Online ||
-                        snapshot.Capabilities == null || !snapshot.Capabilities.CanDisplayMessage) continue;
-                    if (!plugin.Rooms.IsCurrentRoom(room) || !room.IsJoined(userId) || !IsSameServer(room.ServerId, plugin.ResolveServerId())) continue;
+                        snapshot.Capabilities == null || !snapshot.Capabilities.CanDisplayMessage)
+                    {
+                        continue;
+                    }
+                    if (!plugin.Rooms.IsCurrentRoom(room) || !room.IsJoined(userId) || !IsSameServer(room.ServerId, plugin.ResolveServerId()))
+                    {
+                        continue;
+                    }
                     try
                     {
                         plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "一起观看", text, 3000, CancellationToken.None)
                             .GetAwaiter().GetResult();
                     }
-                    catch { }
+                    catch
+                    {
+                        // Advisory notification failures must not affect membership state.
+                    }
                 }
             }
         }

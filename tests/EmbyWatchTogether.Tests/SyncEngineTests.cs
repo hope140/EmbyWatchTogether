@@ -577,7 +577,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         public void SeekFailure_PreservesBarrier_FreezesAndRetriesOriginalTarget()
         {
             var room = CreateRoom();
-            var engine = CreateEngine();
+            var engine = CreateEngine(notifyOnSyncActions: true);
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 0));
@@ -1076,7 +1076,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         public void BarrierSeek_ImmediateFailures_StopAtSharedRetryBudget()
         {
             var room = CreateRoom();
-            var engine = CreateEngine();
+            var engine = CreateEngine(notifyOnSyncActions: true);
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 0));
@@ -2254,7 +2254,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         public void PendingCommandFailure_AutomaticallyRetriesWhenBothClientsRemainReady()
         {
             var room = CreateRoom();
-            var engine = CreateEngine();
+            var engine = CreateEngine(notifyOnSyncActions: true);
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 0),
                 Snapshot("s2", "u2", paused: false, position: 0));
@@ -2309,7 +2309,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 ReturnFalse = !throwException,
                 ThrowOnIssue = throwException,
             };
-            var engine = CreateEngine(messageIssuer: messageIssuer);
+            var engine = CreateEngine(messageIssuer: messageIssuer, notifyOnSyncActions: true);
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 0),
                 Snapshot("s2", "u2", paused: false, position: 0));
@@ -2629,6 +2629,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             string serverId = "server-1",
             bool pauseOtherOnPlaybackStop = true,
             bool notifyOtherOnPlaybackStop = true,
+            bool notifyOnSyncActions = false,
             IMessageIssuer messageIssuer = null,
             ILogManager logManager = null)
         {
@@ -2637,6 +2638,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 pollIntervalSeconds: 1.0,
                 pauseOtherOnPlaybackStop: pauseOtherOnPlaybackStop,
                 notifyOtherOnPlaybackStop: notifyOtherOnPlaybackStop,
+                notifyOnSyncActions: notifyOnSyncActions,
                 messageIssuer: messageIssuer ?? _messageIssuer,
                 logManager: logManager);
         }

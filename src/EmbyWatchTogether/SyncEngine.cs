@@ -49,7 +49,6 @@ namespace Emby.Plugins.WatchTogether
         private bool _pauseOtherOnPlaybackStop;
         private bool _notifyOtherOnPlaybackStop;
         private bool _notifyOnSyncActions;
-        private bool _legacyAutomaticRetryNotifications;
         private readonly HashSet<string> _differentVideoNoticeRooms =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly object _lock = new object();
@@ -74,7 +73,7 @@ namespace Emby.Plugins.WatchTogether
             bool notifyOtherOnPlaybackStop = true,
             IMessageIssuer messageIssuer = null,
             ILogManager logManager = null,
-            bool? notifyOnSyncActions = null)
+            bool notifyOnSyncActions = true)
         {
             _roomManager = roomManager ?? throw new ArgumentNullException(nameof(roomManager));
             _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
@@ -91,14 +90,15 @@ namespace Emby.Plugins.WatchTogether
 
             _serverIdProvider = serverIdProvider ?? (() => string.Empty);
             _clock = clock ?? (() => DateTimeOffset.UtcNow);
-            var options = notifyOnSyncActions.HasValue
-                ? new SyncEngineOptions(pollIntervalSeconds, pauseOtherOnPlaybackStop, notifyOtherOnPlaybackStop, notifyOnSyncActions.Value)
-                : new SyncEngineOptions(pollIntervalSeconds, pauseOtherOnPlaybackStop, notifyOtherOnPlaybackStop);
+            var options = new SyncEngineOptions(
+                pollIntervalSeconds,
+                pauseOtherOnPlaybackStop,
+                notifyOtherOnPlaybackStop,
+                notifyOnSyncActions);
             _pollIntervalSeconds = options.PollIntervalSeconds;
             _pauseOtherOnPlaybackStop = options.PauseOtherOnPlaybackStop;
             _notifyOtherOnPlaybackStop = options.NotifyOtherOnPlaybackStop;
-            _notifyOnSyncActions = options.NotifyOnSyncActions && options.IsNotifyOnSyncActionsExplicit;
-            _legacyAutomaticRetryNotifications = options.LegacyAutomaticRetryNotifications;
+            _notifyOnSyncActions = options.NotifyOnSyncActions;
         }
 
         public void Start()
@@ -146,8 +146,7 @@ namespace Emby.Plugins.WatchTogether
                     options.PollIntervalSeconds);
                 _pauseOtherOnPlaybackStop = options.PauseOtherOnPlaybackStop;
                 _notifyOtherOnPlaybackStop = options.NotifyOtherOnPlaybackStop;
-                _notifyOnSyncActions = options.NotifyOnSyncActions && options.IsNotifyOnSyncActionsExplicit;
-                _legacyAutomaticRetryNotifications = options.LegacyAutomaticRetryNotifications;
+                _notifyOnSyncActions = options.NotifyOnSyncActions;
                 SignalWakeLocked();
             }
         }
@@ -830,7 +829,7 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
-            if ((!_notifyOnSyncActions && !_legacyAutomaticRetryNotifications) || _messageIssuer == null || room == null || snapshots == null)
+            if (!_notifyOnSyncActions || _messageIssuer == null || room == null || snapshots == null)
             {
                 return;
             }
