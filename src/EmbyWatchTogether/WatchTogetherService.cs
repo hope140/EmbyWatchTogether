@@ -448,7 +448,7 @@ namespace Emby.Plugins.WatchTogether
                     if (!plugin.Rooms.IsCurrentRoom(room) || !room.IsJoined(userId) || !IsSameServer(room.ServerId, plugin.ResolveServerId())) continue;
                     try
                     {
-                        plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "Watch Together", text, 3000, CancellationToken.None)
+                        plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "一起观看", text, 3000, CancellationToken.None)
                             .GetAwaiter().GetResult();
                     }
                     catch { }
@@ -469,9 +469,21 @@ namespace Emby.Plugins.WatchTogether
                 foreach (var userId in result.Users)
                 {
                     if (!room.IsJoined(userId)) continue;
-                    var snapshots = actionSnapshots;
+                    var snapshots = BuildSnapshots(plugin, room);
                     if (!snapshots.TryGetValue(userId, out var snapshot) || snapshot == null || !snapshot.Online || snapshot.Capabilities?.CanDisplayMessage != true) continue;
-                    try { plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "Watch Together", text, 3000, CancellationToken.None).GetAwaiter().GetResult(); } catch { }
+                    if (actionSnapshots == null || !actionSnapshots.TryGetValue(userId, out var actionSnapshot) ||
+                        !HasSameSessionIdentity(actionSnapshot, snapshot))
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "一起观看", text, 3000, CancellationToken.None).GetAwaiter().GetResult();
+                    }
+                    catch
+                    {
+                        // Advisory notification failures must not affect action state.
+                    }
                 }
             }
         }
@@ -499,8 +511,7 @@ namespace Emby.Plugins.WatchTogether
         {
             if (room == null || runtime == null) return "waiting_for_playback";
             if (!IsSameServer(room.ServerId, plugin.ResolveServerId())) return "server_unavailable";
-            if (runtime.LastEligibilityFailureReason == RoomEligibilityFailureReason.EmptyOrDifferentItem ||
-                string.Equals(runtime.Error, "两位参与者打开了不同视频，暂不发送同步指令", StringComparison.Ordinal)) return "different_video";
+            if (string.Equals(runtime.Error, "两位参与者打开了不同视频，暂不发送同步指令", StringComparison.Ordinal)) return "different_video";
             if (string.Equals(runtime.Error, "播放已停止，等待双方重新打开同一视频", StringComparison.Ordinal)) return "playback_stopped";
             if (!string.IsNullOrEmpty(runtime.Error)) return "command_failed";
             if (room.JoinedParticipantUserIds.Count < room.ParticipantUserIds.Count) return "member_left";

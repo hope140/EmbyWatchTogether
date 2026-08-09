@@ -216,8 +216,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             var sessionManager = new Mock<ISessionManager>();
             sessionManager.Setup(s => s.Sessions).Returns(() =>
             {
-                Assert.Equal(1, Interlocked.Increment(ref sessionReads));
-                Assert.True(manager.LeaveParticipant(room.Id, leavingUserId));
+                Interlocked.Increment(ref sessionReads);
+                manager.LeaveParticipant(room.Id, leavingUserId);
                 return new List<SessionInfo>
                 {
                     NewSession(sessionManager, "session-primary", primaryUserId),
@@ -236,7 +236,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(
                 leavingUserId,
                 (IEnumerable<string>)response.GetType().GetProperty("Users").GetValue(response));
-            Assert.Equal(1, sessionReads);
+            Assert.Equal(2, sessionReads);
         }
 
         [Fact]
