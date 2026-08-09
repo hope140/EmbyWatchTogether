@@ -2718,6 +2718,58 @@ namespace Emby.Plugins.WatchTogether.Tests
             _issuer.Issued.Clear();
         }
 
+        [Fact]
+        public void WatchingTick_UserPause_NotifiesOnlyPeerOnce_WithThreeSecondTimeout()
+        {
+            var room = CreateRoom(); var engine = CreateEngine(notifyOnSyncActions: true); EnterWatching(engine, room); _messageIssuer.Issued.Clear();
+            SetCandidates(Snapshot("s1", "u1", true, 50 * SessionSnapshot.TicksPerSecond), Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond)); _clock.Advance(1); engine.PollOnce(_clock.Now);
+            Assert.Single(_messageIssuer.Issued); Assert.Equal("u2", _messageIssuer.Issued[0].userId); Assert.Equal("对方已暂停播放，已同步暂停", _messageIssuer.Issued[0].text); Assert.Equal(3000, _messageIssuer.Issued[0].timeoutMs);
+            _clock.Advance(1); engine.PollOnce(_clock.Now); Assert.Single(_messageIssuer.Issued);
+        }
+
+        [Fact]
+        public void WatchingTick_UserResume_NotifiesOnlyPeerOnce_WithThreeSecondTimeout()
+        {
+            var room = CreateRoom(); var engine = CreateEngine(notifyOnSyncActions: true); EnterWatchingPaused(engine, room, 50); _messageIssuer.Issued.Clear();
+            SetCandidates(Snapshot("s1", "u1", false, 50 * SessionSnapshot.TicksPerSecond), Snapshot("s2", "u2", true, 50 * SessionSnapshot.TicksPerSecond)); _clock.Advance(1); engine.PollOnce(_clock.Now);
+            Assert.Single(_messageIssuer.Issued); Assert.Equal("u2", _messageIssuer.Issued[0].userId); Assert.Equal("对方已继续播放，已同步继续", _messageIssuer.Issued[0].text); Assert.Equal(3000, _messageIssuer.Issued[0].timeoutMs);
+            _clock.Advance(1); engine.PollOnce(_clock.Now); Assert.Single(_messageIssuer.Issued);
+        }
+
+        [Fact]
+        public void WatchingTick_ManualSeek_NotifiesOnlyPeer_AndCompletionNotifiesBoth()
+        {
+            var room = CreateRoom(); var engine = CreateEngine(notifyOnSyncActions: true); EnterWatching(engine, room); _messageIssuer.Issued.Clear();
+            SetCandidates(Snapshot("s1", "u1", false, 80 * SessionSnapshot.TicksPerSecond), Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond)); _clock.Advance(1); engine.PollOnce(_clock.Now);
+            Assert.Contains(_messageIssuer.Issued, m => m.userId == "u2" && m.text == "对方调整了播放进度，正在重新同步" && m.timeoutMs == 3000);
+            Assert.DoesNotContain(_messageIssuer.Issued, m => m.userId == "u1" && m.text == "对方调整了播放进度，正在重新同步");
+        }
+
+        [Fact]
+        public void DifferentVideoNotice_IsDeduplicated_RearmedAfterRecovery_AndRequiresNonEmptyItems()
+        {
+            var room = CreateRoom(); var engine = CreateEngine(notifyOnSyncActions: true); SetCandidates(Snapshot("s1", "u1", false, 0, "a"), Snapshot("s2", "u2", false, 0, "b")); engine.PollOnce(_clock.Now); Assert.Equal(2, _messageIssuer.Issued.Count); engine.PollOnce(_clock.Now); Assert.Equal(2, _messageIssuer.Issued.Count); SetCandidates(Snapshot("s1", "u1", false, 0, "a"), Snapshot("s2", "u2", false, 0, "a")); engine.PollOnce(_clock.Now); SetCandidates(Snapshot("s1", "u1", false, 0, "a"), Snapshot("s2", "u2", false, 0, "b")); engine.PollOnce(_clock.Now); Assert.Equal(4, _messageIssuer.Issued.Count); _messageIssuer.Issued.Clear(); SetCandidates(Snapshot("s1", "u1", false, 0, ""), Snapshot("s2", "u2", false, 0, "b")); engine.PollOnce(_clock.Now); Assert.Empty(_messageIssuer.Issued);
+        }
+
+        [Fact]
+        public void DifferentVideoNotice_DisabledDoesNotConsumeEvent_EnablingNotifiesNextPoll()
+        {
+            var room = CreateRoom(); var engine = CreateEngine(notifyOnSyncActions: false); SetCandidates(Snapshot("s1", "u1", false, 0, "a"), Snapshot("s2", "u2", false, 0, "b")); engine.PollOnce(_clock.Now); Assert.Empty(_messageIssuer.Issued); engine.UpdateOptions(new SyncEngineOptions(1, true, true, true)); engine.PollOnce(_clock.Now); Assert.Equal(2, _messageIssuer.Issued.Count);
+        }
+
+        [Fact]
+        public void NotifyOnSyncActionsDisabled_SuppressesAutomaticRetry_ButStopNoticeRemainsIndependent()
+        {
+            var room = CreateRoom(); var engine = CreateEngine(notifyOnSyncActions: false, notifyOtherOnPlaybackStop: true); EnterWatching(engine, room); _messageIssuer.Issued.Clear(); SetCandidates(Snapshot("s1", "u1", false, 0, stopped: true), Snapshot("s2", "u2", false, 0)); _clock.Advance(1); engine.PollOnce(_clock.Now); _clock.Advance(3); engine.PollOnce(_clock.Now); Assert.Single(_messageIssuer.Issued); Assert.Equal("对方已停止播放，请重新打开视频", _messageIssuer.Issued[0].text);
+        }
+
+        [Theory]
+        [InlineData(false)] [InlineData(true)]
+        public void SyncActionMessageFailure_DoesNotChangePlaybackState(bool throwOnIssue)
+        {
+            var room = CreateRoom(); _messageIssuer.ThrowOnIssue = throwOnIssue; _messageIssuer.ReturnFalse = !throwOnIssue; var engine = CreateEngine(notifyOnSyncActions: true); EnterWatching(engine, room); _messageIssuer.Issued.Clear(); SetCandidates(Snapshot("s1", "u1", true, 50 * SessionSnapshot.TicksPerSecond), Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond)); _clock.Advance(1); engine.PollOnce(_clock.Now); Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+        }
+
         private void SetCandidates(params SessionSnapshot[] snapshots)
         {
             _provider.Snapshots = snapshots.ToList();
