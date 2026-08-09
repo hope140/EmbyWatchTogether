@@ -49,3 +49,11 @@
 - 结论：`PlaybackStopped` 只用于唤醒轮询；停止只依据 SessionSelector 选中的当前会话判断。同一用户的旧 stopped Session 不能覆盖当前有效播放；当前会话的 `Stopped=true`、离线和缺失统一要求连续 2 秒快照异常，恢复有效快照时清除计时并保持 `Watching`。
 - 规则：任何新增停止信号或未选中的候选会话都不得绕过当前会话选择与确认窗口；位置归零仍按正常 Seek 处理。确认停止后，暂停和通知副作用只执行一次。
 - 验证：真实 Emby Theater 与 embyToLocalPlayer 日志复现了短暂停止后恢复，以及旧 stopped Session 与当前播放并存导致的误判；`SyncEngineTests` 覆盖同用户同 Item 的旧 stopped Session、短暂 stopped/缺失恢复、持续异常确认和 seek-to-zero。
+
+## 7. Seek 失败必须冻结原 Barrier 目标
+
+- 现象：Seek 无确认后双方状态分叉，从方保持暂停而主方继续前进，自动重试目标持续追逐移动中的主方位置。
+- 原因：Seek 失败时 `ResetToWaiting` 丢失 Barrier 的目标和原播放状态；Waiting/Barrier 又不会传播普通播放变化。
+- 结论：Seek 阶段失败必须保留 Barrier、固定目标与原播放状态；冷却期维持双方暂停，确认全员暂停后才按固定目标重试，成功后执行 Restore。混合非 Seek 失败仍走 full retry。
+- 规则：不得在 Seek 冷却期重新采样主方位置或用新的 Pending 覆盖未完成 Seek；只有全员确认暂停后才清除冷却并发送下一轮 Seek。
+- 验证：真实双客户端日志与 `SyncEngineTests` 新增的 Seek 失败冻结、冷却暂停、固定目标重试和最终 Restore 回归场景共同确认。
