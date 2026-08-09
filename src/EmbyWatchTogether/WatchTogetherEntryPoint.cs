@@ -205,8 +205,23 @@ namespace Emby.Plugins.WatchTogether
                 _syncEngine = null;
                 _bridge = null;
 
-                syncEngine?.Dispose();
-                bridge?.Dispose();
+                try
+                {
+                    syncEngine?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    LogStartupException("Watch Together 停止同步引擎失败。", ex);
+                }
+
+                try
+                {
+                    bridge?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    LogStartupException("Watch Together 停止会话桥接失败。", ex);
+                }
             }
         }
 

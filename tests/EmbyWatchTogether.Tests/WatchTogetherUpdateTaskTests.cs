@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Common.Updates;
 using MediaBrowser.Controller;
+using MediaBrowser.Model.Serialization;
 using MediaBrowser.Model.Tasks;
 using MediaBrowser.Model.Updates;
 using Moq;
@@ -52,7 +55,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public async Task RunCheckAsync_InstallsNewerReleaseOnce()
         {
-            var plugin = CreateUninitializedPlugin();
+            var plugin = CreateInitializedPlugin();
             var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
             var installation = CreateInstallationManager(out var installMock);
 
@@ -80,7 +83,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public async Task RunCheckAsync_ThrowsWhenCheckReportsError()
         {
-            var plugin = CreateUninitializedPlugin();
+            var plugin = CreateInitializedPlugin();
             var releaseClient = new ThrowingReleaseClient("无法读取 GitHub 正式版信息。");
             var installation = CreateInstallationManager(out _);
 
@@ -99,7 +102,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public async Task RunCheckAsync_WithCancelledToken_ThrowsOperationCanceledException()
         {
-            var plugin = CreateUninitializedPlugin();
+            var plugin = CreateInitializedPlugin();
             var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
             var installation = CreateInstallationManager(out _);
             using var cancellation = new CancellationTokenSource();
@@ -123,11 +126,27 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Mock.Of<IServerApplicationHost>());
         }
 
-        private static Plugin CreateUninitializedPlugin()
+        private static Plugin CreateInitializedPlugin()
         {
-#pragma warning disable SYSLIB0050 // Deliberately bypasses the constructor to avoid touching the plugin singleton.
-            return (Plugin)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(Plugin));
-#pragma warning restore SYSLIB0050
+            var paths = new Mock<IApplicationPaths>();
+            paths.SetupGet(x => x.PluginConfigurationsPath).Returns("C:\\watch-together-update-task-tests");
+            var serializer = new Mock<IXmlSerializer>();
+            var plugin = new Plugin(paths.Object, serializer.Object);
+            plugin.SetAttributes(
+                "C:\\watch-together-update-task-tests\\Emby.Plugins.WatchTogether.dll",
+                null,
+                new Version(1, 0, 0, 0));
+            plugin.SetStartupInfo(_ => { });
+            SetPluginInstance(null);
+            return plugin;
+        }
+
+        private static void SetPluginInstance(Plugin plugin)
+        {
+            typeof(Plugin)
+                .GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .GetSetMethod(true)
+                .Invoke(null, new object[] { plugin });
         }
 
         private static IInstallationManager CreateInstallationManager(out Mock<IInstallationManager> mock)
