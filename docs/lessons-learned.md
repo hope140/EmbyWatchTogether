@@ -73,3 +73,11 @@
 - 结论：入口仅在同步引擎启动成功后发布运行时对象，并只清理自己拥有的引用；当前版本不可读时更新 fail closed，每次检查先失效旧 release；安装后的持久化或通知失败必须持续保留可见诊断。
 - 规则：不得用管理器程序集版本替代不可读的当前插件版本，也不得用新的检查结果掩盖“已安装但待处理”的状态。
 - 验证：`WatchTogetherEntryPointTests`、`PluginUpdateManagerTests` 与 `WatchTogetherUpdateTaskTests` 覆盖重复启动/释放、失败清理、版本尾零等价、版本读取失败、旧 release 失效和安装后诊断。
+
+## 10. 嵌入式插件页必须兼容宿主主题变量
+
+- 现象：仅假定完整色 CSS 变量，或用 `prefers-color-scheme` 推断宿主主题时，Emby Theater 3.0.20 的嵌入式页面会出现卡片、按钮、占位符和悬停态对比度异常。
+- 原因：宿主可能只提供 HSL 分量变量；系统偏好媒体查询也不等同于 Emby 当前主题，硬编码白底或深色文字会覆盖宿主浅色/深色配色。
+- 结论：主题变量应优先使用完整色并兼容 HSL 分量（text/secondary/primary、theme background、button/card、line），由宿主变量决定页面配色。
+- 规则：不得用 `prefers-color-scheme` 代替宿主主题判断，不得为卡片、按钮、placeholder 或 hover 硬编码白底/深色文字；必须分别检查宿主浅色和深色下的计算样式。
+- 验证：实际客户端主题文件与当前插件实现交叉确认，`PluginPagesTests` 通过，并以浅/深主题本地渲染计算样式复核；尚未在真实客户端加载新 DLL。
