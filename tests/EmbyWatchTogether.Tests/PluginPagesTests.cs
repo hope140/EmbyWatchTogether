@@ -36,7 +36,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("--theme-primary-color-hue", html);
             Assert.Contains("--card-background-lightness", html);
             Assert.Contains("--wt-card: hsla(var(--card-background-hue", html);
-            Assert.Contains("--card-background-alpha, .16", html);
+            Assert.Contains("--card-background-alpha, 1", html);
             Assert.DoesNotContain("--wt-card: var(--theme-background", html);
             Assert.Contains("--button-background-lightness", html);
             Assert.Contains("--line-background", html);
