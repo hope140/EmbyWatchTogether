@@ -6,11 +6,13 @@
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
-            --wt-text: var(--theme-text-color, #26313a);
-            --wt-muted: var(--theme-secondary-text-color, #68737d);
-            --wt-border: rgba(38, 49, 58, .2);
+            --wt-text: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)));
+            --wt-muted: var(--theme-secondary-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 42%), var(--theme-secondary-text-color-alpha, 1)));
+            --wt-border: var(--line-background, rgba(38, 49, 58, .2));
             --wt-surface: rgba(38, 49, 58, .035);
-            --wt-primary: var(--theme-primary-color, #287fb5);
+            --wt-primary: var(--theme-primary-color, hsla(var(--theme-primary-color-hue, 201), var(--theme-primary-color-saturation, 63%), var(--theme-primary-color-lightness, 43%), var(--theme-primary-color-alpha, 1)));
+            --wt-card: var(--theme-background-color, var(--theme-background, hsla(var(--card-background-hue, 0), var(--card-background-saturation, 0%), var(--card-background-lightness, 97.25%), var(--card-background-alpha, 1))));
+            --wt-button: var(--button-background-color, hsla(var(--button-background-hue, 0), var(--button-background-saturation, 0%), var(--button-background-lightness, 95.88%), var(--button-background-alpha, 1)));
             color: var(--wt-text);
         }
 
@@ -187,7 +189,7 @@
             padding: 1.1em 1.25em;
             border: 1px solid var(--wt-border);
             border-radius: .3em;
-            background: var(--theme-background-color, #fff);
+            background: var(--wt-card);
             box-shadow: 0 1px 3px rgba(20, 29, 36, .08);
         }
 
@@ -284,9 +286,9 @@
             margin: 0;
             border: 1px solid #aeb8bf !important;
             border-radius: .35em;
-            background: #fff !important;
+            background: var(--wt-button) !important;
             box-shadow: none;
-            color: #36434d !important;
+            color: var(--wt-text) !important;
             font-size: .94em;
             font-weight: 500;
             line-height: 1.2;
@@ -326,7 +328,7 @@
 
         .wt-roomActions button.wt-action--danger {
             border-color: #d47a80 !important;
-            background: #fff !important;
+            background: var(--wt-button) !important;
             color: #a43b44 !important;
         }
 
