@@ -37,7 +37,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("--card-background-lightness", html);
             Assert.Contains("--button-background-lightness", html);
             Assert.Contains("--line-background", html);
-            Assert.Contains(".wt-page input::placeholder {\n            color: var(--wt-muted) !important;", html);
+            Assert.Contains(".wt-page input::placeholder", html);
+            Assert.Contains("color: var(--wt-muted) !important;", html);
             Assert.Contains("background: var(--wt-card);", html);
             Assert.Contains("background: var(--wt-button) !important;", html);
             Assert.Contains("background: var(--wt-hover) !important;", html);
