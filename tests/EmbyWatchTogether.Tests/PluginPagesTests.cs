@@ -31,8 +31,16 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("wtSaveConfig", html);
             Assert.Contains("wtPluginVersion", html);
             Assert.Contains("wtRepositoryLink", html);
-            Assert.Contains("--wt-text: var(--theme-text-color, #26313a);", html);
-            Assert.Contains("--wt-muted: var(--theme-secondary-text-color, #68737d);", html);
+            Assert.Contains("--wt-text: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)));", html);
+            Assert.Contains("--theme-secondary-text-color-alpha", html);
+            Assert.Contains("--theme-primary-color-hue", html);
+            Assert.Contains("--card-background-lightness", html);
+            Assert.Contains("--button-background-lightness", html);
+            Assert.Contains("--line-background", html);
+            Assert.Contains("background: var(--wt-card);", html);
+            Assert.Contains("background: var(--wt-button) !important;", html);
+            Assert.DoesNotContain("background: var(--theme-background-color, #fff)", html);
+            Assert.DoesNotContain("background: #fff !important;", html);
             Assert.DoesNotContain("@media (prefers-color-scheme: dark)", html);
             Assert.DoesNotContain("wtUpdateSection", html);
             Assert.DoesNotContain("wtCheckUpdate", html);
