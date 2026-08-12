@@ -81,3 +81,36 @@
 - 结论：主题变量应优先使用完整色并兼容 HSL 分量（text/secondary/primary、theme background、button/card、line），由宿主变量决定页面配色。
 - 规则：不得用 `prefers-color-scheme` 代替宿主主题判断，不得为卡片、按钮、placeholder 或 hover 硬编码白底/深色文字；必须分别检查宿主浅色和深色下的计算样式。
 - 验证：实际客户端主题文件与当前插件实现交叉确认，`PluginPagesTests` 通过，并以浅/深主题本地渲染计算样式复核；尚未在真实客户端加载新 DLL。
+
+## 11. 会话选择必须传入当前时间
+
+- 现象：在线但 `LastActivity` 已过期的旧会话可能与另一位参与者组成无效配对并触发同步。
+- 原因：`SessionSelector.Select` 只有传入 `now` 时才执行 `RemoveExpired`；运行时调用必须显式提供采样时间。
+- 结论：`SyncEngine.PollOnce` 将本轮 `now` 传入会话选择；管理快照在候选采样后为本次选择捕获当前时间并传入，既有 60 秒过期策略因此在两条路径都生效。
+- 规则：默认过期策略仍为 60 秒（`StaleSessionTimeoutSeconds`），`staleTimeoutSeconds` 仍是可传入参数；不得改变 15 秒相对过滤、默认 `LastActivity` 处理或其他选择语义。
+- 验证：`SessionSelectorTests` 覆盖过期候选清理；`SyncEngineTests.PollOnce_ExpiredGhostSessionCannotFormPairOrTriggerSync` 覆盖过期幽灵会话不能组成有效配对或触发同步；管理接口路径复用 `BuildSnapshots` 的当前时间采样逻辑，未新增可稳定注入 `LastActivity` 的端到端服务夹具。
+
+## 12. 多会话选择诊断必须低噪声且来自同一决策管线
+
+- 约束：仅在同一房间参与者存在多个原始在线候选时记录 `multiple-session selection`；候选集合、处置阶段或最终选择不变时按签名去重，位置和 `LastActivity` 年龄不进入签名。
+- 结论：诊断与 `SessionSelector` 的过期、相对落后、共同 Item、能力排序和歧义处理共用一条管线，记录短 Session/Item identity、位置、暂停状态、年龄（未知时写 `unknown`）及每用户最终选择；离开多会话状态后清除签名，复发可再次记录。
+- 验证：`SessionSelectorTests` 与 `SyncEngineTests` 保持既有选择语义，并覆盖首次记录、位置/年龄变化去重、候选或处置变化重记及离开后复发；这些测试不等同于真实客户端复现。
+
+## 13. 多共同 Item 必须全局一致评分并在同分时安全等待
+
+- 现象：参与者各自拥有多个共同 Item 时，若直接按用户分别选择最新会话，可能出现双方交叉选择不同 Item。
+- 结论：完成过期 60 秒和用户内 15 秒落后清理后，对每个共同 Item 取每位参与者的最佳 `SelectionKey`，将这些 key 排序为与用户及输入枚举顺序无关的评分向量，按 maximin 选择唯一胜者；其余 Item 走 `common-item-filtered`。全局评分完全相同时标记相关候选 `ambiguous` 并清空本轮选择，禁止按字符串、用户 ID 或输入顺序猜测。
+- 规则：评分只比较 `SelectionKey` tuple，不累加 `activityTicks`，保持能力排序、同 session 去重及单用户同分歧义语义不变。
+- 验证：`SessionSelectorTests` 覆盖多共同 Item 的全局一致选择、交换输入/用户顺序、能力差异、同分安全失败、过期/落后候选排除及诊断处置；`SyncEngineTests.PollOnce_MultipleCommonItems_SelectsOneItemForBothParticipants` 证明首轮进入 Barrier 时两端命令只绑定全局胜出 Item 的 session。
+
+## 14. Watching 同分会话只沿用唯一有效历史身份
+
+- 结论：运行时在同一用户的最佳 `SelectionKey` 同分时，仅当候选集合中恰有一个候选同时匹配上一轮已绑定的 `SessionId+ItemId` 才沿用；历史身份过期、落后、消失或 Item 不同均不得复活，仍按同分歧义安全等待。
+- 规则：公开无偏好的 `SessionSelector.Select` 语义不变；沿用候选标记为 `selected`，其余同分候选标记为 `previous-selection-filtered` 并沿用多会话诊断签名去重。
+- 验证：`SessionSelectorTests.SelectWithPreviousDiagnostics_EqualTieReusesUniquePreviousIdentity`、`SelectWithPreviousDiagnostics_DoesNotReuseExpiredOrDifferentItemIdentity` 与 `SyncEngineTests.WatchingTie_ReusesPreviousSessionIdentityWithoutRestartingOrIssuingCommands` 通过；未覆盖真实客户端重连行为。
+
+## 15. 房间副作用部分失败必须如实反馈
+
+- 约束：退出后的自动暂停和群发提示都按目标统计成功、失败与未尝试；单个目标失败不得阻断后续目标，且响应和管理页不得把部分成功伪装成全部成功。
+- 规则：目标缺少可信 session、能力或在线状态属于未尝试；命令/提示异常只返回稳定错误代码和汇总计数，不回传底层异常详情。退出状态 `Changed` 始终只反映成员关系转换结果。
+- 验证：`WatchTogetherServiceRoomTests` 覆盖暂停返回 false、issuer 缺失、session identity 变化和首个群发目标异常后继续发送；`PluginPagesTests` 覆盖退出确认与成功、失败、中性三类文案。

@@ -41,6 +41,7 @@ namespace Emby.Plugins.WatchTogether
     public sealed class RoomManager
     {
         private const string RoomServerUnavailableError = "room server is unavailable";
+        private const string RoomActionConflictError = "manual action conflicts with active synchronization";
 
         private readonly object _lock = new object();
         private readonly RoomStore _store;
@@ -422,7 +423,24 @@ namespace Emby.Plugins.WatchTogether
                     }
                 }
 
+                // A manual pause/resume must never replace an in-flight
+                // synchronization sequence. Perform the complete conflict
+                // check while the room gate is held, before any external
+                // command can be issued or Pending state can be changed.
+                if (runtime.Barrier != null ||
+                    HasJoinedParticipantPending(room, runtime))
+                {
+                    return new RoomActionResult
+                    {
+                        RoomId = roomId,
+                        State = runtime.State,
+                        Command = command,
+                        Error = RoomActionConflictError,
+                    };
+                }
+
                 var issued = new List<string>();
+                string operationError = null;
                 var joinedUsers = room.JoinedParticipantUserIds.ToList();
                 foreach (var user in joinedUsers)
                 {
@@ -477,7 +495,8 @@ namespace Emby.Plugins.WatchTogether
                     {
                         lock (_lock)
                         {
-                            runtime.Error = $"{command} command failed: {error}";
+                            operationError = $"{command} command failed: {error}";
+                            runtime.Error = operationError;
                         }
                     }
                 }
@@ -490,10 +509,23 @@ namespace Emby.Plugins.WatchTogether
                         State = runtime.State,
                         Command = command,
                         Users = issued,
-                        Error = runtime.Error,
+                        Error = operationError ?? (issued.Count > 0 ? null : runtime.Error),
                     };
                 }
             }
+        }
+
+        private static bool HasJoinedParticipantPending(Room room, RoomRuntime runtime)
+        {
+            foreach (var userId in room.JoinedParticipantUserIds)
+            {
+                if (runtime.Pending.ContainsKey(userId))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool IsSameServer(string roomServerId, string currentServerId)

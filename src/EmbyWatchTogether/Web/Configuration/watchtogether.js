@@ -387,6 +387,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     var statusReasonMessages = {
         server_unavailable: '房间所属服务器暂不可用，请确认当前服务器连接。',
+        snapshot_unavailable: '暂时无法读取播放会话，自动同步已进入保护状态；恢复后会重新对齐。',
         different_video: '两位参与者打开了不同视频，请打开同一视频。',
         playback_stopped: '播放已停止，请双方重新打开同一视频。',
         command_failed: '播放控制未完成，请检查两位参与者的客户端。',
@@ -481,7 +482,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         button.title = action === 'delete'
             ? '删除这个房间；只删除同步关系，不删除媒体'
             : action === 'leave'
-                ? '退出后仍在房间的一方会暂停'
+                ? '退出后将尝试暂停仍在房间的一方'
                 : action === 'join'
                     ? '加入后需要与另一位参与者打开同一视频'
             : actionLabels[action] + '：' + (getStateInfo(room.State).description || '');
@@ -709,7 +710,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function membership(page, room, action, button) {
-        if (action === 'leave' && !window.confirm('退出“' + (room.Name || '未命名房间') + '”吗？仍在房间的一方会暂停。')) {
+        if (action === 'leave' && !window.confirm('退出“' + (room.Name || '未命名房间') + '”吗？将尝试暂停仍在房间的一方。')) {
             return;
         }
         setRoomBusy(page, room.RoomId, true);
@@ -717,10 +718,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '退出中…', false, true);
         renderRooms(page, page._wtRooms || []);
         apiSend('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/' + (action === 'join' ? 'Join' : 'Leave'), 'POST')
-            .then(function () {
-                roomFeedback(page, room.RoomId,
-                    action === 'join' ? '已加入房间，请与另一位参与者打开同一视频。' : '已退出房间，仍在房间的一方会暂停。',
-                    false, false);
+            .then(function (result) {
+                var text = action === 'join'
+                    ? '已加入房间，请与另一位参与者打开同一视频。'
+                    : getLeaveFeedback(result);
+                roomFeedback(page, room.RoomId, text,
+                    action === 'leave' && Number(result && result.PauseFailed) > 0, false);
                 return loadRooms(page, false);
             })
             .catch(function (err) {
@@ -730,6 +733,19 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 setRoomBusy(page, room.RoomId, false);
                 renderRooms(page, page._wtRooms || []);
             });
+    }
+
+    function getLeaveFeedback(result) {
+        var attempted = Number(result && result.PauseAttempted) || 0;
+        var succeeded = Number(result && result.PauseSucceeded) || 0;
+        var failed = Number(result && result.PauseFailed) || 0;
+        if (failed > 0) {
+            return '已退出房间，但仍在房间的一方暂停失败，请检查客户端。';
+        }
+        if (attempted > 0 && succeeded === attempted) {
+            return '已退出房间，仍在房间的一方已暂停。';
+        }
+        return '已退出房间，自动同步已停止。';
     }
 
     function createRoom(page) {

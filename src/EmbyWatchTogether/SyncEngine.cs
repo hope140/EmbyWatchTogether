@@ -37,6 +37,7 @@ namespace Emby.Plugins.WatchTogether
         private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
         private const double AckLatencyEmaAlpha = 0.3;
         private const double MissingSessionDebounceSeconds = 2;
+        private const double SnapshotProviderDebounceSeconds = 2;
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -55,6 +56,10 @@ namespace Emby.Plugins.WatchTogether
         private readonly object _roomPollLogLock = new object();
         private readonly Dictionary<string, DateTimeOffset> _lastRoomPollErrorAtUtc =
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        private DateTimeOffset? _snapshotProviderFailureSinceUtc;
+        private DateTimeOffset? _snapshotProviderRecoverySinceUtc;
+        private DateTimeOffset? _lastSnapshotProviderErrorAtUtc;
+        private bool _snapshotProviderProtectionActive;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
         private Thread _thread;
@@ -252,8 +257,18 @@ namespace Emby.Plugins.WatchTogether
             {
                 candidates = _snapshotProvider.GetSessionSnapshots();
             }
-            catch
+            catch (Exception ex)
             {
+                HandleSnapshotProviderFailure(now, validRoomIds, results, ex);
+                return results;
+            }
+
+            if (HandleSnapshotProviderSuccess(now, validRoomIds, results))
+            {
+                // A protected room is intentionally not allowed to process
+                // snapshots until the full recovery observation window has
+                // elapsed. The successful poll that clears protection falls
+                // through and is processed exactly once below.
                 return results;
             }
 
@@ -270,13 +285,25 @@ namespace Emby.Plugins.WatchTogether
 
                     var room = access.Room;
                     var runtime = access.Runtime;
+                    if (runtime.SnapshotUnavailable)
+                    {
+                        runtime.ExitSnapshotUnavailableProtection();
+                    }
+                    runtime.ConsumeSnapshotRecoveryError();
                     if (runtime.State == RoomState.Unavailable)
                     {
                         runtime.State = RoomState.Waiting;
                         runtime.Error = null;
                     }
 
-                    var snapshots = SessionSelector.Select(candidates, room.JoinedParticipantUserIds);
+                    var selection = SessionSelector.SelectWithPreviousDiagnostics(
+                        candidates,
+                        room.JoinedParticipantUserIds,
+                        now,
+                        SessionSelector.StaleSessionTimeoutSeconds,
+                        runtime.Previous);
+                    var snapshots = selection.Selected;
+                    LogMultipleSessionDiagnostics(runtime, room, selection, now);
                     var eligibility = RoomEligibility.Evaluate(snapshots);
                     bool eligible = eligibility.IsEligible;
                     LogEligibilityFailureIfChanged(
@@ -709,6 +736,138 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        private void HandleSnapshotProviderFailure(
+            DateTimeOffset now,
+            IReadOnlyList<string> validRoomIds,
+            IList<RoomPollResult> results,
+            Exception exception)
+        {
+            if (!_snapshotProviderFailureSinceUtc.HasValue)
+            {
+                _snapshotProviderFailureSinceUtc = now;
+                if (_snapshotProviderProtectionActive)
+                {
+                    _snapshotProviderRecoverySinceUtc = null;
+                }
+            }
+
+            if (!_lastSnapshotProviderErrorAtUtc.HasValue ||
+                (now - _lastSnapshotProviderErrorAtUtc.Value).TotalSeconds >= RoomPollErrorLogIntervalSeconds)
+            {
+                _lastSnapshotProviderErrorAtUtc = now;
+                _logger?.Warn(
+                    $"Session snapshot provider failed; exceptionType={exception?.GetType().Name ?? "unknown"}, " +
+                    $"failureDetailPresent={HasFailureDetail(exception?.Message)}");
+            }
+
+            bool thresholdReached =
+                (now - _snapshotProviderFailureSinceUtc.Value).TotalSeconds >= SnapshotProviderDebounceSeconds;
+            if (thresholdReached)
+            {
+                if (!_snapshotProviderProtectionActive)
+                {
+                    _snapshotProviderProtectionActive = true;
+                    _snapshotProviderRecoverySinceUtc = null;
+                    _logger?.Warn("Session snapshot provider protection entered");
+                }
+
+                foreach (var roomId in validRoomIds)
+                {
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access == null)
+                        {
+                            continue;
+                        }
+
+                        access.Runtime.EnterSnapshotUnavailableProtection();
+                        results.Add(Result(access.Room, access.Runtime, eligible: false));
+                    }
+                }
+            }
+            else
+            {
+                // A short provider failure is observable to callers but does
+                // not mutate any room state or issue commands.
+                foreach (var roomId in validRoomIds)
+                {
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access != null)
+                        {
+                            results.Add(Result(access.Room, access.Runtime, eligible: false));
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns true while a protected provider is still in its recovery
+        /// observation window. The first successful sample starts the window;
+        /// another failure resets it through HandleSnapshotProviderFailure.
+        /// </summary>
+        private bool HandleSnapshotProviderSuccess(
+            DateTimeOffset now,
+            IReadOnlyList<string> validRoomIds,
+            IList<RoomPollResult> results)
+        {
+            _snapshotProviderFailureSinceUtc = null;
+            if (!_snapshotProviderProtectionActive)
+            {
+                return false;
+            }
+
+            if (!_snapshotProviderRecoverySinceUtc.HasValue)
+            {
+                _snapshotProviderRecoverySinceUtc = now;
+                foreach (var roomId in validRoomIds)
+                {
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access != null)
+                        {
+                            if (!access.Runtime.SnapshotUnavailable)
+                            {
+                                // Rooms created or becoming server-valid
+                                // while the global provider is protected join
+                                // the same recovery window.
+                                access.Runtime.EnterSnapshotUnavailableProtection();
+                            }
+                            results.Add(Result(access.Room, access.Runtime, eligible: false));
+                        }
+                    }
+                }
+
+                return true;
+            }
+
+            if ((now - _snapshotProviderRecoverySinceUtc.Value).TotalSeconds < SnapshotProviderDebounceSeconds)
+            {
+                foreach (var roomId in validRoomIds)
+                {
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access != null)
+                        {
+                            if (!access.Runtime.SnapshotUnavailable)
+                            {
+                                access.Runtime.EnterSnapshotUnavailableProtection();
+                            }
+                            results.Add(Result(access.Room, access.Runtime, eligible: false));
+                        }
+                    }
+                }
+
+                return true;
+            }
+
+            _snapshotProviderProtectionActive = false;
+            _snapshotProviderRecoverySinceUtc = null;
+            _logger?.Info("Session snapshot provider protection cleared");
+            return false;
+        }
+
         private static bool TryGetStoppedUsers(
             RoomRuntime runtime,
             Room room,
@@ -739,6 +898,20 @@ namespace Emby.Plugins.WatchTogether
                 }
                 else if (current.Stopped)
                 {
+                    stoppedUsers.Add(userId);
+                    stopObserved = true;
+                }
+                else if (runtime.MissingSessionSinceUtc.HasValue &&
+                    (!runtime.Previous.TryGetValue(userId, out var previous) ||
+                     previous == null ||
+                     !HasSameIdentity(previous.SessionId, previous.ItemId, current) ||
+                     !current.SupportsRemoteControl))
+                {
+                    // Once a stop observation has started, an online snapshot
+                    // is a recovery only when it proves continuity with the
+                    // previously bound session and remains remotely
+                    // controllable. A replacement session (even one that is
+                    // controllable) must not clear the debounce window.
                     stoppedUsers.Add(userId);
                     stopObserved = true;
                 }
@@ -1042,6 +1215,89 @@ namespace Emby.Plugins.WatchTogether
             _logger?.Warn(
                 $"Room {room.Id}: eligibility failure reason={eligibility.FailureReason}; " +
                 FormatEligibilitySnapshotSummary(room, snapshots));
+        }
+
+        private void LogMultipleSessionDiagnostics(
+            RoomRuntime runtime,
+            Room room,
+            SessionSelectionDiagnostics selection,
+            DateTimeOffset now)
+        {
+            if (selection == null || !selection.HasMultipleCandidates)
+            {
+                runtime.LastMultipleSessionDiagnosticSignature = null;
+                return;
+            }
+
+            var candidates = (selection.Candidates ?? Array.Empty<SessionSelectionCandidateDiagnostic>())
+                .OrderBy(candidate => candidate.UserId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(candidate => candidate.Snapshot?.SessionId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(candidate => candidate.Snapshot?.ItemId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(candidate => candidate.Disposition, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var selectedByUser = (room.JoinedParticipantUserIds ?? Array.Empty<string>())
+                .Select(userId =>
+                {
+                    SessionSnapshot snapshot = null;
+                    selection.Selected?.TryGetValue(userId, out snapshot);
+                    return userId + "=" + (snapshot == null
+                        ? "-"
+                        : snapshot.SessionId + "/" + snapshot.ItemId);
+                });
+            string signature = string.Join(
+                "|",
+                candidates.Select(candidate =>
+                    candidate.UserId + ":" + candidate.Snapshot?.SessionId + "/" +
+                    candidate.Snapshot?.ItemId + ":" + candidate.Disposition)
+                    .Concat(selectedByUser));
+            if (string.Equals(runtime.LastMultipleSessionDiagnosticSignature, signature, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            runtime.LastMultipleSessionDiagnosticSignature = signature;
+            var details = candidates.Select(candidate =>
+            {
+                var snapshot = candidate.Snapshot;
+                if (snapshot == null)
+                {
+                    return $"user={candidate.UserId},session=-,item=-,position=-,paused=-,age=unknown,disposition={candidate.Disposition}";
+                }
+
+                string age = snapshot.LastActivityDateUtc == default
+                    ? "unknown"
+                    : Math.Max(0, (now - snapshot.LastActivityDateUtc).TotalSeconds).ToString("0.0") + "s";
+                return $"user={candidate.UserId},session={ShortMultipleSessionIdentity(snapshot.SessionId)}," +
+                    $"item={ShortMultipleSessionIdentity(snapshot.ItemId)},position={snapshot.PositionSeconds:0.0}s," +
+                    $"paused={snapshot.IsPaused},age={age},disposition={candidate.Disposition}";
+            });
+            string selectedSummary = string.Join(
+                ",",
+                (room.JoinedParticipantUserIds ?? Array.Empty<string>()).Select(userId =>
+                {
+                    SessionSnapshot snapshot = null;
+                    selection.Selected?.TryGetValue(userId, out snapshot);
+                    return $"{userId}={(snapshot == null ? "-" :
+                        ShortMultipleSessionIdentity(snapshot.SessionId) + "/" +
+                        ShortMultipleSessionIdentity(snapshot.ItemId))}";
+                }));
+            _logger?.Warn(
+                $"Room {room.Id}: multiple-session selection; candidates=[{string.Join("; ", details)}]; " +
+                $"selected=[{selectedSummary}]");
+        }
+
+        private static string ShortMultipleSessionIdentity(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "-";
+            }
+
+            const int edgeLength = 6;
+            const int maxLength = edgeLength * 2 + 3;
+            return value.Length <= maxLength
+                ? value
+                : value.Substring(0, edgeLength) + "..." + value.Substring(value.Length - edgeLength);
         }
 
         private static string FormatEligibilitySnapshotSummary(

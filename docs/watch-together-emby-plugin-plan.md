@@ -19,7 +19,7 @@
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
 
-程序集目标框架为 `netstandard2.0`，项目版本为 `1.3.0.2`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
+程序集目标框架为 `netstandard2.0`，项目版本为 `1.3.0.6`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
 
 ## 2. 组件和数据流
 
@@ -137,9 +137,9 @@ else:
 只有在 `Watching` 状态才产生持久停止处理。停止判断按以下顺序执行：
 
 1. Emby 的 `PlaybackStopped` 事件只唤醒同步轮询，不直接触发停止副作用。
-2. 仅依据 SessionSelector 为参与者选出的当前会话判断停止；同一用户的旧 Session 即使标记 `stopped` 或活动时间更新，也不能覆盖仍有效的当前播放。当前会话标记 `stopped`、离线或缺失时先记录疑似停止时间，异常状态连续达到 2 秒 debounce 后才确认，期间恢复有效快照会清除计时并保持 `Watching`。
+2. `Watching` 开始后，当前观察按 `Previous SessionId` + `ItemId` 绑定。当前会话标记 `stopped`、离线或缺失时先记录疑似停止时间，异常状态连续达到 2 秒 debounce 后才确认；临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。
 3. 位置归零不是停止条件；合法的 seek-to-zero 不会单独触发停止副作用。
-4. 仅在停止状态确认的转换上执行副作用，避免每轮重复；`PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方，`NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示。
+4. 仅在停止状态确认的转换上执行副作用，避免每轮重复；`PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方，`NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示。生产序列中两项副作用都必须在同一停止确认转换上执行，避免另一方遗漏暂停或提示。
 5. 清理运行时并回到 `Waiting`，要求双方重新打开同一视频。
 
 Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久的播放停止。
@@ -148,13 +148,15 @@ Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久
 
 `SessionSelector` 选择会话后，`Watching`、Barrier、Pending、Suppressed 和暂停对齐状态都会记录对应的 session identity 与 Item。即使新设备继续播放相同 Item 和位置，只要 session identity 变化也会回到 `Waiting`，不会把旧快照当成手动 Seek。Pending 命令遇到不同会话、不同 Item 或设备重连时直接丢弃，不跨身份确认或重试。
 
+同一用户存在多个候选会话时，仅当历史记录能唯一绑定 `SessionId` 与 `ItemId` 才沿用；无历史或绑定失效时保持等待，直到重新建立可靠关联。
+
 每个房间通过独立 gate 串行完成快照处理和状态迁移；一个房间的异常只记录到该房间并隔离，不会终止同步线程或影响其他房间。远程命令和消息调用带取消与约 5 秒超时，停止引擎等待后台线程的上限为 10 秒。
 
 ## 7. 设置页和 REST API
 
 ### 管理页
 
-嵌入式页面显示房间创建表单、房间状态卡片、加入/退出、暂停、继续、重新同步和删除操作。每个房间卡片维护独立的操作反馈和忙碌状态，5 秒轮询只刷新状态，不覆盖操作结果；成功提示约 8 秒后清除，错误提示保留到下一次同房间操作或手动刷新。`StatusReason` 会映射为安全、可执行的中文说明，不直接显示后端错误文本。
+嵌入式页面显示房间创建表单、房间状态卡片、加入/退出、暂停、继续、重新同步和删除操作。每个房间卡片维护独立的操作反馈和忙碌状态，5 秒轮询只刷新状态，不覆盖操作结果；成功提示约 8 秒后清除，错误提示保留到下一次同房间操作或手动刷新。`StatusReason` 会映射为安全、可执行的中文说明，不直接显示后端错误文本。手动暂停/继续在 Barrier 或任一参与者存在 Pending 时整次拒绝，不覆盖同步；成功操作不会误报陈旧 runtime error。
 
 页面还显示三个设置复选框：
 

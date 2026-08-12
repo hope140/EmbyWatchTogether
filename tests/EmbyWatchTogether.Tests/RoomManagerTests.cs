@@ -172,6 +172,101 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(2, result.Users.Count);
         }
 
+        [Theory]
+        [InlineData("pause", RoomState.Barrier, BarrierStage.Pause)]
+        [InlineData("pause", RoomState.Barrier, BarrierStage.Seek)]
+        [InlineData("pause", RoomState.Barrier, BarrierStage.Restore)]
+        [InlineData("resume", RoomState.Barrier, BarrierStage.Pause)]
+        [InlineData("resume", RoomState.Barrier, BarrierStage.Seek)]
+        [InlineData("resume", RoomState.Barrier, BarrierStage.Restore)]
+        public void Action_PauseOrResume_BarrierConflictDoesNotIssueOrMutate(
+            string action,
+            RoomState state,
+            BarrierStage stage)
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = state;
+            runtime.Barrier = new BarrierState
+            {
+                Stage = stage,
+                AnchorUserId = "u2",
+                ItemId = "item-before",
+                PrimaryPositionTicks = 123,
+            };
+            var barrier = runtime.Barrier;
+            var issuer = new FakeIssuer();
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = TestSnapshots.Online("u1"),
+                ["u2"] = TestSnapshots.Online("u2"),
+            };
+
+            var result = manager.Action(room.Id, action, snapshots, issuer, DateTimeOffset.UtcNow);
+
+            Assert.Empty(result.Users);
+            Assert.Equal("manual action conflicts with active synchronization", result.Error);
+            Assert.Empty(issuer.Issued);
+            Assert.Same(barrier, runtime.Barrier);
+            Assert.Equal(stage, runtime.Barrier.Stage);
+            Assert.Equal("u2", runtime.Barrier.AnchorUserId);
+            Assert.Empty(runtime.Pending);
+        }
+
+        [Theory]
+        [InlineData("Pause")]
+        [InlineData("Unpause")]
+        public void Action_PauseOrResume_PendingConflictDoesNotIssueOrOverwrite(string pendingCommand)
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.Pending["u2"] = new PendingCommand
+            {
+                UserId = "u2",
+                SessionId = "old-session",
+                ItemId = "old-item",
+                Command = pendingCommand,
+            };
+            var original = runtime.Pending["u2"];
+            var issuer = new FakeIssuer();
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = TestSnapshots.Online("u1"),
+                ["u2"] = TestSnapshots.Online("u2"),
+            };
+
+            var result = manager.Action(room.Id, "pause", snapshots, issuer, DateTimeOffset.UtcNow);
+
+            Assert.Empty(result.Users);
+            Assert.Equal("manual action conflicts with active synchronization", result.Error);
+            Assert.Empty(issuer.Issued);
+            Assert.Same(original, runtime.Pending["u2"]);
+            Assert.Equal(pendingCommand, runtime.Pending["u2"].Command);
+        }
+
+        [Fact]
+        public void Action_SuccessDoesNotReturnStaleRuntimeError()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.Error = "older synchronization error";
+            var issuer = new FakeIssuer();
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = TestSnapshots.Online("u1"),
+                ["u2"] = TestSnapshots.Offline("u2"),
+            };
+
+            var result = manager.Action(room.Id, "pause", snapshots, issuer, DateTimeOffset.UtcNow);
+
+            Assert.Equal(new[] { "u1" }, result.Users);
+            Assert.Null(result.Error);
+            Assert.Equal("older synchronization error", runtime.Error);
+        }
+
         [Fact]
         public void Action_FailedIssue_RecordsError()
         {
