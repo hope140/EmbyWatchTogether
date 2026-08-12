@@ -66,7 +66,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("remote_control_unavailable", javascript);
             Assert.Contains("_wtRoomFeedback", javascript);
             Assert.Contains("_wtRoomBusy", javascript);
-            Assert.Contains("仍在房间的一方会暂停", javascript);
+            Assert.Contains("将尝试暂停仍在房间的一方", javascript);
+            Assert.Contains("已退出房间，但仍在房间的一方暂停失败，请检查客户端。", javascript);
+            Assert.Contains("已退出房间，仍在房间的一方已暂停。", javascript);
+            Assert.Contains("已退出房间，自动同步已停止。", javascript);
+            Assert.DoesNotContain("仍在房间的一方会暂停", javascript);
             Assert.Contains("只删除同步关系，不删除媒体", javascript);
             Assert.Contains("会暂时暂停双方并重新对齐，确认继续吗", javascript);
             Assert.Contains("重新同步已开始，播放可能暂时暂停，请等待同步完成", javascript);

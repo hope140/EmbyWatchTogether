@@ -263,6 +263,10 @@ namespace Emby.Plugins.WatchTogether
                 transition.PreviousState == RoomState.Watching;
             bool sameServer = !string.IsNullOrWhiteSpace(transition.ServerId) &&
                 string.Equals(transition.ServerId, plugin.ResolveServerId(), StringComparison.OrdinalIgnoreCase);
+            int pauseAttempted = 0;
+            int pauseSucceeded = 0;
+            int pauseFailed = 0;
+            string pauseError = null;
 
             if (transition.Changed && activeBeforeLeave && sameServer)
             {
@@ -309,25 +313,59 @@ namespace Emby.Plugins.WatchTogether
                                     !current.Online ||
                                     !HasSameSessionIdentity(beforeLeave, current))
                                 {
+                                    pauseError = pauseError ?? "target_session_unavailable";
                                     continue;
                                 }
 
-                                plugin.Issuer?.TryIssue(
-                                    currentRoom.Id,
-                                    currentRoom.AdminUserId,
-                                    targetUserId,
-                                    current,
-                                    RemoteCommands.Pause,
-                                    null,
-                                    DateTimeOffset.UtcNow,
-                                    out _);
+                                if (plugin.Issuer == null)
+                                {
+                                    pauseError = pauseError ?? "issuer_unavailable";
+                                    continue;
+                                }
+
+                                pauseAttempted++;
+                                try
+                                {
+                                    string error;
+                                    if (plugin.Issuer.TryIssue(
+                                        currentRoom.Id,
+                                        currentRoom.AdminUserId,
+                                        targetUserId,
+                                        current,
+                                        RemoteCommands.Pause,
+                                        null,
+                                        DateTimeOffset.UtcNow,
+                                        out error))
+                                    {
+                                        pauseSucceeded++;
+                                    }
+                                    else
+                                    {
+                                        pauseFailed++;
+                                        pauseError = pauseError ?? "pause_failed";
+                                    }
+                                }
+                                catch
+                                {
+                                    pauseFailed++;
+                                    pauseError = pauseError ?? "pause_failed";
+                                }
                             }
                         }
                     }
                 }
             }
 
-            return new { RoomId = request.Id, Joined = false, Changed = transition.Changed };
+            return new
+            {
+                RoomId = request.Id,
+                Joined = false,
+                Changed = transition.Changed,
+                PauseAttempted = pauseAttempted,
+                PauseSucceeded = pauseSucceeded,
+                PauseFailed = pauseFailed,
+                PauseError = pauseError,
+            };
         }
 
         public object Post(SendRoomMessageRequest request)
@@ -335,6 +373,8 @@ namespace Emby.Plugins.WatchTogether
             RequireAdmin();
             var plugin = RequirePlugin();
             int sent = 0;
+            int failed = 0;
+            int skipped = 0;
             Room room;
             using (var access = plugin.Rooms.TryEnterRoom(request.Id))
             {
@@ -352,7 +392,7 @@ namespace Emby.Plugins.WatchTogether
                 if (!plugin.Rooms.IsCurrentRoom(room) ||
                     !IsSameServer(room.ServerId, plugin.ResolveServerId()))
                 {
-                    return new { RoomId = room.Id, Sent = 0 };
+                    return new { RoomId = room.Id, Sent = 0, Failed = 0, Skipped = 0 };
                 }
 
                 foreach (var userId in room.JoinedParticipantUserIds.ToList())
@@ -371,6 +411,7 @@ namespace Emby.Plugins.WatchTogether
                         snapshot.Capabilities == null ||
                         !snapshot.Capabilities.CanDisplayMessage)
                     {
+                        skipped++;
                         continue;
                     }
 
@@ -381,19 +422,28 @@ namespace Emby.Plugins.WatchTogether
                         break;
                     }
 
-                    plugin.Bridge.SendDisplayMessageAsync(
-                            room.AdminUserId,
-                            snapshot.SessionId,
-                            "Watch Together",
-                            request.Text ?? string.Empty,
-                            timeoutMs: 3000,
-                            cancellationToken: CancellationToken.None)
-                        .GetAwaiter().GetResult();
-                    sent++;
+                    try
+                    {
+                        plugin.Bridge.SendDisplayMessageAsync(
+                                room.AdminUserId,
+                                snapshot.SessionId,
+                                "Watch Together",
+                                request.Text ?? string.Empty,
+                                timeoutMs: 3000,
+                                cancellationToken: CancellationToken.None)
+                            .GetAwaiter().GetResult();
+                        sent++;
+                    }
+                    catch
+                    {
+                        // A single display-message failure must not prevent the
+                        // remaining current targets from receiving the message.
+                        failed++;
+                    }
                 }
             }
 
-            return new { RoomId = room.Id, Sent = sent };
+            return new { RoomId = room.Id, Sent = sent, Failed = failed, Skipped = skipped };
         }
 
         public object Get(GetUsersRequest request)
