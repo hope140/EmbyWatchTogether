@@ -177,6 +177,168 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void SnapshotProviderFailure_ProtectsAfterDebounce_AndRecoversFromFreshSnapshot()
+        {
+            var room = CreateRoom();
+            var provider = new ToggleSnapshotProvider
+            {
+                Snapshots = new List<SessionSnapshot>
+                {
+                    Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                },
+            };
+            var engine = new SyncEngine(
+                _rooms, provider, _issuer, () => "server-1", () => _clock.Now);
+            try
+            {
+                engine.PollOnce(_clock.Now);
+                var runtime = _rooms.GetRuntime(room.Id);
+                _issuer.Issued.Clear();
+                provider.Throw = true;
+
+                _clock.Advance(1);
+                Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+                Assert.False(runtime.SnapshotUnavailable);
+                Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+
+                _clock.Advance(1.1);
+                Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+                Assert.False(runtime.SnapshotUnavailable);
+
+                _clock.Advance(1.1);
+                var protectedResult = engine.PollOnce(_clock.Now).Single();
+                Assert.Equal(RoomState.Waiting, protectedResult.State);
+                Assert.False(protectedResult.Eligible);
+                Assert.True(runtime.SnapshotUnavailable);
+                Assert.Empty(runtime.Pending);
+                Assert.Null(runtime.Barrier);
+
+                provider.Throw = false;
+                provider.Snapshots = new List<SessionSnapshot>
+                {
+                    Snapshot("fresh-1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                    Snapshot("fresh-2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                };
+                _clock.Advance(1);
+                Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+                Assert.True(runtime.SnapshotUnavailable);
+
+                _clock.Advance(1.1);
+                engine.PollOnce(_clock.Now);
+                Assert.True(runtime.SnapshotUnavailable);
+
+                _clock.Advance(1.1);
+                engine.PollOnce(_clock.Now);
+                Assert.False(runtime.SnapshotUnavailable);
+                Assert.DoesNotContain(_issuer.Issued, i => i.sessionId == "s1" || i.sessionId == "s2");
+            }
+            finally
+            {
+                engine.Dispose();
+            }
+        }
+
+        [Fact]
+        public void SnapshotProviderProtection_CoversMultipleRooms_AndClearsAllSyncState()
+        {
+            var first = CreateRoom();
+            var second = _rooms.CreateRoom("server-1", "http://emby", "second", "admin-2", new[] { "u3", "u4" }, "u3");
+            var provider = new ToggleSnapshotProvider();
+            var engine = new SyncEngine(_rooms, provider, _issuer, () => "server-1", () => _clock.Now);
+            try
+            {
+                foreach (var room in new[] { first, second })
+                {
+                    var runtime = _rooms.GetRuntime(room.Id);
+                    runtime.Error = "command error";
+                    runtime.Pending["u1"] = new PendingCommand();
+                    runtime.WaitingPauseRetries["u1"] = new WaitingPauseRetryState();
+                    runtime.Suppressed["u1"] = new SuppressedCommand();
+                    runtime.PauseAlign["u1"] = new PauseAlignState();
+                    runtime.LastSeekAtUtc["u1"] = _clock.Now;
+                    runtime.Previous["u1"] = Snapshot("old", "u1", false, 0);
+                    runtime.SyncItemId = "old-item";
+                    runtime.DriftRounds = 4;
+                    runtime.State = RoomState.Barrier;
+                }
+                provider.Throw = true;
+                engine.PollOnce(_clock.Now);
+                _clock.Advance(2.1);
+                var results = engine.PollOnce(_clock.Now);
+                Assert.Equal(2, results.Count);
+                foreach (var room in new[] { first, second })
+                {
+                    var runtime = _rooms.GetRuntime(room.Id);
+                    Assert.True(runtime.SnapshotUnavailable);
+                    Assert.Equal(RoomState.Waiting, runtime.State);
+                    Assert.Equal("command error", runtime.Error);
+                    Assert.Empty(runtime.Pending);
+                    Assert.Empty(runtime.WaitingPauseRetries);
+                    Assert.Empty(runtime.Suppressed);
+                    Assert.Empty(runtime.PauseAlign);
+                    Assert.Empty(runtime.Previous);
+                    Assert.Null(runtime.SyncItemId);
+                    Assert.Equal(0, runtime.DriftRounds);
+                }
+            }
+            finally { engine.Dispose(); }
+        }
+
+        [Fact]
+        public void SnapshotProviderFailure_BackgroundLoopContinuesPolling()
+        {
+            var rooms = new RoomManager();
+            rooms.CreateRoom("server-1", "http://emby", "room", "admin-1", new[] { "u1", "u2" }, "u1");
+            var provider = new ThrowingCountingSnapshotProvider();
+            var engine = new SyncEngine(rooms, provider, new RecordingIssuer(), () => "server-1", pollIntervalSeconds: 0.02);
+            try { engine.Start(); Assert.True(provider.WaitForCount(4, TimeSpan.FromSeconds(2))); }
+            finally { engine.Stop(); engine.Dispose(); }
+        }
+
+        [Fact]
+        public void SnapshotProviderProtection_NewRoomDuringActiveFailureIsAlsoProtected()
+        {
+            var first = CreateRoom();
+            var provider = new ToggleSnapshotProvider { Throw = true };
+            var engine = new SyncEngine(_rooms, provider, _issuer, () => "server-1", () => _clock.Now);
+            try
+            {
+                engine.PollOnce(_clock.Now);
+                _clock.Advance(2.1);
+                engine.PollOnce(_clock.Now);
+                var second = _rooms.CreateRoom("server-1", "http://emby", "second", "admin-2", new[] { "u3", "u4" }, "u3");
+                var results = engine.PollOnce(_clock.Now);
+                Assert.Equal(2, results.Count);
+                Assert.True(_rooms.GetRuntime(first.Id).SnapshotUnavailable);
+                Assert.True(_rooms.GetRuntime(second.Id).SnapshotUnavailable);
+                Assert.All(results, result => Assert.Equal(RoomState.Waiting, result.State));
+            }
+            finally { engine.Dispose(); }
+        }
+
+        [Fact]
+        public void SnapshotProviderRecovery_ShortSuccessThenFailureResetsWindow()
+        {
+            var room = CreateRoom();
+            var provider = new ToggleSnapshotProvider { Throw = true };
+            var engine = new SyncEngine(_rooms, provider, _issuer, () => "server-1", () => _clock.Now);
+            try
+            {
+                engine.PollOnce(_clock.Now); _clock.Advance(2.1); engine.PollOnce(_clock.Now);
+                provider.Throw = false;
+                provider.Snapshots = new List<SessionSnapshot> { Snapshot("fresh-1", "u1", false, 0), Snapshot("fresh-2", "u2", false, 0) };
+                _clock.Advance(1); engine.PollOnce(_clock.Now);
+                provider.Throw = true; _clock.Advance(0.1); engine.PollOnce(_clock.Now);
+                provider.Throw = false; _clock.Advance(1.9); engine.PollOnce(_clock.Now);
+                Assert.True(_rooms.GetRuntime(room.Id).SnapshotUnavailable);
+                _clock.Advance(2.1); engine.PollOnce(_clock.Now);
+                Assert.False(_rooms.GetRuntime(room.Id).SnapshotUnavailable);
+            }
+            finally { engine.Dispose(); }
+        }
+
+        [Fact]
         public void EligibilityDiagnostics_LogOnReasonChangeOnly_AndResumeAfterRecovery()
         {
             var room = CreateRoom();
@@ -3162,6 +3324,40 @@ namespace Emby.Plugins.WatchTogether.Tests
             public List<SessionSnapshot> Snapshots { get; set; } = new List<SessionSnapshot>();
 
             public IReadOnlyList<SessionSnapshot> GetSessionSnapshots() => Snapshots;
+        }
+
+        private sealed class ToggleSnapshotProvider : ISessionSnapshotProvider
+        {
+            public bool Throw { get; set; }
+
+            public List<SessionSnapshot> Snapshots { get; set; } = new List<SessionSnapshot>();
+
+            public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
+            {
+                if (Throw)
+                {
+                    throw new InvalidOperationException("snapshot provider unavailable");
+                }
+
+                return Snapshots;
+            }
+        }
+
+        private sealed class ThrowingCountingSnapshotProvider : ISessionSnapshotProvider
+        {
+            private int _count;
+            public int Count => Volatile.Read(ref _count);
+            public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
+            {
+                Interlocked.Increment(ref _count);
+                throw new InvalidOperationException("snapshot provider unavailable");
+            }
+            public bool WaitForCount(int expected, TimeSpan timeout)
+            {
+                var deadline = DateTime.UtcNow + timeout;
+                while (Count < expected && DateTime.UtcNow < deadline) Thread.Sleep(10);
+                return Count >= expected;
+            }
         }
 
         private sealed class BlockingSnapshotProvider : ISessionSnapshotProvider

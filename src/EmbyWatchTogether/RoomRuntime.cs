@@ -11,6 +11,18 @@ namespace Emby.Plugins.WatchTogether
     {
         public RoomState State { get; set; } = RoomState.Waiting;
 
+        /// <summary>
+        /// Set when the session snapshot provider has been unavailable long
+        /// enough that the room can no longer safely use its in-memory sync
+        /// state. This is deliberately separate from <see cref="Error"/> so
+        /// command failures remain visible to callers.
+        /// </summary>
+        public bool SnapshotUnavailable { get; private set; }
+
+        internal bool SnapshotRecoveryPending { get; private set; }
+
+        internal string SnapshotErrorBeforeProtection { get; private set; }
+
         public string Error { get; set; }
 
         internal RoomEligibilityFailureReason? LastEligibilityFailureReason { get; set; }
@@ -61,6 +73,53 @@ namespace Emby.Plugins.WatchTogether
         public BarrierState Barrier { get; set; }
 
         public DateTimeOffset? BarrierRetryAtUtc { get; set; }
+
+        internal void EnterSnapshotUnavailableProtection()
+        {
+            if (!SnapshotUnavailable)
+            {
+                SnapshotErrorBeforeProtection = Error;
+            }
+            SnapshotUnavailable = true;
+            SnapshotRecoveryPending = false;
+            State = RoomState.Waiting;
+            Barrier = null;
+            Pending.Clear();
+            WaitingPauseRetries.Clear();
+            Suppressed.Clear();
+            PauseAlign.Clear();
+            LastSeekAtUtc.Clear();
+            Previous.Clear();
+            PreviousAtUtc = null;
+            MissingSessionSinceUtc = null;
+            DriftRounds = 0;
+            SyncItemId = null;
+            BarrierRetryAtUtc = null;
+        }
+
+        internal void ExitSnapshotUnavailableProtection()
+        {
+            SnapshotUnavailable = false;
+            SnapshotRecoveryPending = true;
+        }
+
+        internal bool ConsumeSnapshotRecoveryError()
+        {
+            if (!SnapshotRecoveryPending)
+            {
+                return false;
+            }
+
+            SnapshotRecoveryPending = false;
+            if (!string.IsNullOrEmpty(SnapshotErrorBeforeProtection) &&
+                string.Equals(Error, SnapshotErrorBeforeProtection, StringComparison.Ordinal))
+            {
+                Error = null;
+            }
+
+            SnapshotErrorBeforeProtection = null;
+            return true;
+        }
 
         public void ResetToWaiting()
         {

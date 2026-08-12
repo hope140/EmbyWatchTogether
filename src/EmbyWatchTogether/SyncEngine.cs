@@ -37,6 +37,7 @@ namespace Emby.Plugins.WatchTogether
         private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
         private const double AckLatencyEmaAlpha = 0.3;
         private const double MissingSessionDebounceSeconds = 2;
+        private const double SnapshotProviderDebounceSeconds = 2;
 
         private readonly RoomManager _roomManager;
         private readonly ISessionSnapshotProvider _snapshotProvider;
@@ -55,6 +56,10 @@ namespace Emby.Plugins.WatchTogether
         private readonly object _roomPollLogLock = new object();
         private readonly Dictionary<string, DateTimeOffset> _lastRoomPollErrorAtUtc =
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        private DateTimeOffset? _snapshotProviderFailureSinceUtc;
+        private DateTimeOffset? _snapshotProviderRecoverySinceUtc;
+        private DateTimeOffset? _lastSnapshotProviderErrorAtUtc;
+        private bool _snapshotProviderProtectionActive;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
         private Thread _thread;
@@ -252,8 +257,18 @@ namespace Emby.Plugins.WatchTogether
             {
                 candidates = _snapshotProvider.GetSessionSnapshots();
             }
-            catch
+            catch (Exception ex)
             {
+                HandleSnapshotProviderFailure(now, validRoomIds, results, ex);
+                return results;
+            }
+
+            if (HandleSnapshotProviderSuccess(now, validRoomIds, results))
+            {
+                // A protected room is intentionally not allowed to process
+                // snapshots until the full recovery observation window has
+                // elapsed. The successful poll that clears protection falls
+                // through and is processed exactly once below.
                 return results;
             }
 
@@ -270,6 +285,11 @@ namespace Emby.Plugins.WatchTogether
 
                     var room = access.Room;
                     var runtime = access.Runtime;
+                    if (runtime.SnapshotUnavailable)
+                    {
+                        runtime.ExitSnapshotUnavailableProtection();
+                    }
+                    runtime.ConsumeSnapshotRecoveryError();
                     if (runtime.State == RoomState.Unavailable)
                     {
                         runtime.State = RoomState.Waiting;
@@ -712,6 +732,138 @@ namespace Emby.Plugins.WatchTogether
                     $"Room {key}: poll failed; exceptionType={exception?.GetType().Name ?? "unknown"}, " +
                     $"failureDetailPresent={HasFailureDetail(exception?.Message)}");
             }
+        }
+
+        private void HandleSnapshotProviderFailure(
+            DateTimeOffset now,
+            IReadOnlyList<string> validRoomIds,
+            IList<RoomPollResult> results,
+            Exception exception)
+        {
+            if (!_snapshotProviderFailureSinceUtc.HasValue)
+            {
+                _snapshotProviderFailureSinceUtc = now;
+                if (_snapshotProviderProtectionActive)
+                {
+                    _snapshotProviderRecoverySinceUtc = null;
+                }
+            }
+
+            if (!_lastSnapshotProviderErrorAtUtc.HasValue ||
+                (now - _lastSnapshotProviderErrorAtUtc.Value).TotalSeconds >= RoomPollErrorLogIntervalSeconds)
+            {
+                _lastSnapshotProviderErrorAtUtc = now;
+                _logger?.Warn(
+                    $"Session snapshot provider failed; exceptionType={exception?.GetType().Name ?? "unknown"}, " +
+                    $"failureDetailPresent={HasFailureDetail(exception?.Message)}");
+            }
+
+            bool thresholdReached =
+                (now - _snapshotProviderFailureSinceUtc.Value).TotalSeconds >= SnapshotProviderDebounceSeconds;
+            if (thresholdReached)
+            {
+                if (!_snapshotProviderProtectionActive)
+                {
+                    _snapshotProviderProtectionActive = true;
+                    _snapshotProviderRecoverySinceUtc = null;
+                    _logger?.Warn("Session snapshot provider protection entered");
+                }
+
+                foreach (var roomId in validRoomIds)
+                {
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access == null)
+                        {
+                            continue;
+                        }
+
+                        access.Runtime.EnterSnapshotUnavailableProtection();
+                        results.Add(Result(access.Room, access.Runtime, eligible: false));
+                    }
+                }
+            }
+            else
+            {
+                // A short provider failure is observable to callers but does
+                // not mutate any room state or issue commands.
+                foreach (var roomId in validRoomIds)
+                {
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access != null)
+                        {
+                            results.Add(Result(access.Room, access.Runtime, eligible: false));
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns true while a protected provider is still in its recovery
+        /// observation window. The first successful sample starts the window;
+        /// another failure resets it through HandleSnapshotProviderFailure.
+        /// </summary>
+        private bool HandleSnapshotProviderSuccess(
+            DateTimeOffset now,
+            IReadOnlyList<string> validRoomIds,
+            IList<RoomPollResult> results)
+        {
+            _snapshotProviderFailureSinceUtc = null;
+            if (!_snapshotProviderProtectionActive)
+            {
+                return false;
+            }
+
+            if (!_snapshotProviderRecoverySinceUtc.HasValue)
+            {
+                _snapshotProviderRecoverySinceUtc = now;
+                foreach (var roomId in validRoomIds)
+                {
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access != null)
+                        {
+                            if (!access.Runtime.SnapshotUnavailable)
+                            {
+                                // Rooms created or becoming server-valid
+                                // while the global provider is protected join
+                                // the same recovery window.
+                                access.Runtime.EnterSnapshotUnavailableProtection();
+                            }
+                            results.Add(Result(access.Room, access.Runtime, eligible: false));
+                        }
+                    }
+                }
+
+                return true;
+            }
+
+            if ((now - _snapshotProviderRecoverySinceUtc.Value).TotalSeconds < SnapshotProviderDebounceSeconds)
+            {
+                foreach (var roomId in validRoomIds)
+                {
+                    using (var access = _roomManager.TryEnterRoom(roomId))
+                    {
+                        if (access != null)
+                        {
+                            if (!access.Runtime.SnapshotUnavailable)
+                            {
+                                access.Runtime.EnterSnapshotUnavailableProtection();
+                            }
+                            results.Add(Result(access.Room, access.Runtime, eligible: false));
+                        }
+                    }
+                }
+
+                return true;
+            }
+
+            _snapshotProviderProtectionActive = false;
+            _snapshotProviderRecoverySinceUtc = null;
+            _logger?.Info("Session snapshot provider protection cleared");
+            return false;
         }
 
         private static bool TryGetStoppedUsers(
