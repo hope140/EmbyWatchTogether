@@ -84,8 +84,8 @@
 
 ## 11. 会话选择必须传入当前时间
 
-- 现象：在线但 `LastActivity` 已过期的旧会话仍可能进入后续会话选择。
-- 原因：`SessionSelector.Select` 只有传入 `now` 时才执行 `RemoveExpired`；未传入时不会按过期策略清理候选。当前 `SyncEngine` 轮询和管理快照 `BuildSnapshots` 调用均未传入当前时间。
-- 结论：运行时同步和管理快照选择都必须传入同一轮采样的当前时间，才能执行过期清理。
-- 规则：当前默认过期策略为 60 秒（`StaleSessionTimeoutSeconds`），但 `staleTimeoutSeconds` 是可传入参数，不能把常量误写成所有调用都已生效。旧会话不一定总会胜出，但未清理时仍参与候选，可能影响 common item 或 session identity 的选择。
-- 验证：依据 `SessionSelector.cs` 的 `now.HasValue` 条件及 `SyncEngine.cs`、`WatchTogetherService.cs` 当前调用点核对；未声称真实客户端复现。
+- 现象：在线但 `LastActivity` 已过期的旧会话可能与另一位参与者组成无效配对并触发同步。
+- 原因：`SessionSelector.Select` 只有传入 `now` 时才执行 `RemoveExpired`；运行时调用必须显式提供采样时间。
+- 结论：`SyncEngine.PollOnce` 将本轮 `now` 传入会话选择；管理快照在候选采样后为本次选择捕获当前时间并传入，既有 60 秒过期策略因此在两条路径都生效。
+- 规则：默认过期策略仍为 60 秒（`StaleSessionTimeoutSeconds`），`staleTimeoutSeconds` 仍是可传入参数；不得改变 15 秒相对过滤、默认 `LastActivity` 处理或其他选择语义。
+- 验证：`SessionSelectorTests` 覆盖过期候选清理；`SyncEngineTests.PollOnce_ExpiredGhostSessionCannotFormPairOrTriggerSync` 覆盖过期幽灵会话不能组成有效配对或触发同步；管理接口路径复用 `BuildSnapshots` 的当前时间采样逻辑，未新增可稳定注入 `LastActivity` 的端到端服务夹具。

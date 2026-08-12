@@ -276,7 +276,7 @@ namespace Emby.Plugins.WatchTogether
                         runtime.Error = null;
                     }
 
-                    var snapshots = SessionSelector.Select(candidates, room.JoinedParticipantUserIds);
+                    var snapshots = SessionSelector.Select(candidates, room.JoinedParticipantUserIds, now);
                     var eligibility = RoomEligibility.Evaluate(snapshots);
                     bool eligible = eligibility.IsEligible;
                     LogEligibilityFailureIfChanged(
