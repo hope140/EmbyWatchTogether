@@ -95,3 +95,10 @@
 - 约束：仅在同一房间参与者存在多个原始在线候选时记录 `multiple-session selection`；候选集合、处置阶段或最终选择不变时按签名去重，位置和 `LastActivity` 年龄不进入签名。
 - 结论：诊断与 `SessionSelector` 的过期、相对落后、共同 Item、能力排序和歧义处理共用一条管线，记录短 Session/Item identity、位置、暂停状态、年龄（未知时写 `unknown`）及每用户最终选择；离开多会话状态后清除签名，复发可再次记录。
 - 验证：`SessionSelectorTests` 与 `SyncEngineTests` 保持既有选择语义，并覆盖首次记录、位置/年龄变化去重、候选或处置变化重记及离开后复发；这些测试不等同于真实客户端复现。
+
+## 13. 多共同 Item 必须全局一致评分并在同分时安全等待
+
+- 现象：参与者各自拥有多个共同 Item 时，若直接按用户分别选择最新会话，可能出现双方交叉选择不同 Item。
+- 结论：完成过期 60 秒和用户内 15 秒落后清理后，对每个共同 Item 取每位参与者的最佳 `SelectionKey`，将这些 key 排序为与用户及输入枚举顺序无关的评分向量，按 maximin 选择唯一胜者；其余 Item 走 `common-item-filtered`。全局评分完全相同时标记相关候选 `ambiguous` 并清空本轮选择，禁止按字符串、用户 ID 或输入顺序猜测。
+- 规则：评分只比较 `SelectionKey` tuple，不累加 `activityTicks`，保持能力排序、同 session 去重及单用户同分歧义语义不变。
+- 验证：`SessionSelectorTests` 覆盖多共同 Item 的全局一致选择、交换输入/用户顺序、能力差异、同分安全失败、过期/落后候选排除及诊断处置；`SyncEngineTests.PollOnce_MultipleCommonItems_SelectsOneItemForBothParticipants` 证明首轮进入 Barrier 时两端命令只绑定全局胜出 Item 的 session。
