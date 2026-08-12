@@ -1691,6 +1691,39 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PollOnce_MultipleCommonItems_SelectsOneItemForBothParticipants()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            var now = _clock.Now;
+
+            SetCandidates(
+                Snapshot("u1-a", "u1", paused: false, position: 0,
+                    itemId: "item-a", lastActivityDateUtc: now.AddSeconds(2)),
+                Snapshot("u1-b", "u1", paused: false, position: 0,
+                    itemId: "item-b", lastActivityDateUtc: now),
+                Snapshot("u2-a", "u2", paused: false, position: 0,
+                    itemId: "item-a", lastActivityDateUtc: now),
+                Snapshot("u2-b", "u2", paused: false, position: 0,
+                    itemId: "item-b", lastActivityDateUtc: now.AddSeconds(1)));
+
+            var result = engine.PollOnce(now).Single();
+
+            Assert.Equal(room.Id, result.RoomId);
+            Assert.True(result.Eligible);
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.NotEmpty(_issuer.Issued);
+            Assert.All(_issuer.Issued, issue =>
+            {
+                Assert.Equal(RemoteCommands.Pause, issue.command);
+                Assert.Equal("item-a", issue.itemId);
+            });
+            Assert.Contains(_issuer.Issued, issue => issue.userId == "u1" && issue.sessionId == "u1-a");
+            Assert.Contains(_issuer.Issued, issue => issue.userId == "u2" && issue.sessionId == "u2-a");
+            Assert.DoesNotContain(_issuer.Issued, issue => issue.sessionId == "u1-b" || issue.sessionId == "u2-b");
+        }
+
+        [Fact]
         public void TransientMissingParticipant_RecoversBeforeDebounceWithoutBarrier()
         {
             var room = CreateRoom();

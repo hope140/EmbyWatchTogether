@@ -209,12 +209,70 @@ namespace Emby.Plugins.WatchTogether
                 common.IntersectWith(set);
             }
 
-            if (common.Count != 1)
+            if (common.Count == 0)
             {
                 return;
             }
 
-            string commonItem = common.First();
+            string commonItem;
+            if (common.Count == 1)
+            {
+                // Preserve the original single-common-item behavior.
+                commonItem = common.First();
+            }
+            else
+            {
+                var scored = common
+                    .Select(item => new CommonItemScore
+                    {
+                        ItemId = item,
+                        Keys = byUser.Values
+                            .Select(values => values
+                                .Where(value => string.Equals(value.Snapshot.ItemId, item, StringComparison.OrdinalIgnoreCase))
+                                .Select(value => SelectionKey(value.Snapshot))
+                                .Max())
+                            .OrderBy(key => key)
+                            .ToList(),
+                    })
+                    .ToList();
+
+                var winner = scored[0];
+                foreach (var candidate in scored.Skip(1))
+                {
+                    if (CompareScores(candidate.Keys, winner.Keys) > 0)
+                    {
+                        winner = candidate;
+                    }
+                }
+
+                var tied = scored
+                    .Where(candidate => CompareScores(candidate.Keys, winner.Keys) == 0)
+                    .ToList();
+                if (tied.Count != 1)
+                {
+                    var ambiguousItems = new HashSet<string>(
+                        tied.Select(candidate => candidate.ItemId),
+                        StringComparer.OrdinalIgnoreCase);
+                    foreach (var key in byUser.Keys.ToList())
+                    {
+                        foreach (var candidate in byUser[key])
+                        {
+                            candidate.Disposition = ambiguousItems.Contains(candidate.Snapshot.ItemId)
+                                ? "ambiguous"
+                                : "lower-ranked";
+                        }
+
+                        // A global item tie must fail closed; do not allow independent
+                        // per-user selection of a non-common item in this round.
+                        byUser[key] = new List<SelectionCandidate>();
+                    }
+
+                    return;
+                }
+
+                commonItem = winner.ItemId;
+            }
+
             foreach (var key in byUser.Keys.ToList())
             {
                 byUser[key] = byUser[key]
@@ -230,6 +288,30 @@ namespace Emby.Plugins.WatchTogether
                     })
                     .ToList();
             }
+        }
+
+        private static int CompareScores(
+            IReadOnlyList<(int active, int capabilityRank, long activityTicks)> left,
+            IReadOnlyList<(int active, int capabilityRank, long activityTicks)> right)
+        {
+            int count = Math.Min(left.Count, right.Count);
+            for (int index = 0; index < count; index++)
+            {
+                int comparison = left[index].CompareTo(right[index]);
+                if (comparison != 0)
+                {
+                    return comparison;
+                }
+            }
+
+            return left.Count.CompareTo(right.Count);
+        }
+
+        private sealed class CommonItemScore
+        {
+            public string ItemId { get; set; }
+
+            public List<(int active, int capabilityRank, long activityTicks)> Keys { get; set; }
         }
 
         private static List<SelectionCandidate> DeduplicateBySessionId(List<SelectionCandidate> values)
