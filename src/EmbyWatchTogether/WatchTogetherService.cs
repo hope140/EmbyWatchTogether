@@ -423,7 +423,8 @@ namespace Emby.Plugins.WatchTogether
             var candidates = plugin.Bridge == null
                 ? new List<SessionSnapshot>()
                 : new SessionBridgeSnapshotProvider(plugin.Bridge).GetSessionSnapshots();
-            return SessionSelector.Select(candidates, room.JoinedParticipantUserIds);
+            var now = DateTimeOffset.UtcNow;
+            return SessionSelector.Select(candidates, room.JoinedParticipantUserIds, now);
         }
 
         private static void NotifyMembershipChange(Plugin plugin, string roomId, string changedUserId, string text)

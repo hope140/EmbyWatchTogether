@@ -1416,6 +1416,26 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PollOnce_ExpiredGhostSessionCannotFormPairOrTriggerSync()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            var now = _clock.Now;
+
+            SetCandidates(
+                Snapshot("s1-stale", "u1", paused: false, position: 0,
+                    itemId: "item-old", lastActivityDateUtc: now.AddSeconds(-61)),
+                Snapshot("s2", "u2", paused: false, position: 0,
+                    itemId: "item-old", lastActivityDateUtc: now.AddSeconds(-1)));
+
+            var result = engine.PollOnce(now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.False(result.Eligible);
+            Assert.Empty(_issuer.Issued);
+        }
+
+        [Fact]
         public void TransientMissingParticipant_RecoversBeforeDebounceWithoutBarrier()
         {
             var room = CreateRoom();
@@ -2592,6 +2612,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal("waiting pause retry limit reached", runtime.Error);
             int issuedAtLimit = _issuer.Issued.Count(i => i.command == RemoteCommands.Pause);
             _clock.Advance(100);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)));
             engine.PollOnce(_clock.Now);
             Assert.Equal(issuedAtLimit, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
 
@@ -2602,8 +2627,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             // exhausted user must remain suppressed and must keep the limit
             // error visible.
             SetCandidates(
-                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1"),
-                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2"));
+                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)));
             _clock.Advance(0.1);
             engine.PollOnce(_clock.Now);
             Assert.Equal(issuedAtLimit + 1, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
@@ -2615,8 +2642,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             // Only after the second exhausted user's identity changes may the
             // limit error clear and a new retry cycle begin for that user.
             SetCandidates(
-                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1"),
-                Snapshot("s2-reconnected", "u2", paused: false, position: 0, itemId: "i2"));
+                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)),
+                Snapshot("s2-reconnected", "u2", paused: false, position: 0, itemId: "i2",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)));
             _clock.Advance(0.1);
             engine.PollOnce(_clock.Now);
             Assert.Equal(issuedAtLimit + 2, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
