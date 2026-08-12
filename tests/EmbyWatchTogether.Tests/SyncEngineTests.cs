@@ -1671,6 +1671,27 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void WatchingTie_ReusesPreviousSessionIdentityWithoutRestartingOrIssuingCommands()
+        {
+            var room = CreateRoom();
+            var warnings = new List<string>();
+            var engine = CreateEngine(logManager: CreateLogManager(warnings).Object);
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1-alt", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Empty(_issuer.Issued);
+            Assert.DoesNotContain(warnings, warning => warning.Contains("reason=EmptyOrDifferentItem"));
+            Assert.Contains(warnings, warning => warning.Contains("disposition=previous-selection-filtered"));
+        }
+
+        [Fact]
         public void PollOnce_ExpiredGhostSessionCannotFormPairOrTriggerSync()
         {
             var room = CreateRoom();

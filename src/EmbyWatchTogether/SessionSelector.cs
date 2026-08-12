@@ -27,6 +27,7 @@ namespace Emby.Plugins.WatchTogether
                 userIds,
                 now,
                 TimeSpan.FromSeconds(staleTimeoutSeconds),
+                null,
                 null);
         }
 
@@ -41,6 +42,7 @@ namespace Emby.Plugins.WatchTogether
                 userIds,
                 now,
                 staleTimeout,
+                null,
                 null);
         }
 
@@ -50,13 +52,29 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset? now = null,
             double staleTimeoutSeconds = StaleSessionTimeoutSeconds)
         {
+            return SelectWithPreviousDiagnostics(
+                candidates,
+                userIds,
+                now,
+                staleTimeoutSeconds,
+                null);
+        }
+
+        internal static SessionSelectionDiagnostics SelectWithPreviousDiagnostics(
+            IEnumerable<SessionSnapshot> candidates,
+            IReadOnlyList<string> userIds,
+            DateTimeOffset? now,
+            double staleTimeoutSeconds,
+            IReadOnlyDictionary<string, SessionSnapshot> previous)
+        {
             var diagnostics = new SessionSelectionDiagnostics();
             var selected = SelectCore(
                 candidates,
                 userIds,
                 now,
                 TimeSpan.FromSeconds(staleTimeoutSeconds),
-                diagnostics);
+                diagnostics,
+                previous);
             diagnostics.Selected = selected;
             return diagnostics;
         }
@@ -66,7 +84,8 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyList<string> userIds,
             DateTimeOffset? now,
             TimeSpan staleTimeout,
-            SessionSelectionDiagnostics diagnostics)
+            SessionSelectionDiagnostics diagnostics,
+            IReadOnlyDictionary<string, SessionSnapshot> previous)
         {
             var byUser = new Dictionary<string, List<SelectionCandidate>>(StringComparer.OrdinalIgnoreCase);
             var allCandidates = diagnostics == null
@@ -118,6 +137,35 @@ namespace Emby.Plugins.WatchTogether
                 var latest = values.Where(v => SelectionKey(v.Snapshot) == maxKey).ToList();
                 if (latest.Count != 1)
                 {
+                    SelectionCandidate previousMatch = null;
+                    if (previous != null &&
+                        previous.TryGetValue(pair.Key, out var previousSnapshot) &&
+                        previousSnapshot != null)
+                    {
+                        var matches = latest
+                            .Where(value => HasSameIdentity(value.Snapshot, previousSnapshot))
+                            .ToList();
+                        if (matches.Count == 1)
+                        {
+                            previousMatch = matches[0];
+                        }
+                    }
+
+                    if (previousMatch != null)
+                    {
+                        previousMatch.Disposition = "selected";
+                        foreach (var value in latest)
+                        {
+                            if (!ReferenceEquals(value, previousMatch))
+                            {
+                                value.Disposition = "previous-selection-filtered";
+                            }
+                        }
+
+                        selected[pair.Key] = previousMatch.Snapshot;
+                        continue;
+                    }
+
                     // Ambiguous: multiple equally-fresh records; never guess.
                     foreach (var value in latest)
                     {
@@ -341,6 +389,16 @@ namespace Emby.Plugins.WatchTogether
         {
             candidate.Disposition = disposition;
             return false;
+        }
+
+        private static bool HasSameIdentity(
+            SessionSnapshot left,
+            SessionSnapshot right)
+        {
+            return left != null &&
+                right != null &&
+                string.Equals(left.SessionId, right.SessionId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(left.ItemId, right.ItemId, StringComparison.OrdinalIgnoreCase);
         }
 
         private static (int active, int capabilityRank, long activityTicks) SelectionKey(SessionSnapshot snapshot)
