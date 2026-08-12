@@ -23,6 +23,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var html = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.watchtogether.html");
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
+            Assert.Contains("data-bindheader=\"true\"", html);
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOnSyncActions", html);
