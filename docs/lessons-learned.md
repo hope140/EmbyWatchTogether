@@ -81,3 +81,11 @@
 - 结论：主题变量应优先使用完整色并兼容 HSL 分量（text/secondary/primary、theme background、button/card、line），由宿主变量决定页面配色。
 - 规则：不得用 `prefers-color-scheme` 代替宿主主题判断，不得为卡片、按钮、placeholder 或 hover 硬编码白底/深色文字；必须分别检查宿主浅色和深色下的计算样式。
 - 验证：实际客户端主题文件与当前插件实现交叉确认，`PluginPagesTests` 通过，并以浅/深主题本地渲染计算样式复核；尚未在真实客户端加载新 DLL。
+
+## 11. 会话选择必须传入当前时间
+
+- 现象：在线但 `LastActivity` 已过期的旧会话仍可能进入后续会话选择。
+- 原因：`SessionSelector.Select` 只有传入 `now` 时才执行 `RemoveExpired`；未传入时不会按过期策略清理候选。当前 `SyncEngine` 轮询和管理快照 `BuildSnapshots` 调用均未传入当前时间。
+- 结论：运行时同步和管理快照选择都必须传入同一轮采样的当前时间，才能执行过期清理。
+- 规则：当前默认过期策略为 60 秒（`StaleSessionTimeoutSeconds`），但 `staleTimeoutSeconds` 是可传入参数，不能把常量误写成所有调用都已生效。旧会话不一定总会胜出，但未清理时仍参与候选，可能影响 common item 或 session identity 的选择。
+- 验证：依据 `SessionSelector.cs` 的 `now.HasValue` 条件及 `SyncEngine.cs`、`WatchTogetherService.cs` 当前调用点核对；未声称真实客户端复现。
