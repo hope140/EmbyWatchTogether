@@ -89,3 +89,9 @@
 - 结论：`SyncEngine.PollOnce` 将本轮 `now` 传入会话选择；管理快照在候选采样后为本次选择捕获当前时间并传入，既有 60 秒过期策略因此在两条路径都生效。
 - 规则：默认过期策略仍为 60 秒（`StaleSessionTimeoutSeconds`），`staleTimeoutSeconds` 仍是可传入参数；不得改变 15 秒相对过滤、默认 `LastActivity` 处理或其他选择语义。
 - 验证：`SessionSelectorTests` 覆盖过期候选清理；`SyncEngineTests.PollOnce_ExpiredGhostSessionCannotFormPairOrTriggerSync` 覆盖过期幽灵会话不能组成有效配对或触发同步；管理接口路径复用 `BuildSnapshots` 的当前时间采样逻辑，未新增可稳定注入 `LastActivity` 的端到端服务夹具。
+
+## 12. 多会话选择诊断必须低噪声且来自同一决策管线
+
+- 约束：仅在同一房间参与者存在多个原始在线候选时记录 `multiple-session selection`；候选集合、处置阶段或最终选择不变时按签名去重，位置和 `LastActivity` 年龄不进入签名。
+- 结论：诊断与 `SessionSelector` 的过期、相对落后、共同 Item、能力排序和歧义处理共用一条管线，记录短 Session/Item identity、位置、暂停状态、年龄（未知时写 `unknown`）及每用户最终选择；离开多会话状态后清除签名，复发可再次记录。
+- 验证：`SessionSelectorTests` 与 `SyncEngineTests` 保持既有选择语义，并覆盖首次记录、位置/年龄变化去重、候选或处置变化重记及离开后复发；这些测试不等同于真实客户端复现。
