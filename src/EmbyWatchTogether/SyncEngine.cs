@@ -901,6 +901,20 @@ namespace Emby.Plugins.WatchTogether
                     stoppedUsers.Add(userId);
                     stopObserved = true;
                 }
+                else if (runtime.MissingSessionSinceUtc.HasValue &&
+                    (!runtime.Previous.TryGetValue(userId, out var previous) ||
+                     previous == null ||
+                     !HasSameIdentity(previous.SessionId, previous.ItemId, current) ||
+                     !current.SupportsRemoteControl))
+                {
+                    // Once a stop observation has started, an online snapshot
+                    // is a recovery only when it proves continuity with the
+                    // previously bound session and remains remotely
+                    // controllable. A replacement session (even one that is
+                    // controllable) must not clear the debounce window.
+                    stoppedUsers.Add(userId);
+                    stopObserved = true;
+                }
             }
 
             if (!stopObserved)
