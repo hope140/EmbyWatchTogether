@@ -108,3 +108,9 @@
 - 结论：运行时在同一用户的最佳 `SelectionKey` 同分时，仅当候选集合中恰有一个候选同时匹配上一轮已绑定的 `SessionId+ItemId` 才沿用；历史身份过期、落后、消失或 Item 不同均不得复活，仍按同分歧义安全等待。
 - 规则：公开无偏好的 `SessionSelector.Select` 语义不变；沿用候选标记为 `selected`，其余同分候选标记为 `previous-selection-filtered` 并沿用多会话诊断签名去重。
 - 验证：`SessionSelectorTests.SelectWithPreviousDiagnostics_EqualTieReusesUniquePreviousIdentity`、`SelectWithPreviousDiagnostics_DoesNotReuseExpiredOrDifferentItemIdentity` 与 `SyncEngineTests.WatchingTie_ReusesPreviousSessionIdentityWithoutRestartingOrIssuingCommands` 通过；未覆盖真实客户端重连行为。
+
+## 15. 房间副作用部分失败必须如实反馈
+
+- 约束：退出后的自动暂停和群发提示都按目标统计成功、失败与未尝试；单个目标失败不得阻断后续目标，且响应和管理页不得把部分成功伪装成全部成功。
+- 规则：目标缺少可信 session、能力或在线状态属于未尝试；命令/提示异常只返回稳定错误代码和汇总计数，不回传底层异常详情。退出状态 `Changed` 始终只反映成员关系转换结果。
+- 验证：`WatchTogetherServiceRoomTests` 覆盖暂停返回 false、issuer 缺失、session identity 变化和首个群发目标异常后继续发送；`PluginPagesTests` 覆盖退出确认与成功、失败、中性三类文案。

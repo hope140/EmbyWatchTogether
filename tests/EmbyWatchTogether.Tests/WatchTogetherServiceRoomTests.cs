@@ -55,6 +55,101 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Single(issuer.Issued);
             Assert.Equal(primaryUserId, issuer.Issued[0].userId);
             Assert.Equal(RemoteCommands.Pause, issuer.Issued[0].command);
+            Assert.Equal(1, GetInt(response, "PauseAttempted"));
+            Assert.Equal(1, GetInt(response, "PauseSucceeded"));
+            Assert.Equal(0, GetInt(response, "PauseFailed"));
+        }
+
+        [Fact]
+        public void Leave_PauseIssuerFailureIsReportedWithoutThrowing()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var leavingUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, leavingUserId }, primaryUserId);
+            manager.GetRuntime(room.Id).State = RoomState.Watching;
+
+            var issuer = new RecordingIssuer { Succeed = false, Error = "private transport detail" };
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new List<SessionInfo>
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, issuer, "server-1");
+            var service = NewService(leavingUserId);
+
+            object response = WithPlugin(plugin, () =>
+                service.Post(new LeaveRoomRequest { Id = room.Id }));
+
+            Assert.True(GetBoolean(response, "Changed"));
+            Assert.Equal(1, GetInt(response, "PauseAttempted"));
+            Assert.Equal(0, GetInt(response, "PauseSucceeded"));
+            Assert.Equal(1, GetInt(response, "PauseFailed"));
+            Assert.Equal("pause_failed", GetString(response, "PauseError"));
+        }
+
+        [Fact]
+        public void Leave_PauseIssuerExceptionIsReportedWithoutThrowing()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var leavingUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, leavingUserId }, primaryUserId);
+            manager.GetRuntime(room.Id).State = RoomState.Watching;
+
+            var issuer = new RecordingIssuer { ThrowOnTry = true };
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new List<SessionInfo>
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, issuer, "server-1");
+            var service = NewService(leavingUserId);
+
+            object response = WithPlugin(plugin, () =>
+                service.Post(new LeaveRoomRequest { Id = room.Id }));
+
+            Assert.True(GetBoolean(response, "Changed"));
+            Assert.Equal(1, GetInt(response, "PauseAttempted"));
+            Assert.Equal(0, GetInt(response, "PauseSucceeded"));
+            Assert.Equal(1, GetInt(response, "PauseFailed"));
+            Assert.Equal("pause_failed", GetString(response, "PauseError"));
+        }
+
+        [Fact]
+        public void Leave_NullIssuerDoesNotClaimPauseSuccess()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var leavingUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, leavingUserId }, primaryUserId);
+            manager.GetRuntime(room.Id).State = RoomState.Watching;
+
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new List<SessionInfo>
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, null, "server-1");
+            var service = NewService(leavingUserId);
+
+            object response = WithPlugin(plugin, () =>
+                service.Post(new LeaveRoomRequest { Id = room.Id }));
+
+            Assert.True(GetBoolean(response, "Changed"));
+            Assert.Equal(0, GetInt(response, "PauseAttempted"));
+            Assert.Equal(0, GetInt(response, "PauseSucceeded"));
+            Assert.Equal(0, GetInt(response, "PauseFailed"));
+            Assert.Equal("issuer_unavailable", GetString(response, "PauseError"));
         }
 
         [Fact]
@@ -706,6 +801,46 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Message_FirstTargetFailureDoesNotBlockLaterTargets()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var otherUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, otherUserId }, primaryUserId);
+
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new List<SessionInfo>
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+                NewSession(sessionManager, "session-other", otherUserId),
+            });
+            sessionManager.Setup(s => s.SendMessageCommand(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((string _, string sessionId, MessageCommand __, CancellationToken ___) =>
+                    sessionId == "session-primary"
+                        ? Task.FromException(new InvalidOperationException("private transport detail"))
+                        : Task.CompletedTask);
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(primaryUserId, administrator: true);
+
+            object response = WithPlugin(plugin, () =>
+                service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "hello" }));
+
+            Assert.Equal(1, GetInt(response, "Sent"));
+            Assert.Equal(1, GetInt(response, "Failed"));
+            sessionManager.Verify(s => s.SendMessageCommand(
+                It.IsAny<string>(), "session-primary", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+            sessionManager.Verify(s => s.SendMessageCommand(
+                It.IsAny<string>(), "session-other", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public async Task Message_ParticipantLeavesWhileWaitingForGate_IsNotTargeted()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
@@ -1102,6 +1237,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             public List<(string userId, string command, long? positionTicks)> Issued { get; } =
                 new List<(string, string, long?)>();
 
+            public bool Succeed { get; set; } = true;
+
+            public string Error { get; set; }
+
+            public bool ThrowOnTry { get; set; }
+
             public bool TryIssue(
                 string roomId,
                 string controllingUserId,
@@ -1113,8 +1254,12 @@ namespace Emby.Plugins.WatchTogether.Tests
                 out string error)
             {
                 Issued.Add((userId, command, positionTicks));
-                error = null;
-                return true;
+                if (ThrowOnTry)
+                {
+                    throw new InvalidOperationException("private transport detail");
+                }
+                error = Succeed ? null : Error;
+                return Succeed;
             }
         }
     }
