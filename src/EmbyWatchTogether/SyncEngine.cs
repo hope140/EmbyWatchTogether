@@ -296,10 +296,12 @@ namespace Emby.Plugins.WatchTogether
                         runtime.Error = null;
                     }
 
-                    var selection = SessionSelector.SelectWithDiagnostics(
+                    var selection = SessionSelector.SelectWithPreviousDiagnostics(
                         candidates,
                         room.JoinedParticipantUserIds,
-                        now);
+                        now,
+                        SessionSelector.StaleSessionTimeoutSeconds,
+                        runtime.Previous);
                     var snapshots = selection.Selected;
                     LogMultipleSessionDiagnostics(runtime, room, selection, now);
                     var eligibility = RoomEligibility.Evaluate(snapshots);

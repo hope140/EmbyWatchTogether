@@ -262,6 +262,92 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void SelectWithPreviousDiagnostics_EqualTieReusesUniquePreviousIdentity()
+        {
+            var previous = Snapshot("s1", "u1", "itemA", activity: 1000);
+            var candidates = new List<SessionSnapshot>
+            {
+                Snapshot("s2", "u1", "itemA", activity: 1000),
+                previous,
+            };
+
+            var diagnostics = InvokeSelectWithPreviousDiagnostics(
+                candidates,
+                new[] { "u1" },
+                new Dictionary<string, SessionSnapshot> { ["u1"] = previous });
+            var selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Equal("s1", selected["u1"].SessionId);
+            Assert.Contains("selected", GetDispositions(diagnostics, "itemA"));
+            Assert.Contains("previous-selection-filtered", GetDispositions(diagnostics, "itemA"));
+
+            var reversedCandidates = new List<SessionSnapshot>(candidates);
+            reversedCandidates.Reverse();
+            diagnostics = InvokeSelectWithPreviousDiagnostics(
+                reversedCandidates,
+                new[] { "u1" },
+                new Dictionary<string, SessionSnapshot> { ["u1"] = previous });
+            selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Equal("s1", selected["u1"].SessionId);
+        }
+
+        [Fact]
+        public void SelectWithPreviousDiagnostics_DoesNotReuseExpiredOrDifferentItemIdentity()
+        {
+            var previous = Snapshot("s1", "u1", "itemA", activity: 1000);
+            var expired = SnapshotAt("s1", "u1", "itemA", TestNow.AddSeconds(-61));
+            var candidates = new List<SessionSnapshot>
+            {
+                expired,
+                Snapshot("s2", "u1", "itemA", activity: 1000),
+                Snapshot("s3", "u1", "itemA", activity: 1000),
+            };
+
+            var diagnostics = InvokeSelectWithPreviousDiagnostics(
+                candidates,
+                new[] { "u1" },
+                new Dictionary<string, SessionSnapshot> { ["u1"] = previous });
+            var selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Empty(selected);
+            Assert.Equal("expired", GetDisposition(diagnostics, "s1"));
+            Assert.Equal("ambiguous", GetDisposition(diagnostics, "s2"));
+            Assert.Equal("ambiguous", GetDisposition(diagnostics, "s3"));
+
+            diagnostics = InvokeSelectWithPreviousDiagnostics(
+                new[]
+                {
+                    Snapshot("s2", "u1", "itemB", activity: 1000),
+                    Snapshot("s3", "u1", "itemB", activity: 1000),
+                },
+                new[] { "u1" },
+                new Dictionary<string, SessionSnapshot> { ["u1"] = previous });
+            selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Empty(selected);
+            Assert.All(GetDispositions(diagnostics, "itemB"), disposition => Assert.Equal("ambiguous", disposition));
+
+            diagnostics = InvokeSelectWithPreviousDiagnostics(
+                new[]
+                {
+                    Snapshot("s2", "u1", "itemA", activity: 1000),
+                    Snapshot("s3", "u1", "itemA", activity: 1000),
+                },
+                new[] { "u1" },
+                new Dictionary<string, SessionSnapshot> { ["u1"] = previous });
+            selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Empty(selected);
+            Assert.All(GetDispositions(diagnostics, "itemA"), disposition => Assert.Equal("ambiguous", disposition));
+        }
+
+        [Fact]
         public void Select_RemovesAbsolutelyExpiredCommonCandidateBeforePreferringCommonItem()
         {
             var candidates = new List<SessionSnapshot>
@@ -323,6 +409,27 @@ namespace Emby.Plugins.WatchTogether.Tests
                 });
         }
 
+        private static object InvokeSelectWithPreviousDiagnostics(
+            IEnumerable<SessionSnapshot> candidates,
+            IReadOnlyList<string> userIds,
+            IReadOnlyDictionary<string, SessionSnapshot> previous)
+        {
+            var method = typeof(SessionSelector).GetMethod(
+                "SelectWithPreviousDiagnostics",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            return method.Invoke(
+                null,
+                new object[]
+                {
+                    candidates,
+                    userIds,
+                    TestNow,
+                    SessionSelector.StaleSessionTimeoutSeconds,
+                    previous,
+                });
+        }
+
         private static List<string> GetDispositions(object diagnostics, string itemId)
         {
             var candidates = (IEnumerable)diagnostics.GetType().GetProperty("Candidates").GetValue(diagnostics);
@@ -337,6 +444,21 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
 
             return dispositions;
+        }
+
+        private static string GetDisposition(object diagnostics, string sessionId)
+        {
+            var candidates = (IEnumerable)diagnostics.GetType().GetProperty("Candidates").GetValue(diagnostics);
+            foreach (var candidate in candidates)
+            {
+                var snapshot = (SessionSnapshot)candidate.GetType().GetProperty("Snapshot").GetValue(candidate);
+                if (string.Equals(snapshot.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return (string)candidate.GetType().GetProperty("Disposition").GetValue(candidate);
+                }
+            }
+
+            return null;
         }
 
         private static SessionSnapshot Snapshot(

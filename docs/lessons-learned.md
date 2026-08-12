@@ -102,3 +102,9 @@
 - 结论：完成过期 60 秒和用户内 15 秒落后清理后，对每个共同 Item 取每位参与者的最佳 `SelectionKey`，将这些 key 排序为与用户及输入枚举顺序无关的评分向量，按 maximin 选择唯一胜者；其余 Item 走 `common-item-filtered`。全局评分完全相同时标记相关候选 `ambiguous` 并清空本轮选择，禁止按字符串、用户 ID 或输入顺序猜测。
 - 规则：评分只比较 `SelectionKey` tuple，不累加 `activityTicks`，保持能力排序、同 session 去重及单用户同分歧义语义不变。
 - 验证：`SessionSelectorTests` 覆盖多共同 Item 的全局一致选择、交换输入/用户顺序、能力差异、同分安全失败、过期/落后候选排除及诊断处置；`SyncEngineTests.PollOnce_MultipleCommonItems_SelectsOneItemForBothParticipants` 证明首轮进入 Barrier 时两端命令只绑定全局胜出 Item 的 session。
+
+## 14. Watching 同分会话只沿用唯一有效历史身份
+
+- 结论：运行时在同一用户的最佳 `SelectionKey` 同分时，仅当候选集合中恰有一个候选同时匹配上一轮已绑定的 `SessionId+ItemId` 才沿用；历史身份过期、落后、消失或 Item 不同均不得复活，仍按同分歧义安全等待。
+- 规则：公开无偏好的 `SessionSelector.Select` 语义不变；沿用候选标记为 `selected`，其余同分候选标记为 `previous-selection-filtered` 并沿用多会话诊断签名去重。
+- 验证：`SessionSelectorTests.SelectWithPreviousDiagnostics_EqualTieReusesUniquePreviousIdentity`、`SelectWithPreviousDiagnostics_DoesNotReuseExpiredOrDifferentItemIdentity` 与 `SyncEngineTests.WatchingTie_ReusesPreviousSessionIdentityWithoutRestartingOrIssuingCommands` 通过；未覆盖真实客户端重连行为。
