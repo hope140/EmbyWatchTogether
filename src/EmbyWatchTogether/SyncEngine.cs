@@ -276,7 +276,12 @@ namespace Emby.Plugins.WatchTogether
                         runtime.Error = null;
                     }
 
-                    var snapshots = SessionSelector.Select(candidates, room.JoinedParticipantUserIds, now);
+                    var selection = SessionSelector.SelectWithDiagnostics(
+                        candidates,
+                        room.JoinedParticipantUserIds,
+                        now);
+                    var snapshots = selection.Selected;
+                    LogMultipleSessionDiagnostics(runtime, room, selection, now);
                     var eligibility = RoomEligibility.Evaluate(snapshots);
                     bool eligible = eligibility.IsEligible;
                     LogEligibilityFailureIfChanged(
@@ -1042,6 +1047,89 @@ namespace Emby.Plugins.WatchTogether
             _logger?.Warn(
                 $"Room {room.Id}: eligibility failure reason={eligibility.FailureReason}; " +
                 FormatEligibilitySnapshotSummary(room, snapshots));
+        }
+
+        private void LogMultipleSessionDiagnostics(
+            RoomRuntime runtime,
+            Room room,
+            SessionSelectionDiagnostics selection,
+            DateTimeOffset now)
+        {
+            if (selection == null || !selection.HasMultipleCandidates)
+            {
+                runtime.LastMultipleSessionDiagnosticSignature = null;
+                return;
+            }
+
+            var candidates = (selection.Candidates ?? Array.Empty<SessionSelectionCandidateDiagnostic>())
+                .OrderBy(candidate => candidate.UserId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(candidate => candidate.Snapshot?.SessionId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(candidate => candidate.Snapshot?.ItemId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(candidate => candidate.Disposition, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var selectedByUser = (room.JoinedParticipantUserIds ?? Array.Empty<string>())
+                .Select(userId =>
+                {
+                    SessionSnapshot snapshot = null;
+                    selection.Selected?.TryGetValue(userId, out snapshot);
+                    return userId + "=" + (snapshot == null
+                        ? "-"
+                        : snapshot.SessionId + "/" + snapshot.ItemId);
+                });
+            string signature = string.Join(
+                "|",
+                candidates.Select(candidate =>
+                    candidate.UserId + ":" + candidate.Snapshot?.SessionId + "/" +
+                    candidate.Snapshot?.ItemId + ":" + candidate.Disposition)
+                    .Concat(selectedByUser));
+            if (string.Equals(runtime.LastMultipleSessionDiagnosticSignature, signature, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            runtime.LastMultipleSessionDiagnosticSignature = signature;
+            var details = candidates.Select(candidate =>
+            {
+                var snapshot = candidate.Snapshot;
+                if (snapshot == null)
+                {
+                    return $"user={candidate.UserId},session=-,item=-,position=-,paused=-,age=unknown,disposition={candidate.Disposition}";
+                }
+
+                string age = snapshot.LastActivityDateUtc == default
+                    ? "unknown"
+                    : Math.Max(0, (now - snapshot.LastActivityDateUtc).TotalSeconds).ToString("0.0") + "s";
+                return $"user={candidate.UserId},session={ShortMultipleSessionIdentity(snapshot.SessionId)}," +
+                    $"item={ShortMultipleSessionIdentity(snapshot.ItemId)},position={snapshot.PositionSeconds:0.0}s," +
+                    $"paused={snapshot.IsPaused},age={age},disposition={candidate.Disposition}";
+            });
+            string selectedSummary = string.Join(
+                ",",
+                (room.JoinedParticipantUserIds ?? Array.Empty<string>()).Select(userId =>
+                {
+                    SessionSnapshot snapshot = null;
+                    selection.Selected?.TryGetValue(userId, out snapshot);
+                    return $"{userId}={(snapshot == null ? "-" :
+                        ShortMultipleSessionIdentity(snapshot.SessionId) + "/" +
+                        ShortMultipleSessionIdentity(snapshot.ItemId))}";
+                }));
+            _logger?.Warn(
+                $"Room {room.Id}: multiple-session selection; candidates=[{string.Join("; ", details)}]; " +
+                $"selected=[{selectedSummary}]");
+        }
+
+        private static string ShortMultipleSessionIdentity(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "-";
+            }
+
+            const int edgeLength = 6;
+            const int maxLength = edgeLength * 2 + 3;
+            return value.Length <= maxLength
+                ? value
+                : value.Substring(0, edgeLength) + "..." + value.Substring(value.Length - edgeLength);
         }
 
         private static string FormatEligibilitySnapshotSummary(

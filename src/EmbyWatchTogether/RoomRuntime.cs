@@ -15,6 +15,8 @@ namespace Emby.Plugins.WatchTogether
 
         internal RoomEligibilityFailureReason? LastEligibilityFailureReason { get; set; }
 
+        internal string LastMultipleSessionDiagnosticSignature { get; set; }
+
         public Dictionary<string, PendingCommand> Pending { get; } = new Dictionary<string, PendingCommand>();
 
         public Dictionary<string, WaitingPauseRetryState> WaitingPauseRetries { get; } =

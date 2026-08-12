@@ -245,6 +245,99 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void MultipleSessionDiagnostics_AreDeduplicatedAndRearmedAfterRecovery()
+        {
+            CreateRoom();
+            var warnings = new List<string>();
+            var engine = CreateEngine(logManager: CreateLogManager(warnings).Object);
+            var stale = Snapshot(
+                "session-old-ABCDEFGHIJKL", "u1", paused: false, position: 10,
+                lastActivityDateUtc: _clock.Now.AddSeconds(-61));
+            var fresh = Snapshot("session-new-MNOPQRSTUVWX", "u1", paused: false, position: 20);
+            SetCandidates(stale, fresh, Snapshot("session-two-123456789012", "u2", paused: false, position: 20));
+
+            engine.PollOnce(_clock.Now);
+            Assert.Single(warnings, warning => warning.Contains("multiple-session selection"));
+            Assert.Contains("multiple-session selection", warnings[0]);
+            Assert.Contains("disposition=expired", warnings[0]);
+            Assert.Contains("disposition=selected", warnings[0]);
+            Assert.Contains("session=sessio...GHIJKL", warnings[0]);
+            Assert.Contains("session=sessio...STUVWX", warnings[0]);
+            Assert.DoesNotContain("session-old-ABCDEFGHIJKL", warnings[0]);
+
+            SetCandidates(
+                Snapshot("session-old-ABCDEFGHIJKL", "u1", paused: false, position: 99,
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-61)),
+                Snapshot("session-new-MNOPQRSTUVWX", "u1", paused: false, position: 30),
+                Snapshot("session-two-123456789012", "u2", paused: true, position: 30));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Single(warnings, warning => warning.Contains("multiple-session selection"));
+
+            SetCandidates(
+                Snapshot("session-third-ABCDEFGHIJKLMNOP", "u1", paused: false, position: 30),
+                Snapshot("session-new-MNOPQRSTUVWX", "u1", paused: false, position: 30),
+                Snapshot("session-two-123456789012", "u2", paused: false, position: 30));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, warnings.Count(warning => warning.Contains("multiple-session selection")));
+
+            SetCandidates(
+                Snapshot("session-third-ABCDEFGHIJKLMNOP", "u1", paused: false, position: 30),
+                Snapshot("session-two-123456789012", "u2", paused: false, position: 30));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, warnings.Count(warning => warning.Contains("multiple-session selection")));
+
+            SetCandidates(
+                Snapshot("session-third-ABCDEFGHIJKLMNOP", "u1", paused: false, position: 30),
+                Snapshot("session-fourth-QRSTUVWXYZABCD", "u1", paused: false, position: 30),
+                Snapshot("session-two-123456789012", "u2", paused: false, position: 30));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(3, warnings.Count(warning => warning.Contains("multiple-session selection")));
+        }
+
+        [Fact]
+        public void MultipleSessionDiagnostics_DescribeLaggingCommonFilterAndAmbiguousStages()
+        {
+            CreateRoom();
+            var warnings = new List<string>();
+            var engine = CreateEngine(logManager: CreateLogManager(warnings).Object);
+            SetCandidates(
+                Snapshot("lagging", "u1", paused: false, position: 1, itemId: "item-a",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-20)),
+                Snapshot("fresh", "u1", paused: false, position: 2, itemId: "item-b"),
+                Snapshot("u2", "u2", paused: false, position: 2, itemId: "item-a"));
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(warnings, warning => warning.Contains("disposition=lagging"));
+            Assert.Contains(warnings, warning => warning.Contains("disposition=selected"));
+
+            warnings.Clear();
+            SetCandidates(
+                Snapshot("common-a", "u1", paused: false, position: 1, itemId: "item-a"),
+                Snapshot("common-b", "u1", paused: false, position: 1, itemId: "item-b"),
+                Snapshot("u2", "u2", paused: false, position: 1, itemId: "item-a"));
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(warnings, warning => warning.Contains("disposition=common-item-filtered"));
+
+            warnings.Clear();
+            SetCandidates(
+                Snapshot("tie-a", "u1", paused: false, position: 1, itemId: "item-a"),
+                Snapshot("tie-b", "u1", paused: false, position: 1, itemId: "item-a"),
+                Snapshot("u2", "u2", paused: false, position: 1, itemId: "item-a"));
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(warnings, warning => warning.Contains("disposition=ambiguous"));
+            Assert.Contains(warnings, warning => warning.Contains("u1=-"));
+
+            warnings.Clear();
+            SetCandidates(
+                Snapshot("ranked-capable-ABCDEFGHI", "u1", paused: false, position: 1, itemId: "item-a"),
+                Snapshot("ranked-unknown-MNOPQRST", "u1", paused: false, position: 1, itemId: "item-a",
+                    supportsRemoteControl: false),
+                Snapshot("u2", "u2", paused: false, position: 1, itemId: "item-a"));
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(warnings, warning => warning.Contains("disposition=lower-ranked"));
+        }
+
+        [Fact]
         public void CommandDiagnostics_DistinguishImmediateFailureFromAcceptedUnacknowledged()
         {
             var room = CreateRoom();

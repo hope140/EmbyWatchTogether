@@ -26,7 +26,8 @@ namespace Emby.Plugins.WatchTogether
                 candidates,
                 userIds,
                 now,
-                TimeSpan.FromSeconds(staleTimeoutSeconds));
+                TimeSpan.FromSeconds(staleTimeoutSeconds),
+                null);
         }
 
         public static Dictionary<string, SessionSnapshot> Select(
@@ -39,19 +40,41 @@ namespace Emby.Plugins.WatchTogether
                 candidates,
                 userIds,
                 now,
-                staleTimeout);
+                staleTimeout,
+                null);
+        }
+
+        internal static SessionSelectionDiagnostics SelectWithDiagnostics(
+            IEnumerable<SessionSnapshot> candidates,
+            IReadOnlyList<string> userIds,
+            DateTimeOffset? now = null,
+            double staleTimeoutSeconds = StaleSessionTimeoutSeconds)
+        {
+            var diagnostics = new SessionSelectionDiagnostics();
+            var selected = SelectCore(
+                candidates,
+                userIds,
+                now,
+                TimeSpan.FromSeconds(staleTimeoutSeconds),
+                diagnostics);
+            diagnostics.Selected = selected;
+            return diagnostics;
         }
 
         private static Dictionary<string, SessionSnapshot> SelectCore(
             IEnumerable<SessionSnapshot> candidates,
             IReadOnlyList<string> userIds,
             DateTimeOffset? now,
-            TimeSpan staleTimeout)
+            TimeSpan staleTimeout,
+            SessionSelectionDiagnostics diagnostics)
         {
-            var byUser = new Dictionary<string, List<SessionSnapshot>>(StringComparer.OrdinalIgnoreCase);
+            var byUser = new Dictionary<string, List<SelectionCandidate>>(StringComparer.OrdinalIgnoreCase);
+            var allCandidates = diagnostics == null
+                ? null
+                : new List<SelectionCandidate>();
             foreach (var userId in userIds ?? Array.Empty<string>())
             {
-                byUser[userId] = new List<SessionSnapshot>();
+                byUser[userId] = new List<SelectionCandidate>();
             }
 
             foreach (var snapshot in candidates ?? Enumerable.Empty<SessionSnapshot>())
@@ -61,7 +84,17 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                byUser[snapshot.UserId].Add(snapshot);
+                var candidate = new SelectionCandidate(snapshot);
+                byUser[snapshot.UserId].Add(candidate);
+                allCandidates?.Add(candidate);
+            }
+
+            if (diagnostics != null)
+            {
+                diagnostics.HasMultipleCandidates = byUser.Values.Any(values =>
+                    values.Select(value => value.Snapshot.SessionId)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Count() > 1);
             }
 
             if (now.HasValue)
@@ -81,22 +114,39 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                var maxKey = values.Select(SelectionKey).Max();
-                var latest = values.Where(v => SelectionKey(v) == maxKey).ToList();
+                var maxKey = values.Select(v => SelectionKey(v.Snapshot)).Max();
+                var latest = values.Where(v => SelectionKey(v.Snapshot) == maxKey).ToList();
                 if (latest.Count != 1)
                 {
                     // Ambiguous: multiple equally-fresh records; never guess.
+                    foreach (var value in latest)
+                    {
+                        value.Disposition = "ambiguous";
+                    }
                     continue;
                 }
 
-                selected[pair.Key] = latest[0];
+                latest[0].Disposition = "selected";
+                selected[pair.Key] = latest[0].Snapshot;
+            }
+
+            if (diagnostics != null)
+            {
+                diagnostics.Candidates = allCandidates
+                    .Select(candidate => new SessionSelectionCandidateDiagnostic
+                    {
+                        UserId = candidate.Snapshot.UserId,
+                        Snapshot = candidate.Snapshot,
+                        Disposition = candidate.Disposition ?? "lower-ranked",
+                    })
+                    .ToList();
             }
 
             return selected;
         }
 
         private static void RemoveExpired(
-            Dictionary<string, List<SessionSnapshot>> byUser,
+            Dictionary<string, List<SelectionCandidate>> byUser,
             DateTimeOffset now,
             TimeSpan staleTimeout)
         {
@@ -104,13 +154,22 @@ namespace Emby.Plugins.WatchTogether
             foreach (var key in byUser.Keys.ToList())
             {
                 byUser[key] = byUser[key]
-                    .Where(s => s.LastActivityDateUtc == default || s.LastActivityDateUtc >= cutoff)
+                    .Where(s =>
+                    {
+                        if (s.Snapshot.LastActivityDateUtc == default || s.Snapshot.LastActivityDateUtc >= cutoff)
+                        {
+                            return true;
+                        }
+
+                        s.Disposition = "expired";
+                        return false;
+                    })
                     .ToList();
             }
         }
 
         private static void RemoveSessionsLaggingBehindUserLatest(
-            Dictionary<string, List<SessionSnapshot>> byUser)
+            Dictionary<string, List<SelectionCandidate>> byUser)
         {
             foreach (var key in byUser.Keys.ToList())
             {
@@ -120,21 +179,22 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                DateTimeOffset latest = values.Max(s => s.LastActivityDateUtc);
+                DateTimeOffset latest = values.Max(s => s.Snapshot.LastActivityDateUtc);
                 byUser[key] = values
-                    .Where(s => s.LastActivityDateUtc == default ||
+                    .Where(s => s.Snapshot.LastActivityDateUtc == default ||
                                 latest == default ||
-                                (latest - s.LastActivityDateUtc).TotalSeconds <= PerUserActivityGapSeconds)
+                                (latest - s.Snapshot.LastActivityDateUtc).TotalSeconds <= PerUserActivityGapSeconds ||
+                                MarkDisposition(s, "lagging"))
                     .ToList();
             }
         }
 
-        private static void PreferCommonItem(Dictionary<string, List<SessionSnapshot>> byUser)
+        private static void PreferCommonItem(Dictionary<string, List<SelectionCandidate>> byUser)
         {
             var itemSets = byUser
                 .Where(p => p.Value.Count > 0)
                 .Select(p => new HashSet<string>(
-                    p.Value.Select(s => s.ItemId).Where(id => !string.IsNullOrEmpty(id)),
+                    p.Value.Select(s => s.Snapshot.ItemId).Where(id => !string.IsNullOrEmpty(id)),
                     StringComparer.OrdinalIgnoreCase))
                 .ToList();
 
@@ -158,24 +218,47 @@ namespace Emby.Plugins.WatchTogether
             foreach (var key in byUser.Keys.ToList())
             {
                 byUser[key] = byUser[key]
-                    .Where(s => string.Equals(s.ItemId, commonItem, StringComparison.OrdinalIgnoreCase))
+                    .Where(s =>
+                    {
+                        if (string.Equals(s.Snapshot.ItemId, commonItem, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+
+                        s.Disposition = "common-item-filtered";
+                        return false;
+                    })
                     .ToList();
             }
         }
 
-        private static List<SessionSnapshot> DeduplicateBySessionId(List<SessionSnapshot> values)
+        private static List<SelectionCandidate> DeduplicateBySessionId(List<SelectionCandidate> values)
         {
-            var bySession = new Dictionary<string, SessionSnapshot>(StringComparer.OrdinalIgnoreCase);
+            var bySession = new Dictionary<string, SelectionCandidate>(StringComparer.OrdinalIgnoreCase);
             foreach (var value in values)
             {
-                if (!bySession.TryGetValue(value.SessionId, out var previous) ||
-                    SelectionKey(value).CompareTo(SelectionKey(previous)) > 0)
+                if (!bySession.TryGetValue(value.Snapshot.SessionId, out var previous))
                 {
-                    bySession[value.SessionId] = value;
+                    bySession[value.Snapshot.SessionId] = value;
+                }
+                else if (SelectionKey(value.Snapshot).CompareTo(SelectionKey(previous.Snapshot)) > 0)
+                {
+                    previous.Disposition = "lower-ranked";
+                    bySession[value.Snapshot.SessionId] = value;
+                }
+                else
+                {
+                    value.Disposition = "lower-ranked";
                 }
             }
 
             return bySession.Values.ToList();
+        }
+
+        private static bool MarkDisposition(SelectionCandidate candidate, string disposition)
+        {
+            candidate.Disposition = disposition;
+            return false;
         }
 
         private static (int active, int capabilityRank, long activityTicks) SelectionKey(SessionSnapshot snapshot)
@@ -186,6 +269,18 @@ namespace Emby.Plugins.WatchTogether
                 : (snapshot.Capabilities != null && snapshot.Capabilities.SupportedCommands.Count > 0 ? 1 : 0);
             long activity = snapshot.LastActivityDateUtc.Ticks;
             return (active, capabilityRank, activity);
+        }
+
+        private sealed class SelectionCandidate
+        {
+            public SelectionCandidate(SessionSnapshot snapshot)
+            {
+                Snapshot = snapshot;
+            }
+
+            public SessionSnapshot Snapshot { get; }
+
+            public string Disposition { get; set; }
         }
     }
 }
