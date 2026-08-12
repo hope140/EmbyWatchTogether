@@ -430,6 +430,19 @@ namespace Emby.Plugins.WatchTogether.Tests
             runtime.State = RoomState.Waiting;
             result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
             Assert.Equal("waiting_for_playback", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+
+            runtime.Error = "command failed";
+            SetSnapshotUnavailable(runtime, true);
+            Assert.Equal(
+                "snapshot_unavailable",
+                GetString(GetRoomResponse(WithPlugin(plugin, () => service.Get(new GetRoomsRequest())), room.Id), "StatusReason"));
+            Assert.Equal(
+                "snapshot_unavailable",
+                GetString(WithPlugin(plugin, () => service.Get(new GetRoomStateRequest { Id = room.Id })), "StatusReason"));
+            SetSnapshotUnavailable(runtime, false);
+            Assert.Equal(
+                "command_failed",
+                GetString(GetRoomResponse(WithPlugin(plugin, () => service.Get(new GetRoomsRequest())), room.Id), "StatusReason"));
         }
 
         [Fact]
@@ -1073,6 +1086,15 @@ namespace Emby.Plugins.WatchTogether.Tests
                 ? null
                 : Enum.Parse(property.PropertyType.GetGenericArguments()[0], reasonName);
             property.SetValue(runtime, value);
+        }
+
+        private static void SetSnapshotUnavailable(RoomRuntime runtime, bool unavailable)
+        {
+            var method = typeof(RoomRuntime).GetMethod(
+                unavailable ? "EnterSnapshotUnavailableProtection" : "ExitSnapshotUnavailableProtection",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            method.Invoke(runtime, null);
         }
 
         private sealed class RecordingIssuer : ICommandIssuer

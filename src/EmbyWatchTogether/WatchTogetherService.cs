@@ -536,6 +536,7 @@ namespace Emby.Plugins.WatchTogether
         {
             if (room == null || runtime == null) return "waiting_for_playback";
             if (!IsSameServer(room.ServerId, plugin.ResolveServerId())) return "server_unavailable";
+            if (runtime.SnapshotUnavailable) return "snapshot_unavailable";
             if (string.Equals(runtime.Error, "两位参与者打开了不同视频，暂不发送同步指令", StringComparison.Ordinal)) return "different_video";
             if (string.Equals(runtime.Error, "播放已停止，等待双方重新打开同一视频", StringComparison.Ordinal)) return "playback_stopped";
             if (!string.IsNullOrEmpty(runtime.Error)) return "command_failed";

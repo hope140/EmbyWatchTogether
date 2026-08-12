@@ -387,6 +387,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     var statusReasonMessages = {
         server_unavailable: '房间所属服务器暂不可用，请确认当前服务器连接。',
+        snapshot_unavailable: '暂时无法读取播放会话，自动同步已进入保护状态；恢复后会重新对齐。',
         different_video: '两位参与者打开了不同视频，请打开同一视频。',
         playback_stopped: '播放已停止，请双方重新打开同一视频。',
         command_failed: '播放控制未完成，请检查两位参与者的客户端。',
