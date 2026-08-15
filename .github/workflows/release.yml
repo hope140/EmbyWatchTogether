@@ -7,6 +7,13 @@ on:
         description: Canonical release tag, for example v1.2.3.4
         required: true
         type: string
+      channel:
+        description: Release channel; stable must be dispatched from main and beta from beta
+        required: true
+        type: choice
+        options:
+          - stable
+          - beta
       key_id:
         description: ReleaseTrustStore key identifier
         required: true
@@ -24,8 +31,35 @@ jobs:
       contents: write
     env:
       RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      RELEASE_TRIGGER_REF: ${{ github.ref_name }}
       RELEASE_KEY_ID: ${{ inputs.key_id }}
     steps:
+      - name: Validate release channel and dispatch branch
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $channel = $env:RELEASE_CHANNEL
+          $triggerRef = $env:RELEASE_TRIGGER_REF
+          if ($channel -notin @('stable', 'beta')) {
+              throw ('Unknown release channel: {0}' -f $channel)
+          }
+
+          $expectedRef = if ($channel -eq 'stable') { 'main' } else { 'beta' }
+          if (-not [string]::Equals(
+                  $triggerRef,
+                  $expectedRef,
+                  [System.StringComparison]::Ordinal)) {
+              throw ('The {0} channel must be dispatched from {1}, not {2}.' -f
+                  $channel,
+                  $expectedRef,
+                  $triggerRef)
+          }
+
+          Write-Output ('Release channel {0} is authorized from branch {1}.' -f $channel, $triggerRef)
+
       - name: Checkout requested tag
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -581,14 +615,22 @@ jobs:
               throw 'The Chinese release notes must be non-empty and contain CJK characters.'
           }
 
-          gh release create $env:RELEASE_TAG `
-              'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll' `
-              'dist/EmbyWatchTogether.zip' `
-              'dist/EmbyWatchTogether.release.manifest' `
-              'dist/EmbyWatchTogether.release.manifest.sig' `
-              --verify-tag `
-              --notes-file $releaseNotesPath `
-              --title ('Release ' + $env:RELEASE_TAG)
+          $releaseArguments = @(
+              'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll'
+              'dist/EmbyWatchTogether.zip'
+              'dist/EmbyWatchTogether.release.manifest'
+              'dist/EmbyWatchTogether.release.manifest.sig'
+              '--verify-tag'
+              '--notes-file'
+              $releaseNotesPath
+              '--title'
+              ('Release ' + $env:RELEASE_TAG)
+          )
+          if ($env:RELEASE_CHANNEL -eq 'beta') {
+              $releaseArguments += '--prerelease'
+          }
+
+          gh release create $env:RELEASE_TAG @releaseArguments
           if ($LASTEXITCODE -ne 0) {
               throw 'GitHub Release creation failed.'
           }

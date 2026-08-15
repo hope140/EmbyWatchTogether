@@ -115,7 +115,11 @@ function Assert-InputShape {
         [string]$InputsText,
 
         [Parameter(Mandatory = $true)]
-        [string]$InputName
+        [string]$InputName,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('string', 'choice')]
+        [string]$ExpectedType = 'string'
     )
 
     $fieldPattern = '(?ms)^\s{6}' + [System.Text.RegularExpressions.Regex]::Escape($InputName) + ':\s*\n(?<field>.*?)(?=^\s{6}[A-Za-z_][A-Za-z0-9_-]*:\s*$|\z)'
@@ -124,7 +128,7 @@ function Assert-InputShape {
 
     $fieldText = $fieldMatch.Groups['field'].Value
     Assert-Matches -Text $fieldText -Pattern '(?m)^\s{8}required:\s*true\s*$' -Message ('The {0} input must be required.' -f $InputName)
-    Assert-Matches -Text $fieldText -Pattern '(?m)^\s{8}type:\s*string\s*$' -Message ('The {0} input must be a string.' -f $InputName)
+    Assert-Matches -Text $fieldText -Pattern ('(?m)^\s{{8}}type:\s*{0}\s*$' -f $ExpectedType) -Message ('The {0} input must be a {1}.' -f $InputName, $ExpectedType)
 }
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path -Path $PSScriptRoot -ChildPath '..'))
@@ -163,6 +167,15 @@ Assert-True -Condition $inputsMatch.Success -Message 'The workflow_dispatch inpu
 $inputsText = $inputsMatch.Groups['inputs'].Value
 Assert-InputShape -InputsText $inputsText -InputName 'tag'
 Assert-InputShape -InputsText $inputsText -InputName 'key_id'
+Assert-InputShape -InputsText $inputsText -InputName 'channel' -ExpectedType 'choice'
+$channelInputMatch = [System.Text.RegularExpressions.Regex]::Match(
+    $inputsText,
+    '(?ms)^\s{6}channel:\s*\n(?<field>.*?)(?=^\s{6}[A-Za-z_][A-Za-z0-9_-]*:\s*$|\z)')
+Assert-True -Condition $channelInputMatch.Success -Message 'The channel input block is missing.'
+$channelInputText = $channelInputMatch.Groups['field'].Value
+Assert-Matches -Text $channelInputText -Pattern '(?m)^\s{8}options:\s*$' -Message 'The channel input must declare options.'
+Assert-Matches -Text $channelInputText -Pattern '(?m)^\s{10}-\s*stable\s*$' -Message 'The channel input must offer stable.'
+Assert-Matches -Text $channelInputText -Pattern '(?m)^\s{10}-\s*beta\s*$' -Message 'The channel input must offer beta.'
 
 Assert-Matches -Text $workflowText -Pattern '(?m)^permissions:\s*$' -Message 'Top-level contents permissions are missing.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{2}contents:\s*write\s*$' -Message 'Top-level contents write permission is missing.'
@@ -171,7 +184,13 @@ Assert-Matches -Text $workflowText -Pattern '(?m)^\s{4}permissions:\s*$' -Messag
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{6}contents:\s*write\s*$' -Message 'Job-level contents write permission is missing.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{4}runs-on:\s*windows-latest\s*$' -Message 'The workflow must run on windows-latest.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{6}RELEASE_TAG:\s*\$\{\{\s*inputs\.tag\s*\}\}\s*$' -Message 'The tag input must be passed to PowerShell through an environment variable.'
+Assert-Matches -Text $workflowText -Pattern '(?m)^\s{6}RELEASE_CHANNEL:\s*\$\{\{\s*inputs\.channel\s*\}\}\s*$' -Message 'The channel input must be passed to PowerShell through an environment variable.'
+Assert-Matches -Text $workflowText -Pattern '(?m)^\s{6}RELEASE_TRIGGER_REF:\s*\$\{\{\s*github\.ref_name\s*\}\}\s*$' -Message 'The workflow dispatch branch must be passed to PowerShell through an environment variable.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{6}RELEASE_KEY_ID:\s*\$\{\{\s*inputs\.key_id\s*\}\}\s*$' -Message 'The key_id input must be passed to PowerShell through an environment variable.'
+
+$channelValidationIndex = $workflowText.IndexOf('Validate release channel and dispatch branch', [System.StringComparison]::Ordinal)
+$checkoutStepIndex = $workflowText.IndexOf('Checkout requested tag', [System.StringComparison]::Ordinal)
+Assert-True -Condition ($channelValidationIndex -ge 0 -and $channelValidationIndex -lt $checkoutStepIndex) -Message 'The channel and branch gate must run before checkout.'
 
 $checkoutActionSha = 'fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'
 $setupDotnetActionSha = '26b0ec14cb23fa6904739307f278c14f94c95bf1'
@@ -203,6 +222,10 @@ Assert-True -Condition ($runBlocks.Count -ge 9) -Message 'The workflow is missin
 $runText = $runBlocks -join "`n"
 
 Assert-Matches -Text $runText -Pattern 'RELEASE_TAG|RELEASE_KEY_ID' -Message 'PowerShell steps do not consume the environment inputs.'
+Assert-Matches -Text $runText -Pattern 'RELEASE_CHANNEL|RELEASE_TRIGGER_REF' -Message 'PowerShell steps do not consume the channel and dispatch branch inputs.'
+Assert-Matches -Text $runText -Pattern '\$channel\s+-notin\s+@\(''stable'',\s*''beta''\)' -Message 'The workflow must reject unknown release channels.'
+Assert-Matches -Text $runText -Pattern '\$expectedRef\s*=\s*if\s*\(\$channel\s+-eq\s+''stable''\)\s*\{\s*''main''\s*\}\s*else\s*\{\s*''beta''\s*\}' -Message 'The workflow must map stable to main and beta to beta.'
+Assert-Matches -Text $runText -Pattern '(?s)Equals\(\s*\$triggerRef\s*,\s*\$expectedRef' -Message 'The workflow must reject channel and dispatch branch mismatches.'
 Assert-Matches -Text $runText -Pattern 'WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64' -Message 'The signing secret environment variable is not checked or consumed.'
 Assert-Matches -Text $runText -Pattern 'ReleaseTrustStore\.cs' -Message 'The workflow does not inspect ReleaseTrustStore.cs.'
 Assert-Matches -Text $runText -Pattern 'RSAKeyValue' -Message 'The workflow does not require an RSAKeyValue public key.'
@@ -258,14 +281,21 @@ Assert-Matches -Text $runText -Pattern 'dotnet\s+test\s+tests[\\/]EmbyWatchToget
 Assert-Matches -Text $runText -Pattern 'pwsh\s+scripts[\\/]build\.ps1\s+-Configuration\s+Release' -Message 'The release packaging command is missing.'
 Assert-Matches -Text $runText -Pattern 'pwsh\s+tests[\\/]release-signing\.tests\.ps1' -Message 'The release signing test command is missing.'
 Assert-Matches -Text $runText -Pattern 'Sign-ReleaseManifest\.ps1' -Message 'The release manifest signing command is missing.'
-Assert-Matches -Text $runText -Pattern 'gh\s+release\s+create\s+\$env:RELEASE_TAG' -Message 'The gh release create command is missing.'
+Assert-Matches -Text $runText -Pattern 'gh\s+release\s+create\s+\$env:RELEASE_TAG\s+@releaseArguments' -Message 'The gh release create command is missing.'
 Assert-Matches -Text $runText -Pattern '--verify-tag' -Message 'The release creation command must use --verify-tag.'
 Assert-Matches -Text $runText -Pattern 'docs/releases/\{0\}\.md' -Message 'The release notes path must be derived from the canonical tag.'
 Assert-Matches -Text $runText -Pattern 'releaseNotesPath|releaseNotesBytes|strictUtf8|CJK|3400' -Message 'The workflow must validate release notes encoding, content, and Chinese characters.'
-Assert-Matches -Text $runText -Pattern '--notes-file\s+\$releaseNotesPath' -Message 'The release creation command must use the validated notes file.'
+Assert-Matches -Text $runText -Pattern '(?s)--notes-file.*\$releaseNotesPath' -Message 'The release creation command must use the validated notes file.'
 Assert-NotMatches -Text $runText -Pattern '--generate-notes' -Message 'The release creation command must not generate unreviewed notes.'
 Assert-NotMatches -Text $runText -Pattern '(?im)^\s*(?:Write-Output|Write-Host|echo)\b.*\$(?:releaseNotesText|releaseNotesBytes)\b' -Message 'The workflow must not echo release notes content.'
-Assert-Matches -Text $runText -Pattern '--title\s+\(\x27Release\s*\x27\s+\+\s+\$env:RELEASE_TAG\)' -Message 'The release title must contain the requested tag.'
+Assert-Matches -Text $runText -Pattern '(?s)''--title''.*\(''Release\s*''\s*\+\s*\$env:RELEASE_TAG\)' -Message 'The release title must contain the requested tag.'
+$releaseRunBlocks = @($runBlocks | Where-Object { $_ -match 'gh\s+release\s+create' })
+Assert-Equal -Expected 1 -Actual $releaseRunBlocks.Count -Message 'The workflow must have exactly one release creation step.'
+$releaseRunText = [string]$releaseRunBlocks[0]
+Assert-Matches -Text $releaseRunText -Pattern 'if\s*\(\$env:RELEASE_CHANNEL\s+-eq\s+''beta''\)' -Message 'The release command must identify the beta channel.'
+Assert-Matches -Text $releaseRunText -Pattern '\$releaseArguments\s*\+=\s+''--prerelease''' -Message 'The beta release command must add --prerelease.'
+Assert-Equal -Expected 1 -Actual ([System.Text.RegularExpressions.Regex]::Matches($releaseRunText, '--prerelease')).Count -Message 'The release workflow must contain one conditional --prerelease option.'
+Assert-NotMatches -Text $releaseRunText -Pattern 'gh\s+release\s+create[^\r\n]*--prerelease' -Message 'The stable release command must not unconditionally add --prerelease.'
 
 $projectPath = Join-Path $repositoryRoot 'src/EmbyWatchTogether/EmbyWatchTogether.csproj'
 $projectText = Get-Content -LiteralPath $projectPath -Raw

@@ -62,8 +62,8 @@ ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步�
 - `scripts/release/New-ReleaseSigningKey.ps1`：在仓库外生成 RSA PKCS#8 私钥和 `RSAKeyValue` 公钥；私钥不得写入仓库。
 - `scripts/release/Sign-ReleaseManifest.ps1`：检查 DLL 名称、程序集名和版本，流式计算大小与 SHA-256，并生成 canonical manifest 与 detached signature。
 - `tests/release-signing.tests.ps1`：验证密钥生成、清单 canonical 规则、签名和 DLL 校验流程。
-- `tests/release-workflow.tests.ps1`：验证 workflow 只允许手动触发、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
-- `.github/workflows/release.yml`：只接受 `workflow_dispatch` 的 `tag`、`key_id` 输入；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产，不部署服务器。匹配 Secret 缺失或错误、未知 key 或签名失败时会安全失败。
+- `tests/release-workflow.tests.ps1`：验证 workflow 只允许手动触发、channel 与分支门禁、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
+- `.github/workflows/release.yml`：只接受 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入；`stable` 仅允许从 `main` 触发，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配或签名失败时会安全失败。
 
 ## 正式版更新实现约束
 
@@ -73,7 +73,7 @@ ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步�
 - `EmbyWatchTogether.release.manifest`
 - `EmbyWatchTogether.release.manifest.sig`
 
-检查入口使用这三个资产的 `releases/latest/download/<asset>` 地址，不调用 GitHub REST API。发布清单必须是严格 UTF-8、LF 换行的 canonical 字段序列（`schema`、`keyId`、`tag`、`version`、`assetName`、`size`、`sha256`）；签名使用 RSA PKCS#1 v1.5 + SHA-256。插件会校验 `keyId` 是否受信任，再以流式 SHA-256、文件大小、程序集名和程序集版本验证 DLL。只有清单验证通过后，安装器的 `sourceUrl` 才使用清单 `tag` 对应的精确地址：`https://github.com/hope140/EmbyWatchTogether/releases/download/<tag>/Emby.Plugins.WatchTogether.dll`；MD5 仅作为 Emby installer 的二次校验，不是发布信任根。
+检查入口使用这三个资产的 `releases/latest/download/<asset>` 地址，不调用 GitHub REST API；因此它继续只获取正式 stable Release，GitHub beta prerelease 不会进入该入口。测试版如需安装，维护者必须手动获取并验证 prerelease 资产，不能将此流程或静态测试描述为真实客户端验收。发布清单必须是严格 UTF-8、LF 换行的 canonical 字段序列（`schema`、`keyId`、`tag`、`version`、`assetName`、`size`、`sha256`）；签名使用 RSA PKCS#1 v1.5 + SHA-256。插件会校验 `keyId` 是否受信任，再以流式 SHA-256、文件大小、程序集名和程序集版本验证 DLL。只有清单验证通过后，安装器的 `sourceUrl` 才使用清单 `tag` 对应的精确地址：`https://github.com/hope140/EmbyWatchTogether/releases/download/<tag>/Emby.Plugins.WatchTogether.dll`；MD5 仅作为 Emby installer 的二次校验，不是发布信任根。
 
 安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示；重启前同一版本不会重复安装。正式版 Release 必须包含固定的四个资产：DLL、`EmbyWatchTogether.zip`、发布清单和 detached signature，并且 tag 与三项程序集版本一致。
 

@@ -50,6 +50,14 @@ Git tag：v1.3.0.6
 
 当前项目版本为 `1.3.0.6`，对应发布 tag 预期为 `v1.3.0.6`。`1.3.0.5`、`1.3.0.4`、`1.3.0.3`、`1.3.0.2` 和 `1.3.0.1` 保留为历史版本，不因本次修正而覆盖或重命名；本次 beta 尚未创建正式 Release。现有 `1.2.0.x` 历史版本主要使用第四段递增；该历史约定保留，后续发布按本文区分功能、修复和修订级别。
 
+## 发布通道
+
+- `main` 只用于 `stable` 正式发布；`stable` workflow 创建普通 GitHub Release。
+- `beta` 只用于 `beta` 测试发布；`beta` workflow 创建 GitHub prerelease。
+- 手动运行 workflow 时必须选择 `channel` 并提供规范数字 tag。workflow 会拒绝未知 channel，以及 `stable` 从非 `main` 或 `beta` 从非 `beta` 触发的请求。
+- channel 只改变 Release 通道标记，不改变 tag、manifest 的 `tag`/`version` 约束或四个固定签名资产名称；不得使用 `-beta` 等版本后缀。
+- GitHub prerelease 不会成为 `releases/latest`。正式版更新器继续只读取 `releases/latest`；测试版需要由维护者手动获取并验证，不能据此声称已完成真实客户端验收。
+
 以当前版本为基准：
 
 - 小范围兼容性修正：`1.3.0.6` / `v1.3.0.6`；
@@ -66,7 +74,7 @@ Git tag：v1.3.0.6
 3. 为该版本准备并审核 `docs/releases/v<version>.md` 中文 Release Notes，确认内容覆盖用户可见变化、配置兼容性和升级注意；
 4. 运行构建、测试和发布校验；
 5. 在包含版本字段和 Release Notes 的提交上创建唯一的四段 `v` 前缀 tag；
-6. 手动发布 workflow 时，将同一个 tag 作为 `tag` 输入。
+6. 手动发布 workflow 时，选择与触发分支匹配的 `channel`，并将同一个 tag 作为 `tag` 输入。
 
 相关实现和校验见：
 
