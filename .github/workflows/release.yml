@@ -74,6 +74,7 @@ jobs:
       - name: Validate release inputs and trust store
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64: ${{ secrets.WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64 }}
         run: |
           Set-StrictMode -Version Latest
@@ -89,12 +90,12 @@ jobs:
               throw 'The release key_id input is required.'
           }
 
-          $canonicalVersionPattern = '\Av(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*))?\z'
+          $canonicalVersionPattern = '\Av(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\z'
           if (-not [System.Text.RegularExpressions.Regex]::IsMatch(
                   $tag,
                   $canonicalVersionPattern,
                   [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
-              throw 'The tag must be a canonical v<3 or 4 numeric-part> version.'
+              throw 'The tag must be a canonical v<4 numeric-part> version.'
           }
 
           $versionText = $tag.Substring(1)
@@ -110,6 +111,45 @@ jobs:
                   $versionText,
                   [System.StringComparison]::Ordinal)) {
               throw 'The tag version is not canonical.'
+          }
+
+          if ($channel -eq 'stable') {
+              $formalReleaseTagNames = @(gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')
+              $releaseApiExitCode = $LASTEXITCODE
+              if ($releaseApiExitCode -ne 0) {
+                  throw 'Could not query GitHub Releases to validate the stable version.'
+              }
+
+              $historicalFormalVersions = @(
+                  foreach ($releaseTagName in $formalReleaseTagNames) {
+                      if ($releaseTagName -notmatch '\Av(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\z') {
+                          continue
+                      }
+
+                      try {
+                          [Version]::Parse($releaseTagName.Substring(1))
+                      }
+                      catch {
+                          continue
+                      }
+                  }
+              )
+
+              if ($historicalFormalVersions.Count -gt 0) {
+                  $highestFormalVersion = $historicalFormalVersions | Sort-Object -Descending | Select-Object -First 1
+                  if ($tagVersion -le $highestFormalVersion) {
+                      throw ('The stable version {0} must be higher than the highest formal Release {1}.' -f
+                          $versionText,
+                          $highestFormalVersion)
+                  }
+
+                  if ($tagVersion.Major -eq $highestFormalVersion.Major -and
+                      $tagVersion.Minor -eq $highestFormalVersion.Minor -and
+                      $tagVersion.Build -eq $highestFormalVersion.Build) {
+                      throw ('The stable version {0} must change MAJOR, MINOR, or PATCH; REVISION-only increments are prerelease-only.' -f
+                          $versionText)
+                  }
+              }
           }
 
           if (-not [System.Text.RegularExpressions.Regex]::IsMatch(

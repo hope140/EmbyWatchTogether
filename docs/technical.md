@@ -29,7 +29,7 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。当前项目版本为 `1.4.0.0`，对应发布 tag `v1.4.0.0`，已合入 `main` 并进入正式发布线；后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前项目版本为 `1.4.0.0`，对应发布 tag `v1.4.0.0`，已合入 `main` 并进入正式发布线；后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
@@ -63,7 +63,7 @@ ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步�
 - `scripts/release/Sign-ReleaseManifest.ps1`：检查 DLL 名称、程序集名和版本，流式计算大小与 SHA-256，并生成 canonical manifest 与 detached signature。
 - `tests/release-signing.tests.ps1`：验证密钥生成、清单 canonical 规则、签名和 DLL 校验流程。
 - `tests/release-workflow.tests.ps1`：验证 workflow 只允许手动触发、channel 与分支门禁、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
-- `.github/workflows/release.yml`：只接受 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入；`stable` 仅允许从 `main` 触发，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配或签名失败时会安全失败。
+- `.github/workflows/release.yml`：只接受 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入；新 tag 必须是四段规范数字；`stable` 仅允许从 `main` 触发并通过 GitHub Releases API 检查最高正式版本，要求前三段至少一段变化，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配、版本门禁或签名失败时会安全失败。
 
 ## 正式版更新实现约束
 
