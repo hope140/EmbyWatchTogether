@@ -64,26 +64,27 @@ namespace Emby.Plugins.WatchTogether.Tests
             using (var fixture = SignedReleaseFixture.Create())
             {
                 fixture.EnableBetaPaths();
+                var currentTag = fixture.CurrentTag;
                 var releases = new List<GitHubReleaseApiDto>
                 {
                     CreateApiRelease("v9.0.0", prerelease: false, draft: false),
                     CreateApiRelease("v8.0.0", prerelease: true, draft: true),
-                    CreateApiRelease("v1.3.0.6", prerelease: true, draft: false),
-                    CreateApiRelease("v1.3.0.5", prerelease: true, draft: false),
+                    CreateApiRelease(currentTag, prerelease: true, draft: false),
+                    CreateApiRelease("v0.0.0", prerelease: true, draft: false),
                 };
                 var client = CreateBetaClient(fixture, releases, out var requestedApiUrls);
 
                 var verified = await client.CheckForLatestAsync(CancellationToken.None);
 
-                Assert.Equal("v1.3.0.6", verified.Release.TagName);
+                Assert.Equal(currentTag, verified.Release.TagName);
                 Assert.True(verified.Release.Prerelease);
                 Assert.Equal(new[] { GitHubReleaseClient.ReleasesApiUrl }, requestedApiUrls);
                 Assert.Equal(
                     new[]
                     {
-                        GitHubReleaseClient.RepositoryUrl + "/releases/download/v1.3.0.6/" + GitHubReleaseClient.AssetName,
-                        GitHubReleaseClient.RepositoryUrl + "/releases/download/v1.3.0.6/" + GitHubReleaseClient.ManifestAssetName,
-                        GitHubReleaseClient.RepositoryUrl + "/releases/download/v1.3.0.6/" + GitHubReleaseClient.SignatureAssetName,
+                        GitHubReleaseClient.RepositoryUrl + "/releases/download/" + currentTag + "/" + GitHubReleaseClient.AssetName,
+                        GitHubReleaseClient.RepositoryUrl + "/releases/download/" + currentTag + "/" + GitHubReleaseClient.ManifestAssetName,
+                        GitHubReleaseClient.RepositoryUrl + "/releases/download/" + currentTag + "/" + GitHubReleaseClient.SignatureAssetName,
                     },
                     fixture.RequestedUrls);
                 fixture.AssertReturnedFilesAreClean();
@@ -96,7 +97,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             using (var fixture = SignedReleaseFixture.Create())
             {
                 fixture.EnableBetaPaths();
-                var rawJson = "[{\"tag_name\":\"v1.3.0.6\",\"html_url\":\"https://example.invalid/release\",\"draft\":false,\"prerelease\":true,\"assets\":[" +
+                var rawJson = "[{\"tag_name\":\"" + fixture.CurrentTag + "\",\"html_url\":\"https://example.invalid/release\",\"draft\":false,\"prerelease\":true,\"assets\":[" +
                     "{\"name\":\"Emby.Plugins.WatchTogether.dll\",\"browser_download_url\":\"https://example.invalid/dll\"}," +
                     "{\"name\":\"EmbyWatchTogether.release.manifest\"}," +
                     "{\"name\":\"EmbyWatchTogether.release.manifest.sig\"}]}]";
@@ -121,7 +122,7 @@ namespace Emby.Plugins.WatchTogether.Tests
 
                 var verified = await client.CheckForLatestAsync(CancellationToken.None);
 
-                Assert.Equal("v1.3.0.6", verified.Release.TagName);
+                Assert.Equal(fixture.CurrentTag, verified.Release.TagName);
                 Assert.Equal(GitHubReleaseClient.AssetName, verified.Asset.Name);
                 serializer.Verify(x => x.DeserializeFromString<List<GitHubReleaseApiDto>>(rawJson), Times.Once);
                 fixture.AssertReturnedFilesAreClean();
@@ -153,7 +154,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             using (var fixture = SignedReleaseFixture.Create())
             {
-                var missingAsset = CreateApiRelease("v1.3.0.6", prerelease: true, draft: false);
+                var missingAsset = CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false);
                 missingAsset.assets.RemoveAt(2);
                 var client = CreateBetaClient(fixture, new List<GitHubReleaseApiDto> { missingAsset }, out _);
 
@@ -212,7 +213,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                     fixture,
                     new List<GitHubReleaseApiDto>
                     {
-                        CreateApiRelease("v1.3.0.6", prerelease: true, draft: false),
+                        CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
                     },
                     out _);
 
@@ -234,12 +235,12 @@ namespace Emby.Plugins.WatchTogether.Tests
                     fixture,
                     new List<GitHubReleaseApiDto>
                     {
-                        CreateApiRelease("v1.3.0.6", prerelease: true, draft: false),
+                        CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
                     },
                     out _,
                     afterResponse: url =>
                     {
-                        if (string.Equals(url, GitHubReleaseClient.RepositoryUrl + "/releases/download/v1.3.0.6/" + GitHubReleaseClient.ManifestAssetName, StringComparison.Ordinal))
+                        if (string.Equals(url, GitHubReleaseClient.RepositoryUrl + "/releases/download/" + fixture.CurrentTag + "/" + GitHubReleaseClient.ManifestAssetName, StringComparison.Ordinal))
                         {
                             cancellation.Cancel();
                         }
@@ -552,6 +553,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             public string ManifestPath { get; }
 
             public string SignaturePath { get; }
+
+            public string CurrentTag => "v" + _manifestVersion;
 
             public string KeyId { get; }
 
