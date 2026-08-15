@@ -1,3 +1,4 @@
+using System.Globalization;
 using MediaBrowser.Model.Session;
 
 namespace Emby.Plugins.WatchTogether
@@ -15,6 +16,23 @@ namespace Emby.Plugins.WatchTogether
                 Text = text,
                 TimeoutMs = timeoutMs,
             };
+        }
+
+        public static GeneralCommand DisplayMessageCommand(string header, string text, int? timeoutMs = null)
+        {
+            var message = DisplayMessage(header, text, timeoutMs);
+            var command = new GeneralCommand
+            {
+                Name = GeneralCommandType.DisplayMessage.ToString(),
+            };
+            command.Arguments["Header"] = message.Header;
+            command.Arguments["Text"] = message.Text;
+            if (message.TimeoutMs.HasValue)
+            {
+                command.Arguments["TimeoutMs"] = message.TimeoutMs.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            return command;
         }
     }
 }

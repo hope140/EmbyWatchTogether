@@ -533,14 +533,14 @@ namespace Emby.Plugins.WatchTogether
 
             try
             {
-                var command = MessageCommandFactory.DisplayMessage(
+                var command = MessageCommandFactory.DisplayMessageCommand(
                     "Watch Together",
                     "当前已是最新" + GetChannelLabel(verifiedRelease) +
                     " v" + FormatVersion(currentVersion) + "。",
                     timeoutMs: 3000);
 
                 await _sessionManager.SendMessageToAdminSessions(
-                    "Message",
+                    "GeneralCommand",
                     command,
                     cancellationToken).ConfigureAwait(false);
             }

@@ -117,8 +117,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             var installation = CreateInstallationManager(out var installMock);
             var sessionManager = new Mock<ISessionManager>();
             sessionManager.Setup(x => x.SendMessageToAdminSessions(
-                    "Message",
-                    It.IsAny<MessageCommand>(),
+                    "GeneralCommand",
+                    It.IsAny<GeneralCommand>(),
                     It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
@@ -141,11 +141,12 @@ namespace Emby.Plugins.WatchTogether.Tests
                     It.IsAny<IProgress<double>>(),
                     It.IsAny<CancellationToken>()), Times.Never);
                 sessionManager.Verify(x => x.SendMessageToAdminSessions(
-                    "Message",
-                    It.Is<MessageCommand>(command =>
-                        command.Header == "Watch Together" &&
-                        command.Text == "当前已是最新正式版 v1.2.0。" &&
-                        command.TimeoutMs == 3000),
+                    "GeneralCommand",
+                    It.Is<GeneralCommand>(command =>
+                        command.Name == GeneralCommandType.DisplayMessage.ToString() &&
+                        command.Arguments["Header"] == "Watch Together" &&
+                        command.Arguments["Text"] == "当前已是最新正式版 v1.2.0。" &&
+                        command.Arguments["TimeoutMs"] == "3000"),
                     It.IsAny<CancellationToken>()), Times.Once);
             }
         }
@@ -158,8 +159,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             var installation = CreateInstallationManager(out var installMock);
             var sessionManager = new Mock<ISessionManager>();
             sessionManager.Setup(x => x.SendMessageToAdminSessions(
-                    "Message",
-                    It.IsAny<MessageCommand>(),
+                    "GeneralCommand",
+                    It.IsAny<GeneralCommand>(),
                     It.IsAny<CancellationToken>()))
                 .Returns(Task.FromException(new InvalidOperationException("test notification failure")));
 

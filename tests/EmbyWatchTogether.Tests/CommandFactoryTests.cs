@@ -71,5 +71,16 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Null(command.TimeoutMs);
         }
+
+        [Fact]
+        public void DisplayMessageCommand_UsesGeneralCommandPayload()
+        {
+            var command = MessageCommandFactory.DisplayMessageCommand("Watch Together", "Already latest", 3000);
+
+            Assert.Equal(GeneralCommandType.DisplayMessage.ToString(), command.Name);
+            Assert.Equal("Watch Together", command.Arguments["Header"]);
+            Assert.Equal("Already latest", command.Arguments["Text"]);
+            Assert.Equal("3000", command.Arguments["TimeoutMs"]);
+        }
     }
 }
