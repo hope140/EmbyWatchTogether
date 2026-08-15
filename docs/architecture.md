@@ -32,7 +32,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 ## 发布信任边界
 
-更新组件由 `GitHubReleaseClient`、`PluginUpdateManager`、`ReleaseSignatureVerifier` 和 `ReleaseTrustStore` 协作：manifest 的版本、大小、SHA-256、tag 与 detached RSA 签名均需通过校验，未知 key、当前插件版本不可读或校验失败时 fail closed；每次检查会使旧的已验证 release 缓存失效。发布 workflow 负责构建和资产发布，不负责服务器部署。
+更新组件由 `GitHubReleaseClient`、`PluginUpdateManager`、`ReleaseSignatureVerifier` 和 `ReleaseTrustStore` 协作：默认 `stable` 通道从固定的 `releases/latest` 资产读取，管理员选择 `beta` 后先从公开 Releases API 选择最高版本的非 draft prerelease，再构造本仓库规范数字 tag 的固定资产地址；API 返回的下载地址不作为安装来源。两条通道最终都校验 manifest 的版本、大小、SHA-256、tag 与 detached RSA 签名，未知 key、当前插件版本不可读或校验失败时 fail closed；GitHub 资产下载允许其官方 CDN 重定向，但不会因此放宽内容验签。每次检查会使旧的已验证 release 缓存失效。发布 workflow 负责构建和资产发布，不负责服务器部署。
 
 ## 证据与维护
 
