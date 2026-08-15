@@ -34,7 +34,7 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 3. 将 DLL 直接复制到 Emby Server 数据目录的 `plugins` 目录，不要再套一层 `EmbyWatchTogether` 子目录。若不确定数据目录位置，可在 Emby 管理后台的服务器路径页面查看。
 4. 启动或重启 Emby Server。进入 **Dashboard → Plugins → Watch Together**，确认设置页能够打开。
 
-插件是单 DLL 交付，不需要复制源码、NuGet 包或其他旁车进程。升级时停止 Emby、替换 DLL 后再启动；回滚时恢复备份的旧 DLL。本 Beta 版本采用手动部署，尚未创建 Tag 或正式 Release。
+插件是单 DLL 交付，不需要复制源码、NuGet 包或其他旁车进程。升级时停止 Emby、替换 DLL 后再启动；回滚时恢复备份的旧 DLL。当前正式版由 GitHub 签名 Release 提供，正式更新器只读取 `releases/latest`。未来 beta 版本将作为 GitHub prerelease 发布；如需测试，需由维护者手动获取并验证，测试版手动获取不等于真实客户端验收。
 
 ## 插件正式版更新
 
