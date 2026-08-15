@@ -91,7 +91,15 @@ namespace Emby.Plugins.WatchTogether
     /// </summary>
     public class PluginConfiguration : BasePluginConfiguration
     {
+        public const string StableUpdateChannel = "stable";
+
+        public const string BetaUpdateChannel = "beta";
+
+        public const string DefaultUpdateChannel = StableUpdateChannel;
+
         public bool Enabled { get; set; } = true;
+
+        public string UpdateChannel { get; set; } = DefaultUpdateChannel;
 
         public double PollIntervalSeconds { get; set; } = 0.5;
 
@@ -116,5 +124,12 @@ namespace Emby.Plugins.WatchTogether
         /// before that restart happens.
         /// </summary>
         public string PendingUpdateVersion { get; set; }
+
+        public static string NormalizeUpdateChannel(string value)
+        {
+            return string.Equals(value, BetaUpdateChannel, StringComparison.OrdinalIgnoreCase)
+                ? BetaUpdateChannel
+                : StableUpdateChannel;
+        }
     }
 }

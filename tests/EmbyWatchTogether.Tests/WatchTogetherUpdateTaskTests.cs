@@ -123,6 +123,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             return new WatchTogetherUpdateTask(
                 Mock.Of<IHttpClient>(),
+                Mock.Of<IJsonSerializer>(),
                 Mock.Of<IInstallationManager>(),
                 Mock.Of<IServerApplicationHost>());
         }

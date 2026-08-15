@@ -129,5 +129,16 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Null(configuration.PendingUpdateVersion);
         }
+
+        [Fact]
+        public void UpdateChannel_DefaultsToStable_AndUnknownValuesFallBackToStable()
+        {
+            var configuration = new PluginConfiguration();
+
+            Assert.Equal(PluginConfiguration.StableUpdateChannel, configuration.UpdateChannel);
+            Assert.Equal(PluginConfiguration.StableUpdateChannel, PluginConfiguration.NormalizeUpdateChannel(null));
+            Assert.Equal(PluginConfiguration.StableUpdateChannel, PluginConfiguration.NormalizeUpdateChannel("unknown"));
+            Assert.Equal(PluginConfiguration.BetaUpdateChannel, PluginConfiguration.NormalizeUpdateChannel("beta"));
+        }
     }
 }

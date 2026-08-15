@@ -90,6 +90,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
         var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
+        var updateChannel = page.querySelector('#wtUpdateChannel');
         var saveButton = page.querySelector('#wtSaveConfig');
         if (pauseCheckbox) {
             pauseCheckbox.disabled = isBusy;
@@ -99,6 +100,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
         if (syncNotifyCheckbox) {
             syncNotifyCheckbox.disabled = isBusy;
+        }
+        if (updateChannel) {
+            updateChannel.disabled = isBusy;
         }
         if (saveButton) {
             saveButton.disabled = isBusy || !page._wtConfigReady;
@@ -111,6 +115,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
         var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
+        var updateChannel = page.querySelector('#wtUpdateChannel');
         page._wtPluginConfiguration = config || {};
         page._wtConfigReady = true;
         if (pauseCheckbox) {
@@ -124,6 +129,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (syncNotifyCheckbox) {
             syncNotifyCheckbox.checked = page._wtPluginConfiguration.NotifyOnSyncActions !== false;
             syncNotifyCheckbox.disabled = false;
+        }
+        if (updateChannel) {
+            updateChannel.value = page._wtPluginConfiguration.UpdateChannel === 'beta' ? 'beta' : 'stable';
+            updateChannel.disabled = false;
         }
         var saveButton = page.querySelector('#wtSaveConfig');
         if (saveButton) {
@@ -143,6 +152,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
             var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
             var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
+            var updateChannel = page.querySelector('#wtUpdateChannel');
             var saveButton = page.querySelector('#wtSaveConfig');
             if (pauseCheckbox) {
                 pauseCheckbox.disabled = true;
@@ -152,6 +162,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
             if (syncNotifyCheckbox) {
                 syncNotifyCheckbox.disabled = true;
+            }
+            if (updateChannel) {
+                updateChannel.disabled = true;
             }
             if (saveButton) {
                 saveButton.disabled = true;
@@ -171,7 +184,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
         var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
-        if (!pauseCheckbox || !notifyCheckbox || !syncNotifyCheckbox || !page._wtConfigReady) {
+        var updateChannel = page.querySelector('#wtUpdateChannel');
+        if (!pauseCheckbox || !notifyCheckbox || !syncNotifyCheckbox || !updateChannel || !page._wtConfigReady) {
             return Promise.resolve();
         }
 
@@ -182,6 +196,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             config.PauseOtherOnPlaybackStop = pauseCheckbox.checked;
             config.NotifyOtherOnPlaybackStop = notifyCheckbox.checked;
             config.NotifyOnSyncActions = syncNotifyCheckbox.checked;
+            config.UpdateChannel = updateChannel.value === 'beta' ? 'beta' : 'stable';
             return ApiClient.updatePluginConfiguration(pluginId, config);
         }).then(function () {
             return ApiClient.getPluginConfiguration(pluginId);
@@ -190,7 +205,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             setConfigStatus(page,
                 '配置已保存：停止暂停' + (pauseCheckbox.checked ? '开启' : '关闭') + '；停止提示' +
                 (notifyCheckbox.checked ? '开启' : '关闭') + '；同步操作提示' +
-                (syncNotifyCheckbox.checked ? '开启' : '关闭'));
+                (syncNotifyCheckbox.checked ? '开启' : '关闭') + '；更新通道' +
+                (updateChannel.value === 'beta' ? '测试版 beta' : '正式版 stable'));
         }).catch(function (error) {
             setConfigStatus(page,
                 isPermissionError(error) ? '保存被拒绝：只有管理员可以修改此设置。' : '配置保存失败：' + errorMessage(error),

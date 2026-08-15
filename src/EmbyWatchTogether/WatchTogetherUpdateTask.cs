@@ -6,6 +6,7 @@ using MediaBrowser.Common.Net;
 using MediaBrowser.Common.Updates;
 using MediaBrowser.Controller;
 using MediaBrowser.Model.Logging;
+using MediaBrowser.Model.Serialization;
 using MediaBrowser.Model.Tasks;
 
 namespace Emby.Plugins.WatchTogether
@@ -30,14 +31,17 @@ namespace Emby.Plugins.WatchTogether
         private readonly IInstallationManager _installationManager;
         private readonly IServerApplicationHost _applicationHost;
         private readonly ILogManager _logManager;
+        private readonly IJsonSerializer _jsonSerializer;
 
         public WatchTogetherUpdateTask(
             IHttpClient httpClient,
+            IJsonSerializer jsonSerializer,
             IInstallationManager installationManager,
             IServerApplicationHost applicationHost,
             ILogManager logManager = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            _jsonSerializer = jsonSerializer ?? throw new ArgumentNullException(nameof(jsonSerializer));
             _installationManager = installationManager ?? throw new ArgumentNullException(nameof(installationManager));
             _applicationHost = applicationHost;
             _logManager = logManager;
@@ -48,7 +52,7 @@ namespace Emby.Plugins.WatchTogether
         public string Key => TaskKey;
 
         public string Description =>
-            "检查 GitHub 上的 Watch Together 正式版；发现新版本时自动安装，重启 Emby 后生效。";
+            "按设置的 stable/beta 更新通道检查 GitHub；beta 为预发布版，发现新版本时自动安装，重启 Emby 后生效。Emby 计划任务开关和计划仍是控制入口。";
 
         public string Category => "Watch Together";
 
@@ -77,10 +81,14 @@ namespace Emby.Plugins.WatchTogether
             }
 
             progress?.Report(0.1);
+            var updateChannel = PluginConfiguration.NormalizeUpdateChannel(
+                plugin.Configuration?.UpdateChannel);
             var releaseClient = new GitHubReleaseClient(
                 _httpClient,
                 "EmbyWatchTogether/" + (plugin.Version?.ToString() ?? "unknown") +
-                " (+" + GitHubReleaseClient.RepositoryUrl + ")");
+                " (+" + GitHubReleaseClient.RepositoryUrl + ")",
+                jsonSerializer: _jsonSerializer,
+                updateChannel: updateChannel);
             await RunCheckAsync(
                 plugin,
                 releaseClient,

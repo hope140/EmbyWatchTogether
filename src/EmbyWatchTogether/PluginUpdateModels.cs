@@ -53,10 +53,9 @@ namespace Emby.Plugins.WatchTogether
     public interface IPluginReleaseClient
     {
         /// <summary>
-        /// Downloads and verifies the latest release asset in one pass.
-        /// The latest-version download URL is a plain GitHub web endpoint,
-        /// so checks do not consume the anonymous REST API rate limit that
-        /// is shared with Emby's own update checks.
+        /// Downloads and verifies the selected release asset in one pass.
+        /// The concrete client selects stable or beta according to its
+        /// normalized channel configuration.
         /// </summary>
         Task<VerifiedPluginRelease> CheckForLatestAsync(
             CancellationToken cancellationToken);

@@ -499,6 +499,14 @@
                     <span>同步操作时向播放端发送文字提示</span>
                 </label>
                 <div class="fieldDescription">覆盖暂停、继续、进度调整、重新同步、加入、退出、视频不一致和同步完成提示；播放端提示约 3 秒自动消失。</div>
+                <h3 class="wt-subHeading">更新通道</h3>
+                <div class="selectContainer wt-fieldWide">
+                    <select is="emby-select" id="wtUpdateChannel" label="更新通道">
+                        <option value="stable" selected>正式版 / stable</option>
+                        <option value="beta">测试版 / beta</option>
+                    </select>
+                    <div class="fieldDescription">beta 是预发布版，定时任务会按所选通道检查并自动安装；Emby 的任务开关和计划仍是控制入口。</div>
+                </div>
                 <div class="fieldDescription">此设置由 Emby 服务器保存，仅管理员可以修改。</div>
                 <div class="wt-formActions">
                     <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>

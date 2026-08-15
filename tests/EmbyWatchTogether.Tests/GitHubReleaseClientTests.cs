@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Net;
+using MediaBrowser.Model.Serialization;
 using Moq;
 using Xunit;
 
@@ -54,6 +55,161 @@ namespace Emby.Plugins.WatchTogether.Tests
         public void IsAllowedDownloadUrl_RestrictsCanonicalReleasePaths(string url, bool expected)
         {
             Assert.Equal(expected, GitHubReleaseClient.IsAllowedDownloadUrl(url));
+        }
+
+        [Fact]
+        public async Task BetaCheck_SelectsHighestNonDraftPrereleaseAndUsesCanonicalAssets()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var releases = new List<GitHubReleaseInfo>
+                {
+                    CreateApiRelease("v9.0.0", prerelease: false, draft: false),
+                    CreateApiRelease("v8.0.0", prerelease: true, draft: true),
+                    CreateApiRelease("v1.3.0.6", prerelease: true, draft: false),
+                    CreateApiRelease("v1.3.0.5", prerelease: true, draft: false),
+                };
+                var client = CreateBetaClient(fixture, releases, out var requestedApiUrls);
+
+                var verified = await client.CheckForLatestAsync(CancellationToken.None);
+
+                Assert.Equal("v1.3.0.6", verified.Release.TagName);
+                Assert.True(verified.Release.Prerelease);
+                Assert.Equal(new[] { GitHubReleaseClient.ReleasesApiUrl }, requestedApiUrls);
+                Assert.Equal(
+                    new[]
+                    {
+                        GitHubReleaseClient.RepositoryUrl + "/releases/download/v1.3.0.6/" + GitHubReleaseClient.AssetName,
+                        GitHubReleaseClient.RepositoryUrl + "/releases/download/v1.3.0.6/" + GitHubReleaseClient.ManifestAssetName,
+                        GitHubReleaseClient.RepositoryUrl + "/releases/download/v1.3.0.6/" + GitHubReleaseClient.SignatureAssetName,
+                    },
+                    fixture.RequestedUrls);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Theory]
+        [InlineData("invalid")]
+        [InlineData("v1.2")]
+        public async Task BetaCheck_RejectsInvalidTag(string tag)
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseInfo> { CreateApiRelease(tag, prerelease: true, draft: false) },
+                    out _);
+
+                var exception = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+
+                Assert.Contains("测试版发布标签无效", exception.UserMessage);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_RejectsMissingAssetAndInvalidJson()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                var missingAsset = CreateApiRelease("v1.3.0.6", prerelease: true, draft: false);
+                missingAsset.Assets.RemoveAt(2);
+                var client = CreateBetaClient(fixture, new List<GitHubReleaseInfo> { missingAsset }, out _);
+
+                var missingAssetException = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+                Assert.Contains("缺少固定资产", missingAssetException.UserMessage);
+            }
+
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                var client = CreateBetaClient(fixture, null, out _, invalidJson: true);
+
+                var invalidJsonException = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+                Assert.Contains("API 响应无效", invalidJsonException.UserMessage);
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_RejectsApiFailureAndNoBetaRelease()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseInfo>(),
+                    out _,
+                    apiStatusCode: HttpStatusCode.ServiceUnavailable);
+
+                var apiException = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+                Assert.Contains("API 请求失败", apiException.UserMessage);
+            }
+
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseInfo>(),
+                    out _);
+
+                var noReleaseException = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+                Assert.Contains("没有可用的测试版发布", noReleaseException.UserMessage);
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_UsesSignedValidationAndCleansFiles()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                fixture.Tamper("dll");
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseInfo>
+                    {
+                        CreateApiRelease("v1.3.0.6", prerelease: true, draft: false),
+                    },
+                    out _);
+
+                await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_PropagatesCancellation()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            using (var cancellation = new CancellationTokenSource())
+            {
+                fixture.EnableBetaPaths();
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseInfo>
+                    {
+                        CreateApiRelease("v1.3.0.6", prerelease: true, draft: false),
+                    },
+                    out _,
+                    afterResponse: url =>
+                    {
+                        if (string.Equals(url, GitHubReleaseClient.RepositoryUrl + "/releases/download/v1.3.0.6/" + GitHubReleaseClient.ManifestAssetName, StringComparison.Ordinal))
+                        {
+                            cancellation.Cancel();
+                        }
+                    });
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                    client.CheckForLatestAsync(cancellation.Token));
+                fixture.AssertReturnedFilesAreClean();
+            }
         }
 
         [Fact]
@@ -209,6 +365,73 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
+        private static GitHubReleaseInfo CreateApiRelease(string tag, bool prerelease, bool draft)
+        {
+            return new GitHubReleaseInfo
+            {
+                TagName = tag,
+                Draft = draft,
+                Prerelease = prerelease,
+                Assets = new List<GitHubReleaseAsset>
+                {
+                    new GitHubReleaseAsset { Name = GitHubReleaseClient.AssetName },
+                    new GitHubReleaseAsset { Name = GitHubReleaseClient.ManifestAssetName },
+                    new GitHubReleaseAsset { Name = GitHubReleaseClient.SignatureAssetName },
+                },
+            };
+        }
+
+        private static GitHubReleaseClient CreateBetaClient(
+            SignedReleaseFixture fixture,
+            List<GitHubReleaseInfo> releases,
+            out List<string> requestedApiUrls,
+            bool invalidJson = false,
+            Action<string> afterResponse = null,
+            HttpStatusCode apiStatusCode = HttpStatusCode.OK,
+            string apiResponseUrl = null)
+        {
+            var apiUrls = new List<string>();
+            requestedApiUrls = apiUrls;
+            var httpClient = new Mock<IHttpClient>();
+            httpClient.Setup(x => x.GetResponse(It.IsAny<HttpRequestOptions>()))
+                .Returns((HttpRequestOptions options) =>
+                {
+                    apiUrls.Add(options.Url);
+                    return Task.FromResult(new HttpResponseInfo
+                    {
+                        StatusCode = apiStatusCode,
+                        ResponseUrl = apiResponseUrl,
+                        Content = new MemoryStream(Encoding.UTF8.GetBytes("[]")),
+                    });
+                });
+            httpClient.Setup(x => x.GetTempFileResponse(It.IsAny<HttpRequestOptions>()))
+                .Returns((HttpRequestOptions options) =>
+                {
+                    Assert.NotNull(options.Progress);
+                    var response = fixture.CreateResponse(options.Url);
+                    afterResponse?.Invoke(options.Url);
+                    return Task.FromResult(response);
+                });
+
+            var serializer = new Mock<IJsonSerializer>();
+            if (invalidJson)
+            {
+                serializer.Setup(x => x.DeserializeFromString<List<GitHubReleaseInfo>>(It.IsAny<string>()))
+                    .Throws(new InvalidOperationException("invalid json"));
+            }
+            else
+            {
+                serializer.Setup(x => x.DeserializeFromString<List<GitHubReleaseInfo>>(It.IsAny<string>()))
+                    .Returns(releases);
+            }
+
+            return new GitHubReleaseClient(
+                httpClient.Object,
+                signatureVerifier: fixture.Verifier,
+                jsonSerializer: serializer.Object,
+                updateChannel: PluginConfiguration.BetaUpdateChannel);
+        }
+
         private static GitHubReleaseClient CreateClient(
             SignedReleaseFixture fixture,
             out Mock<IHttpClient> httpClient,
@@ -358,6 +581,14 @@ namespace Emby.Plugins.WatchTogether.Tests
                 RebuildManifest();
             }
 
+            public void EnableBetaPaths()
+            {
+                var tag = "v" + _manifestVersion;
+                _paths[GitHubReleaseClient.RepositoryUrl + "/releases/download/" + tag + "/" + GitHubReleaseClient.AssetName] = DllPath;
+                _paths[GitHubReleaseClient.RepositoryUrl + "/releases/download/" + tag + "/" + GitHubReleaseClient.ManifestAssetName] = ManifestPath;
+                _paths[GitHubReleaseClient.RepositoryUrl + "/releases/download/" + tag + "/" + GitHubReleaseClient.SignatureAssetName] = SignaturePath;
+            }
+
             public void AssertReturnedFilesAreClean()
             {
                 foreach (var path in _returnedPaths)
@@ -445,17 +676,17 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             private static string GetComponent(string url)
             {
-                if (string.Equals(url, GitHubReleaseClient.LatestDownloadUrl, StringComparison.Ordinal))
+                if (url.EndsWith("/" + GitHubReleaseClient.AssetName, StringComparison.Ordinal))
                 {
                     return "dll";
                 }
 
-                if (string.Equals(url, GitHubReleaseClient.LatestManifestDownloadUrl, StringComparison.Ordinal))
+                if (url.EndsWith("/" + GitHubReleaseClient.ManifestAssetName, StringComparison.Ordinal))
                 {
                     return "manifest";
                 }
 
-                if (string.Equals(url, GitHubReleaseClient.LatestSignatureDownloadUrl, StringComparison.Ordinal))
+                if (url.EndsWith("/" + GitHubReleaseClient.SignatureAssetName, StringComparison.Ordinal))
                 {
                     return "signature";
                 }

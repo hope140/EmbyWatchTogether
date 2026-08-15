@@ -28,6 +28,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOnSyncActions", html);
             Assert.Contains("同步操作时向播放端发送文字提示", html);
+            Assert.Contains("wtUpdateChannel", html);
+            Assert.Contains("value=\"stable\"", html);
+            Assert.Contains("value=\"beta\"", html);
+            Assert.Contains("beta 是预发布版", html);
             Assert.Contains("aria-live=\"polite\"", html);
             Assert.Contains("wtSaveConfig", html);
             Assert.Contains("wtPluginVersion", html);
@@ -59,6 +63,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("PauseOtherOnPlaybackStop", javascript);
             Assert.Contains("NotifyOtherOnPlaybackStop", javascript);
             Assert.Contains("NotifyOnSyncActions", javascript);
+            Assert.Contains("UpdateChannel", javascript);
             Assert.Contains("statusReasonMessages", javascript);
             Assert.Contains("server_unavailable", javascript);
             Assert.Contains("snapshot_unavailable", javascript);

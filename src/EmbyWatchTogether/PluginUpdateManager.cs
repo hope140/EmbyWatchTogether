@@ -218,7 +218,7 @@ namespace Emby.Plugins.WatchTogether
 
                     if (_verifiedRelease == null)
                     {
-                        SetError("请先检查更新，再安装正式版插件。", null);
+                        SetError("请先检查更新，再安装插件更新。", null);
                     }
                     else
                     {
@@ -231,7 +231,7 @@ namespace Emby.Plugins.WatchTogether
                         }
                         else if (!IsNewer(_verifiedRelease.Release.Version, currentVersion))
                         {
-                            SetError("当前已经是最新正式版。", null);
+                            SetError("当前已经是最新" + GetChannelLabel(_verifiedRelease) + "。", null);
                         }
                         else
                         {
@@ -325,7 +325,7 @@ namespace Emby.Plugins.WatchTogether
                     verifiedRelease.Release.Version == null || verifiedRelease.Asset == null ||
                     string.IsNullOrWhiteSpace(verifiedRelease.Md5Checksum))
                 {
-                    throw new ReleaseValidationException("正式版插件校验结果无效。");
+                    throw new ReleaseValidationException("插件更新校验结果无效。");
                 }
 
                 var release = verifiedRelease.Release;
@@ -339,7 +339,8 @@ namespace Emby.Plugins.WatchTogether
 
                 if (!IsNewer(release.Version, currentVersion))
                 {
-                    LogInfo("检查完成：当前 v" + FormatVersion(currentVersion) + "，已是最新正式版。");
+                    LogInfo("检查完成：当前 v" + FormatVersion(currentVersion) + "，已是最新" +
+                        GetChannelLabel(verifiedRelease) + "。");
                     return GetStatus();
                 }
 
@@ -713,6 +714,11 @@ namespace Emby.Plugins.WatchTogether
         private static string FormatVersion(Version version)
         {
             return version == null ? null : version.ToString();
+        }
+
+        private static string GetChannelLabel(VerifiedPluginRelease release)
+        {
+            return release?.Release?.Prerelease == true ? "测试版" : "正式版";
         }
 
         private void ThrowIfDisposedInstance()
