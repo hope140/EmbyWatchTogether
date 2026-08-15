@@ -5,7 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Updates;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Logging;
+using MediaBrowser.Model.Session;
 using MediaBrowser.Model.Updates;
 using Moq;
 using Xunit;
@@ -96,6 +98,81 @@ namespace Emby.Plugins.WatchTogether.Tests
                 installation))
             {
                 var status = await manager.CheckForUpdatesAsync(false);
+
+                Assert.False(status.UpdateAvailable);
+                Assert.Null(status.LastError);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Never);
+            }
+        }
+
+        [Fact]
+        public async Task AutomaticCheck_NotifiesAdminsWhenAlreadyLatest()
+        {
+            var configuration = new PluginConfiguration();
+            var releaseClient = new FakeReleaseClient(CreateRelease(1, 2, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "Message",
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            using (var manager = new PluginUpdateManager(
+                configuration,
+                new Version(1, 2, 0),
+                releaseClient,
+                installation,
+                applicationHost: null,
+                logManager: null,
+                sessionManager: sessionManager.Object))
+            {
+                var status = await manager.CheckForUpdatesAsync(true);
+
+                Assert.False(status.UpdateAvailable);
+                Assert.Null(status.LastError);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Never);
+                sessionManager.Verify(x => x.SendMessageToAdminSessions(
+                    "Message",
+                    It.Is<MessageCommand>(command =>
+                        command.Header == "Watch Together" &&
+                        command.Text == "当前已是最新正式版 v1.2.0。" &&
+                        command.TimeoutMs == 3000),
+                    It.IsAny<CancellationToken>()), Times.Once);
+            }
+        }
+
+        [Fact]
+        public async Task AutomaticCheck_NotificationFailureDoesNotFailCheck()
+        {
+            var configuration = new PluginConfiguration();
+            var releaseClient = new FakeReleaseClient(CreateRelease(1, 2, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "Message",
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.FromException(new InvalidOperationException("test notification failure")));
+
+            using (var manager = new PluginUpdateManager(
+                configuration,
+                new Version(1, 2, 0),
+                releaseClient,
+                installation,
+                applicationHost: null,
+                logManager: null,
+                sessionManager: sessionManager.Object))
+            {
+                var status = await manager.CheckForUpdatesAsync(true);
 
                 Assert.False(status.UpdateAvailable);
                 Assert.Null(status.LastError);
@@ -443,7 +520,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             IPluginReleaseClient releaseClient,
             IInstallationManager installationManager,
             IServerApplicationHost applicationHost = null,
-            ILogManager logManager = null)
+            ILogManager logManager = null,
+            ISessionManager sessionManager = null)
         {
             var constructor = typeof(PluginUpdateManager).GetConstructor(
                 BindingFlags.Instance | BindingFlags.NonPublic,
@@ -457,6 +535,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                     typeof(IInstallationManager),
                     typeof(IServerApplicationHost),
                     typeof(ILogManager),
+                    typeof(ISessionManager),
                 },
                 modifiers: null);
             return (PluginUpdateManager)constructor.Invoke(new object[]
@@ -468,6 +547,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 installationManager,
                 applicationHost,
                 logManager,
+                sessionManager,
             });
         }
 

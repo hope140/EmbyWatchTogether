@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Common.Updates;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
 using MediaBrowser.Model.Tasks;
@@ -32,19 +33,22 @@ namespace Emby.Plugins.WatchTogether
         private readonly IServerApplicationHost _applicationHost;
         private readonly ILogManager _logManager;
         private readonly IJsonSerializer _jsonSerializer;
+        private readonly ISessionManager _sessionManager;
 
         public WatchTogetherUpdateTask(
             IHttpClient httpClient,
             IJsonSerializer jsonSerializer,
             IInstallationManager installationManager,
             IServerApplicationHost applicationHost,
-            ILogManager logManager = null)
+            ILogManager logManager = null,
+            ISessionManager sessionManager = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _jsonSerializer = jsonSerializer ?? throw new ArgumentNullException(nameof(jsonSerializer));
             _installationManager = installationManager ?? throw new ArgumentNullException(nameof(installationManager));
             _applicationHost = applicationHost;
             _logManager = logManager;
+            _sessionManager = sessionManager;
         }
 
         public string Name => "Update Plugin";
@@ -95,7 +99,8 @@ namespace Emby.Plugins.WatchTogether
                 _installationManager,
                 _applicationHost,
                 _logManager,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                _sessionManager).ConfigureAwait(false);
 
             progress?.Report(1);
         }
@@ -111,7 +116,8 @@ namespace Emby.Plugins.WatchTogether
             IInstallationManager installationManager,
             IServerApplicationHost applicationHost,
             ILogManager logManager,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            ISessionManager sessionManager = null)
         {
             if (plugin == null)
             {
@@ -128,7 +134,8 @@ namespace Emby.Plugins.WatchTogether
                 releaseClient,
                 installationManager,
                 applicationHost,
-                logManager))
+                logManager,
+                sessionManager))
             {
                 var status = await manager
                     .CheckForUpdatesAsync(true, cancellationToken)

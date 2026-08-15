@@ -8,7 +8,9 @@ using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Common.Updates;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Serialization;
+using MediaBrowser.Model.Session;
 using MediaBrowser.Model.Tasks;
 using MediaBrowser.Model.Updates;
 using Moq;
@@ -82,6 +84,42 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task RunCheckAsync_WhenAlreadyLatest_NotifiesAdminSessions()
+        {
+            var plugin = CreateInitializedPlugin();
+            var releaseClient = new FakeReleaseClient(CreateRelease(1, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "Message",
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            await WatchTogetherUpdateTask.RunCheckAsync(
+                plugin,
+                releaseClient,
+                installation,
+                null,
+                null,
+                CancellationToken.None,
+                sessionManager.Object);
+
+            installMock.Verify(x => x.InstallPackage(
+                It.IsAny<PackageVersionInfo>(),
+                true,
+                It.IsAny<IProgress<double>>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            sessionManager.Verify(x => x.SendMessageToAdminSessions(
+                "Message",
+                It.Is<MessageCommand>(command =>
+                    command.Header == "Watch Together" &&
+                    command.Text == "当前已是最新正式版 v1.0.0.0。" &&
+                    command.TimeoutMs == 3000),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public async Task RunCheckAsync_ThrowsWhenCheckReportsError()
         {
             var plugin = CreateInitializedPlugin();
@@ -125,7 +163,8 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Mock.Of<IHttpClient>(),
                 Mock.Of<IJsonSerializer>(),
                 Mock.Of<IInstallationManager>(),
-                Mock.Of<IServerApplicationHost>());
+                Mock.Of<IServerApplicationHost>(),
+                sessionManager: Mock.Of<ISessionManager>());
         }
 
         private static Plugin CreateInitializedPlugin()

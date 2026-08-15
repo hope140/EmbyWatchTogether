@@ -4,7 +4,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Updates;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Logging;
+using MediaBrowser.Model.Session;
 using MediaBrowser.Model.Updates;
 
 namespace Emby.Plugins.WatchTogether
@@ -21,6 +23,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly IPluginReleaseClient _releaseClient;
         private readonly IInstallationManager _installationManager;
         private readonly IServerApplicationHost _applicationHost;
+        private readonly ISessionManager _sessionManager;
         private readonly Func<PluginConfiguration> _configurationAccessor;
         private readonly Action _saveConfiguration;
         private readonly Func<Version> _currentVersionAccessor;
@@ -41,7 +44,8 @@ namespace Emby.Plugins.WatchTogether
             IPluginReleaseClient releaseClient,
             IInstallationManager installationManager,
             IServerApplicationHost applicationHost,
-            ILogManager logManager = null)
+            ILogManager logManager = null,
+            ISessionManager sessionManager = null)
             : this(
                 () => plugin?.Configuration ?? new PluginConfiguration(),
                 GetSaveConfigurationAction(plugin),
@@ -49,7 +53,8 @@ namespace Emby.Plugins.WatchTogether
                 releaseClient,
                 installationManager,
                 applicationHost,
-                logManager)
+                logManager,
+                sessionManager)
         {
         }
 
@@ -59,7 +64,8 @@ namespace Emby.Plugins.WatchTogether
             IPluginReleaseClient releaseClient,
             IInstallationManager installationManager,
             IServerApplicationHost applicationHost = null,
-            ILogManager logManager = null)
+            ILogManager logManager = null,
+            ISessionManager sessionManager = null)
             : this(
                 () => configuration ?? new PluginConfiguration(),
                 null,
@@ -67,7 +73,8 @@ namespace Emby.Plugins.WatchTogether
                 releaseClient,
                 installationManager,
                 applicationHost,
-                logManager)
+                logManager,
+                sessionManager)
         {
         }
 
@@ -78,7 +85,8 @@ namespace Emby.Plugins.WatchTogether
             IPluginReleaseClient releaseClient,
             IInstallationManager installationManager,
             IServerApplicationHost applicationHost,
-            ILogManager logManager)
+            ILogManager logManager,
+            ISessionManager sessionManager)
         {
             _configurationAccessor = configurationAccessor ?? throw new ArgumentNullException(nameof(configurationAccessor));
             _saveConfiguration = saveConfiguration;
@@ -86,6 +94,7 @@ namespace Emby.Plugins.WatchTogether
             _releaseClient = releaseClient ?? throw new ArgumentNullException(nameof(releaseClient));
             _installationManager = installationManager ?? throw new ArgumentNullException(nameof(installationManager));
             _applicationHost = applicationHost;
+            _sessionManager = sessionManager;
             try
             {
                 _logger = logManager?.GetLogger(nameof(PluginUpdateManager));
@@ -339,6 +348,14 @@ namespace Emby.Plugins.WatchTogether
 
                 if (!IsNewer(release.Version, currentVersion))
                 {
+                    if (automatic)
+                    {
+                        await NotifyLatestVersionAsync(
+                            currentVersion,
+                            verifiedRelease,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+
                     LogInfo("检查完成：当前 v" + FormatVersion(currentVersion) + "，已是最新" +
                         GetChannelLabel(verifiedRelease) + "。");
                     return GetStatus();
@@ -501,6 +518,39 @@ namespace Emby.Plugins.WatchTogether
                 {
                     _status.IsInstalling = false;
                 }
+            }
+        }
+
+        private async Task NotifyLatestVersionAsync(
+            Version currentVersion,
+            VerifiedPluginRelease verifiedRelease,
+            CancellationToken cancellationToken)
+        {
+            if (_sessionManager == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var command = MessageCommandFactory.DisplayMessage(
+                    "Watch Together",
+                    "当前已是最新" + GetChannelLabel(verifiedRelease) +
+                    " v" + FormatVersion(currentVersion) + "。",
+                    timeoutMs: 3000);
+
+                await _sessionManager.SendMessageToAdminSessions(
+                    "Message",
+                    command,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                LogException("检查完成，但发送“已是最新”提示失败。", ex);
             }
         }
 
