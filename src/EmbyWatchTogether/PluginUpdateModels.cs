@@ -37,6 +37,67 @@ namespace Emby.Plugins.WatchTogether
     }
 
     /// <summary>
+    /// GitHub's Releases API uses snake_case. Keep that wire format explicit
+    /// instead of relying on serializer naming conventions.
+    /// </summary>
+    public sealed class GitHubReleaseApiDto
+    {
+        public string tag_name { get; set; }
+
+        public string html_url { get; set; }
+
+        public bool draft { get; set; }
+
+        public bool prerelease { get; set; }
+
+        public List<GitHubReleaseAssetApiDto> assets { get; set; }
+
+        public GitHubReleaseInfo ToReleaseInfo()
+        {
+            var release = new GitHubReleaseInfo
+            {
+                TagName = tag_name,
+                HtmlUrl = html_url,
+                Draft = draft,
+                Prerelease = prerelease,
+                Assets = new List<GitHubReleaseAsset>(),
+            };
+
+            if (assets != null)
+            {
+                foreach (var asset in assets)
+                {
+                    release.Assets.Add(asset?.ToAsset());
+                }
+            }
+
+            return release;
+        }
+    }
+
+    public sealed class GitHubReleaseAssetApiDto
+    {
+        public string name { get; set; }
+
+        public string browser_download_url { get; set; }
+
+        public long size { get; set; }
+
+        public string digest { get; set; }
+
+        public GitHubReleaseAsset ToAsset()
+        {
+            return new GitHubReleaseAsset
+            {
+                Name = name,
+                BrowserDownloadUrl = browser_download_url,
+                Size = size,
+                Digest = digest,
+            };
+        }
+    }
+
+    /// <summary>
     /// A release after the fixed DLL has been downloaded and independently
     /// verified. The installer receives the MD5 checksum for Emby's own
     /// validation pass.

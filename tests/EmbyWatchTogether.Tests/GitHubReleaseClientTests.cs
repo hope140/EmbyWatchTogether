@@ -4,6 +4,7 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Net;
@@ -63,7 +64,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             using (var fixture = SignedReleaseFixture.Create())
             {
                 fixture.EnableBetaPaths();
-                var releases = new List<GitHubReleaseInfo>
+                var releases = new List<GitHubReleaseApiDto>
                 {
                     CreateApiRelease("v9.0.0", prerelease: false, draft: false),
                     CreateApiRelease("v8.0.0", prerelease: true, draft: true),
@@ -89,6 +90,44 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
+        [Fact]
+        public async Task BetaCheck_MapsSnakeCaseApiJsonBeforeSelectingRelease()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var rawJson = "[{\"tag_name\":\"v1.3.0.6\",\"html_url\":\"https://example.invalid/release\",\"draft\":false,\"prerelease\":true,\"assets\":[" +
+                    "{\"name\":\"Emby.Plugins.WatchTogether.dll\",\"browser_download_url\":\"https://example.invalid/dll\"}," +
+                    "{\"name\":\"EmbyWatchTogether.release.manifest\"}," +
+                    "{\"name\":\"EmbyWatchTogether.release.manifest.sig\"}]}]";
+                var httpClient = new Mock<IHttpClient>();
+                httpClient.Setup(x => x.GetResponse(It.IsAny<HttpRequestOptions>()))
+                    .ReturnsAsync(new HttpResponseInfo
+                    {
+                        StatusCode = HttpStatusCode.OK,
+                        Content = new MemoryStream(Encoding.UTF8.GetBytes(rawJson)),
+                    });
+                httpClient.Setup(x => x.GetTempFileResponse(It.IsAny<HttpRequestOptions>()))
+                    .Returns((HttpRequestOptions options) => Task.FromResult(fixture.CreateResponse(options.Url)));
+
+                var serializer = new Mock<IJsonSerializer>();
+                serializer.Setup(x => x.DeserializeFromString<List<GitHubReleaseApiDto>>(It.IsAny<string>()))
+                    .Returns((string json) => JsonSerializer.Deserialize<List<GitHubReleaseApiDto>>(json));
+                var client = new GitHubReleaseClient(
+                    httpClient.Object,
+                    signatureVerifier: fixture.Verifier,
+                    jsonSerializer: serializer.Object,
+                    updateChannel: PluginConfiguration.BetaUpdateChannel);
+
+                var verified = await client.CheckForLatestAsync(CancellationToken.None);
+
+                Assert.Equal("v1.3.0.6", verified.Release.TagName);
+                Assert.Equal(GitHubReleaseClient.AssetName, verified.Asset.Name);
+                serializer.Verify(x => x.DeserializeFromString<List<GitHubReleaseApiDto>>(rawJson), Times.Once);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
         [Theory]
         [InlineData("invalid")]
         [InlineData("v1.2")]
@@ -98,7 +137,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             {
                 var client = CreateBetaClient(
                     fixture,
-                    new List<GitHubReleaseInfo> { CreateApiRelease(tag, prerelease: true, draft: false) },
+                    new List<GitHubReleaseApiDto> { CreateApiRelease(tag, prerelease: true, draft: false) },
                     out _);
 
                 var exception = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
@@ -115,8 +154,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             using (var fixture = SignedReleaseFixture.Create())
             {
                 var missingAsset = CreateApiRelease("v1.3.0.6", prerelease: true, draft: false);
-                missingAsset.Assets.RemoveAt(2);
-                var client = CreateBetaClient(fixture, new List<GitHubReleaseInfo> { missingAsset }, out _);
+                missingAsset.assets.RemoveAt(2);
+                var client = CreateBetaClient(fixture, new List<GitHubReleaseApiDto> { missingAsset }, out _);
 
                 var missingAssetException = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
                     client.CheckForLatestAsync(CancellationToken.None));
@@ -140,7 +179,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             {
                 var client = CreateBetaClient(
                     fixture,
-                    new List<GitHubReleaseInfo>(),
+                    new List<GitHubReleaseApiDto>(),
                     out _,
                     apiStatusCode: HttpStatusCode.ServiceUnavailable);
 
@@ -153,7 +192,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             {
                 var client = CreateBetaClient(
                     fixture,
-                    new List<GitHubReleaseInfo>(),
+                    new List<GitHubReleaseApiDto>(),
                     out _);
 
                 var noReleaseException = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
@@ -171,7 +210,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 fixture.Tamper("dll");
                 var client = CreateBetaClient(
                     fixture,
-                    new List<GitHubReleaseInfo>
+                    new List<GitHubReleaseApiDto>
                     {
                         CreateApiRelease("v1.3.0.6", prerelease: true, draft: false),
                     },
@@ -193,7 +232,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 fixture.EnableBetaPaths();
                 var client = CreateBetaClient(
                     fixture,
-                    new List<GitHubReleaseInfo>
+                    new List<GitHubReleaseApiDto>
                     {
                         CreateApiRelease("v1.3.0.6", prerelease: true, draft: false),
                     },
@@ -365,25 +404,40 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
-        private static GitHubReleaseInfo CreateApiRelease(string tag, bool prerelease, bool draft)
+        [Fact]
+        public async Task CheckForLatestAsync_AllowsGitHubAssetCdnRedirects()
         {
-            return new GitHubReleaseInfo
+            using (var fixture = SignedReleaseFixture.Create())
             {
-                TagName = tag,
-                Draft = draft,
-                Prerelease = prerelease,
-                Assets = new List<GitHubReleaseAsset>
+                fixture.SetResponseUrl("https://objects.githubusercontent.com/github-production-release-asset");
+                var client = CreateClient(fixture, out _);
+
+                var verified = await client.CheckForLatestAsync(CancellationToken.None);
+
+                Assert.NotNull(verified);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        private static GitHubReleaseApiDto CreateApiRelease(string tag, bool prerelease, bool draft)
+        {
+            return new GitHubReleaseApiDto
+            {
+                tag_name = tag,
+                draft = draft,
+                prerelease = prerelease,
+                assets = new List<GitHubReleaseAssetApiDto>
                 {
-                    new GitHubReleaseAsset { Name = GitHubReleaseClient.AssetName },
-                    new GitHubReleaseAsset { Name = GitHubReleaseClient.ManifestAssetName },
-                    new GitHubReleaseAsset { Name = GitHubReleaseClient.SignatureAssetName },
+                    new GitHubReleaseAssetApiDto { name = GitHubReleaseClient.AssetName },
+                    new GitHubReleaseAssetApiDto { name = GitHubReleaseClient.ManifestAssetName },
+                    new GitHubReleaseAssetApiDto { name = GitHubReleaseClient.SignatureAssetName },
                 },
             };
         }
 
         private static GitHubReleaseClient CreateBetaClient(
             SignedReleaseFixture fixture,
-            List<GitHubReleaseInfo> releases,
+            List<GitHubReleaseApiDto> releases,
             out List<string> requestedApiUrls,
             bool invalidJson = false,
             Action<string> afterResponse = null,
@@ -416,12 +470,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             var serializer = new Mock<IJsonSerializer>();
             if (invalidJson)
             {
-                serializer.Setup(x => x.DeserializeFromString<List<GitHubReleaseInfo>>(It.IsAny<string>()))
+                serializer.Setup(x => x.DeserializeFromString<List<GitHubReleaseApiDto>>(It.IsAny<string>()))
                     .Throws(new InvalidOperationException("invalid json"));
             }
             else
             {
-                serializer.Setup(x => x.DeserializeFromString<List<GitHubReleaseInfo>>(It.IsAny<string>()))
+                serializer.Setup(x => x.DeserializeFromString<List<GitHubReleaseApiDto>>(It.IsAny<string>()))
                     .Returns(releases);
             }
 
@@ -465,6 +519,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             private string _failedComponent;
             private HttpStatusCode _failureStatusCode = HttpStatusCode.OK;
             private bool _missingTempFile;
+            private string _responseUrl;
 
             private SignedReleaseFixture()
             {
@@ -532,6 +587,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 return new HttpResponseInfo
                 {
                     StatusCode = isFailedComponent ? _failureStatusCode : HttpStatusCode.OK,
+                    ResponseUrl = _responseUrl,
                     TempFilePath = path,
                 };
             }
@@ -567,6 +623,11 @@ namespace Emby.Plugins.WatchTogether.Tests
                 _failedComponent = component;
                 _failureStatusCode = statusCode;
                 _missingTempFile = missingTempFile;
+            }
+
+            public void SetResponseUrl(string responseUrl)
+            {
+                _responseUrl = responseUrl;
             }
 
             public void UseAssetFile(string path)

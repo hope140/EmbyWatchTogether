@@ -388,24 +388,25 @@ namespace Emby.Plugins.WatchTogether
                     }
 
                     var json = Encoding.UTF8.GetString(memory.ToArray());
-                    List<GitHubReleaseInfo> releases;
+                    List<GitHubReleaseApiDto> apiReleases;
                     try
                     {
-                        releases = _jsonSerializer.DeserializeFromString<List<GitHubReleaseInfo>>(json);
+                        apiReleases = _jsonSerializer.DeserializeFromString<List<GitHubReleaseApiDto>>(json);
                     }
                     catch (Exception ex)
                     {
                         throw new ReleaseValidationException("测试版 Releases API 响应无效。", ex);
                     }
 
-                    if (releases == null)
+                    if (apiReleases == null)
                     {
                         throw new ReleaseValidationException("测试版 Releases API 响应无效。");
                     }
 
                     GitHubReleaseInfo selected = null;
-                    foreach (var release in releases)
+                    foreach (var apiRelease in apiReleases)
                     {
+                        var release = apiRelease?.ToReleaseInfo();
                         if (release == null || release.Draft || !release.Prerelease)
                         {
                             continue;
@@ -599,15 +600,7 @@ namespace Emby.Plugins.WatchTogether
                 Progress = new Progress<double>(),
             };
 
-            var response = await _httpClient.GetTempFileResponse(options).ConfigureAwait(false);
-            if (response != null && !string.IsNullOrWhiteSpace(response.ResponseUrl) &&
-                !string.Equals(response.ResponseUrl, url, StringComparison.Ordinal))
-            {
-                response.Dispose();
-                throw new ReleaseValidationException(channelLabel + "下载重定向地址不受信任。");
-            }
-
-            return response;
+            return await _httpClient.GetTempFileResponse(options).ConfigureAwait(false);
         }
 
         private static long ValidateDownloadedFile(
