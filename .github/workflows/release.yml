@@ -82,6 +82,7 @@ jobs:
 
           $tag = $env:RELEASE_TAG
           $keyId = $env:RELEASE_KEY_ID
+          $channel = $env:RELEASE_CHANNEL
           if ([string]::IsNullOrWhiteSpace($tag)) {
               throw 'The release tag input is required.'
           }
