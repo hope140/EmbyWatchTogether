@@ -356,8 +356,7 @@ namespace Emby.Plugins.WatchTogether
                             cancellationToken).ConfigureAwait(false);
                     }
 
-                    LogInfo("检查完成：当前 v" + FormatVersion(currentVersion) + "，已是最新" +
-                        GetChannelLabel(verifiedRelease) + "。");
+                    LogInfo("检查完成：" + BuildLatestVersionMessage(currentVersion, verifiedRelease));
                     return GetStatus();
                 }
 
@@ -535,8 +534,7 @@ namespace Emby.Plugins.WatchTogether
             {
                 var command = MessageCommandFactory.DisplayMessageCommand(
                     "Watch Together",
-                    "当前已是最新" + GetChannelLabel(verifiedRelease) +
-                    " v" + FormatVersion(currentVersion) + "。",
+                    BuildLatestVersionMessage(currentVersion, verifiedRelease),
                     timeoutMs: 3000);
 
                 await _sessionManager.SendMessageToAdminSessions(
@@ -764,6 +762,21 @@ namespace Emby.Plugins.WatchTogether
         private static string FormatVersion(Version version)
         {
             return version == null ? null : version.ToString();
+        }
+
+        private static string BuildLatestVersionMessage(
+            Version currentVersion,
+            VerifiedPluginRelease verifiedRelease)
+        {
+            var channelLabel = GetChannelLabel(verifiedRelease);
+            var latestVersion = verifiedRelease?.Release?.Version;
+            if (latestVersion != null && CompareVersions(currentVersion, latestVersion) > 0)
+            {
+                return "当前版本 v" + FormatVersion(currentVersion) +
+                    " 高于最新" + channelLabel + " v" + FormatVersion(latestVersion) + "，无需更新。";
+            }
+
+            return "当前已是最新" + channelLabel + " v" + FormatVersion(currentVersion) + "。";
         }
 
         private static string GetChannelLabel(VerifiedPluginRelease release)

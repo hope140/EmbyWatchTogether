@@ -152,6 +152,53 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task AutomaticCheck_WhenCurrentVersionIsHigherThanBeta_ExplainsNoDowngrade()
+        {
+            var configuration = new PluginConfiguration();
+            var release = CreateRelease(1, 3, 0);
+            release.TagName = "v1.3.0.6";
+            release.Version = new Version(1, 3, 0, 6);
+            release.HtmlUrl = "https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.3.0.6";
+            release.Prerelease = true;
+            var releaseClient = new FakeReleaseClient(release);
+            var installation = CreateInstallationManager(out var installMock);
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand",
+                    It.IsAny<GeneralCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            using (var manager = new PluginUpdateManager(
+                configuration,
+                new Version(1, 4, 2, 0),
+                releaseClient,
+                installation,
+                applicationHost: null,
+                logManager: null,
+                sessionManager: sessionManager.Object))
+            {
+                var status = await manager.CheckForUpdatesAsync(true);
+
+                Assert.False(status.UpdateAvailable);
+                Assert.Null(status.LastError);
+                installMock.Verify(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()), Times.Never);
+                sessionManager.Verify(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand",
+                    It.Is<GeneralCommand>(command =>
+                        command.Name == GeneralCommandType.DisplayMessage.ToString() &&
+                        command.Arguments["Header"] == "Watch Together" &&
+                        command.Arguments["Text"] == "当前版本 v1.4.2.0 高于最新测试版 v1.3.0.6，无需更新。" &&
+                        command.Arguments["TimeoutMs"] == "3000"),
+                    It.IsAny<CancellationToken>()), Times.Once);
+            }
+        }
+
+        [Fact]
         public async Task AutomaticCheck_NotificationFailureDoesNotFailCheck()
         {
             var configuration = new PluginConfiguration();
