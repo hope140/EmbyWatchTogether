@@ -250,7 +250,7 @@ https://github.com/hope140/EmbyWatchTogether/releases/download/<tag>/Emby.Plugin
 - `scripts/release/Sign-ReleaseManifest.ps1`：校验 DLL 名称/程序集/版本，流式计算大小和 SHA-256，并生成 manifest 与 signature。
 - `tests/release-signing.tests.ps1`：验证密钥、canonical manifest、RSA 签名和 DLL 校验。
 - `tests/release-workflow.tests.ps1`：验证触发条件、输入、版本检查、固定资产、签名步骤和发布命令。
-- `.github/workflows/release.yml`：仅 `workflow_dispatch`，输入 `tag` 和 `key_id`；checkout 对应 tag，校验三项版本，构建、测试、生成测试签名并验证四个固定资产，最后使用 `--verify-tag` 创建 Release；workflow 不部署服务器。
+- `.github/workflows/release.yml`：仅 `workflow_dispatch`，输入 `tag`、`channel`、`key_id`；checkout 对应 tag，校验三项版本，构建、测试，使用 release Environment Secret 生成正式签名并验证四个固定资产，最后使用 `--verify-tag` 创建 Release；workflow 不部署服务器。
 
 ## 9. 验证方案
 
