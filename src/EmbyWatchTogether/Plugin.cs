@@ -4,6 +4,7 @@ using System.Threading;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Controller;
+using MediaBrowser.Model.Drawing;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
@@ -13,9 +14,10 @@ namespace Emby.Plugins.WatchTogether
     /// Emby plugin entry class. Emby discovers it through automatic type discovery
     /// (IPlugin) and constructs it with dependency injection.
     /// </summary>
-    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
+    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasThumbImage
     {
         public static readonly Guid PluginId = Guid.Parse("0f8d1c2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f");
+        private const string ThumbImageResourceName = "Emby.Plugins.WatchTogether.Resources.watch-together-thumb.png";
 
         /// <summary>
         /// Plugin singleton used by API services and the entry point to reach
@@ -98,6 +100,20 @@ namespace Emby.Plugins.WatchTogether
 
         public override Guid Id => PluginId;
 
+        public ImageFormat ThumbImageFormat => ImageFormat.Png;
+
+        public System.IO.Stream GetThumbImage()
+        {
+            var stream = typeof(Plugin).Assembly.GetManifestResourceStream(ThumbImageResourceName);
+            if (stream == null)
+            {
+                throw new InvalidOperationException(
+                    $"Embedded plugin thumbnail resource '{ThumbImageResourceName}' was not found.");
+            }
+
+            return stream;
+        }
+
         public IEnumerable<PluginPageInfo> GetPages()
         {
             return new[]
@@ -109,7 +125,7 @@ namespace Emby.Plugins.WatchTogether
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = true,
                     MenuSection = "server",
-                    MenuIcon = "videocam",
+                    MenuIcon = "sync",
                 },
                 // Controller module for the page above. Emby serves embedded
                 // resources by page Name, so the .js resource must be declared

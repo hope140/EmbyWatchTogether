@@ -1,6 +1,9 @@
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Serialization;
+using MediaBrowser.Common.Plugins;
+using MediaBrowser.Model.Drawing;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
@@ -14,6 +17,40 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Contains("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", names);
             Assert.Contains("Emby.Plugins.WatchTogether.Configuration.WatchTogether.js", names);
+            Assert.Contains("Emby.Plugins.WatchTogether.Resources.watch-together-thumb.png", names);
+        }
+
+        [Fact]
+        public void Plugin_ExposesValidPngThumbnailAndSyncMenuIcon()
+        {
+#pragma warning disable SYSLIB0050
+            var plugin = (Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin));
+#pragma warning restore SYSLIB0050
+            var thumbImage = (IHasThumbImage)plugin;
+
+            Assert.Equal(ImageFormat.Png, thumbImage.ThumbImageFormat);
+            using (var stream = thumbImage.GetThumbImage())
+            {
+                Assert.NotNull(stream);
+                Assert.True(stream.Length >= 24);
+                using (var reader = new BinaryReader(stream))
+                {
+                    Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, reader.ReadBytes(8));
+                    Assert.Equal(13, ReadBigEndianInt32(reader.ReadBytes(4)));
+                    Assert.Equal(new byte[] { 73, 72, 68, 82 }, reader.ReadBytes(4));
+                    Assert.Equal(1280, ReadBigEndianInt32(reader.ReadBytes(4)));
+                    Assert.Equal(720, ReadBigEndianInt32(reader.ReadBytes(4)));
+                }
+            }
+
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogether");
+            Assert.Equal("sync", page.MenuIcon);
+        }
+
+        private static int ReadBigEndianInt32(byte[] bytes)
+        {
+            Assert.Equal(4, bytes.Length);
+            return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
         }
 
         [Fact]
