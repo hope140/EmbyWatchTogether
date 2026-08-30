@@ -233,6 +233,31 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task AutomaticCheck_NotificationCancellationPropagates()
+        {
+            using (var cancellation = new CancellationTokenSource())
+            {
+                var sessionManager = new Mock<ISessionManager>();
+                sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                        "GeneralCommand",
+                        It.IsAny<GeneralCommand>(),
+                        It.IsAny<CancellationToken>()))
+                    .Callback(() => cancellation.Cancel())
+                    .ThrowsAsync(new OperationCanceledException());
+                using (var manager = new PluginUpdateManager(
+                    new PluginConfiguration(),
+                    new Version(1, 2, 0),
+                    new FakeReleaseClient(CreateRelease(1, 2, 0)),
+                    CreateInstallationManager(out _),
+                    sessionManager: sessionManager.Object))
+                {
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                        manager.CheckForUpdatesAsync(true, cancellation.Token));
+                }
+            }
+        }
+
+        [Fact]
         public async Task PluginConstructor_NullVersionFailsClosed()
         {
 #pragma warning disable SYSLIB0050

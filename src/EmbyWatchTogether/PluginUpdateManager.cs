@@ -395,7 +395,27 @@ namespace Emby.Plugins.WatchTogether
                             "发现" + GetChannelLabel(verifiedRelease) + " v" +
                             FormatVersion(release.Version) + "，正在安装。",
                             cancellationToken).ConfigureAwait(false);
-                        await InstallVerifiedReleaseAsync(verifiedRelease, cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            await InstallVerifiedReleaseAsync(verifiedRelease, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            lock (_stateLock)
+                            {
+                                _verifiedRelease = null;
+                                _status.UpdateAvailable = false;
+                            }
+
+                            const string installFailureMessage = "安装更新失败，请稍后重试。";
+                            SetError(installFailureMessage, ex);
+                            await NotifyAdminAsync(installFailureMessage, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
                     }
                 }
 
@@ -573,6 +593,10 @@ namespace Emby.Plugins.WatchTogether
                     "GeneralCommand",
                     command,
                     cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
