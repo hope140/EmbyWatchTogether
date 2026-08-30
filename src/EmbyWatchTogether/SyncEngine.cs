@@ -283,229 +283,229 @@ namespace Emby.Plugins.WatchTogether
                             continue;
                         }
 
-                    var room = access.Room;
-                    var runtime = access.Runtime;
-                    if (runtime.SnapshotUnavailable)
-                    {
-                        runtime.ExitSnapshotUnavailableProtection();
-                    }
-                    runtime.ConsumeSnapshotRecoveryError();
-                    if (runtime.State == RoomState.Unavailable)
-                    {
-                        runtime.State = RoomState.Waiting;
-                        runtime.Error = null;
-                    }
-
-                    var selection = SessionSelector.SelectWithPreviousDiagnostics(
-                        candidates,
-                        room.JoinedParticipantUserIds,
-                        now,
-                        SessionSelector.StaleSessionTimeoutSeconds,
-                        runtime.Previous);
-                    var snapshots = selection.Selected;
-                    LogMultipleSessionDiagnostics(runtime, room, selection, now);
-                    var eligibility = RoomEligibility.Evaluate(snapshots);
-                    bool eligible = eligibility.IsEligible;
-                    LogEligibilityFailureIfChanged(
-                        runtime,
-                        room,
-                        snapshots,
-                        eligibility);
-                    bool sameItem = snapshots.Count == 2 &&
-                        snapshots.Values.All(s => s != null) &&
-                        snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
-
-                    if (TryGetStoppedUsers(runtime, room, snapshots, now, out var stoppedUsers))
-                    {
-                        // SessionSelector omits stopped/offline sessions, so the
-                        // same stop condition can be observed on every poll until
-                        // the participant starts again. Apply stop side effects
-                        // only on the transition into the stopped state.
-                        bool stopAlreadyHandled = string.Equals(
-                            runtime.Error,
-                            StoppedPlaybackError,
-                            StringComparison.Ordinal);
-                        if (!stopAlreadyHandled)
+                        var room = access.Room;
+                        var runtime = access.Runtime;
+                        if (runtime.SnapshotUnavailable)
                         {
-                            if (options.PauseOtherOnPlaybackStop)
-                            {
-                                PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
-                            }
-
-                            if (options.NotifyOtherOnPlaybackStop)
-                            {
-                                NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
-                            }
-
-                            _logger?.Info(
-                                $"Room {room.Id}: playback stopped by {string.Join(",", stoppedUsers)}; " +
-                                $"pausedOther={options.PauseOtherOnPlaybackStop}, notifiedOther={options.NotifyOtherOnPlaybackStop}");
+                            runtime.ExitSnapshotUnavailableProtection();
                         }
-
-                        runtime.ResetToWaiting();
-                        runtime.Previous.Clear();
-                        runtime.PreviousAtUtc = null;
-                        runtime.MissingSessionSinceUtc = null;
-                        runtime.Error = StoppedPlaybackError;
-                        results.Add(Result(room, runtime, eligible));
-                        continue;
-                    }
-
-                    if (runtime.State == RoomState.Watching &&
-                        runtime.MissingSessionSinceUtc.HasValue)
-                    {
-                        results.Add(Result(room, runtime, eligible));
-                        continue;
-                    }
-
-                    // Do not immediately restart a stale old-item snapshot after the
-                    // stop transition. Once both sides are back near the same position,
-                    // the next poll is allowed to start a fresh barrier.
-                    if (runtime.State == RoomState.Waiting &&
-                        runtime.Error == StoppedPlaybackError)
-                    {
-                        if (sameItem && !HasLargePositionGap(snapshots))
+                        runtime.ConsumeSnapshotRecoveryError();
+                        if (runtime.State == RoomState.Unavailable)
                         {
+                            runtime.State = RoomState.Waiting;
                             runtime.Error = null;
                         }
-                        else if (sameItem)
+
+                        var selection = SessionSelector.SelectWithPreviousDiagnostics(
+                            candidates,
+                            room.JoinedParticipantUserIds,
+                            now,
+                            SessionSelector.StaleSessionTimeoutSeconds,
+                            runtime.Previous);
+                        var snapshots = selection.Selected;
+                        var eligibility = RoomEligibility.Evaluate(snapshots);
+                        bool eligible = eligibility.IsEligible;
+                        LogMultipleSessionDiagnostics(runtime, room, selection, eligibility, now);
+                        LogEligibilityFailureIfChanged(
+                            runtime,
+                            room,
+                            snapshots,
+                            eligibility);
+                        bool sameItem = snapshots.Count == 2 &&
+                            snapshots.Values.All(s => s != null) &&
+                            snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
+
+                        if (TryGetStoppedUsers(runtime, room, snapshots, now, out var stoppedUsers))
+                        {
+                            // SessionSelector omits stopped/offline sessions, so the
+                            // same stop condition can be observed on every poll until
+                            // the participant starts again. Apply stop side effects
+                            // only on the transition into the stopped state.
+                            bool stopAlreadyHandled = string.Equals(
+                                runtime.Error,
+                                StoppedPlaybackError,
+                                StringComparison.Ordinal);
+                            if (!stopAlreadyHandled)
+                            {
+                                if (options.PauseOtherOnPlaybackStop)
+                                {
+                                    PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                                }
+
+                                if (options.NotifyOtherOnPlaybackStop)
+                                {
+                                    NotifyOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
+                                }
+
+                                _logger?.Info(
+                                    $"Room {room.Id}: playback stopped by {string.Join(",", stoppedUsers)}; " +
+                                    $"pausedOther={options.PauseOtherOnPlaybackStop}, notifiedOther={options.NotifyOtherOnPlaybackStop}");
+                            }
+
+                            runtime.ResetToWaiting();
+                            runtime.Previous.Clear();
+                            runtime.PreviousAtUtc = null;
+                            runtime.MissingSessionSinceUtc = null;
+                            runtime.Error = StoppedPlaybackError;
+                            results.Add(Result(room, runtime, eligible));
+                            continue;
+                        }
+
+                        if (runtime.State == RoomState.Watching &&
+                            runtime.MissingSessionSinceUtc.HasValue)
                         {
                             results.Add(Result(room, runtime, eligible));
                             continue;
                         }
-                    }
 
-                    PruneWaitingPauseRetries(runtime, snapshots);
-                    bool staleDeferredCommand = DiscardStaleDeferredCommands(
-                        runtime,
-                        snapshots,
-                        sameItem);
-                    bool pendingFailed = ObservePending(
-                        runtime,
-                        room,
-                        snapshots,
-                        sameItem,
-                        now,
-                        out var stalePendingCommand);
-                    if (staleDeferredCommand || stalePendingCommand)
-                    {
-                        // A command captured for a different session or item
-                        // must never be acknowledged or retried against the
-                        // current snapshot. Rebuild the barrier from the
-                        // current identities instead.
-                        runtime.ResetToWaiting();
-                    }
-                    if (!sameItem && runtime.State != RoomState.Waiting &&
-                        !runtime.MissingSessionSinceUtc.HasValue)
-                    {
-                        runtime.ResetToWaiting();
-                    }
-
-                    bool differentVideo = !sameItem && snapshots.Count == 2 &&
-                        snapshots.Values.All(s => s != null) &&
-                        snapshots.Values.All(s => !string.IsNullOrEmpty(s.ItemId)) &&
-                        snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
-                    if (differentVideo && _notifyOnSyncActions && _differentVideoNoticeRooms.Add(room.Id))
-                    {
-                        NotifyParticipants(
-                            room,
-                            snapshots,
-                            "双方打开了不同视频，已暂停同步；请打开同一视频",
-                            now,
-                            includeAll: true);
-                    }
-                    else if (sameItem)
-                    {
-                        _differentVideoNoticeRooms.Remove(room.Id);
-                    }
-
-                    if (differentVideo &&
-                        !runtime.WaitingPauseRetries.Values.Any(state => state.Exhausted))
-                    {
-                        runtime.Error = "两位参与者打开了不同视频，暂不发送同步指令";
-                    }
-                    else if (sameItem && runtime.Error == "两位参与者打开了不同视频，暂不发送同步指令")
-                    {
-                        runtime.Error = null;
-                    }
-
-                    if (pendingFailed &&
-                        !(runtime.State == RoomState.Barrier &&
-                          runtime.Barrier?.Stage == BarrierStage.Seek) &&
-                        !string.Equals(runtime.Error, BarrierSeekRetryBudgetError, StringComparison.Ordinal))
-                    {
-                        ScheduleBarrierRetry(runtime, room.Id, "playback command was not acknowledged", now);
-                        _logger?.Warn($"Room {room.Id}: pending playback command not acknowledged; waiting for retry");
-                        results.Add(Result(room, runtime, eligible));
-                        continue;
-                    }
-
-                    if (runtime.State == RoomState.Watching)
-                    {
-                        if (eligible)
+                        // Do not immediately restart a stale old-item snapshot after the
+                        // stop transition. Once both sides are back near the same position,
+                        // the next poll is allowed to start a fresh barrier.
+                        if (runtime.State == RoomState.Waiting &&
+                            runtime.Error == StoppedPlaybackError)
                         {
-                            WatchingTick(runtime, room, snapshots, now);
-                        }
-                        else
-                        {
-                            if (runtime.MissingSessionSinceUtc.HasValue)
+                            if (sameItem && !HasLargePositionGap(snapshots))
+                            {
+                                runtime.Error = null;
+                            }
+                            else if (sameItem)
                             {
                                 results.Add(Result(room, runtime, eligible));
                                 continue;
                             }
+                        }
 
-                            // A participant may have switched to the next episode or
-                            // another item. Do not seek across item boundaries; pause
-                            // any active peer(s) once the pair is no longer eligible.
-                            // PauseOtherWhenWaiting keeps the solo-player guard.
+                        PruneWaitingPauseRetries(runtime, snapshots);
+                        bool staleDeferredCommand = DiscardStaleDeferredCommands(
+                            runtime,
+                            snapshots,
+                            sameItem);
+                        bool pendingFailed = ObservePending(
+                            runtime,
+                            room,
+                            snapshots,
+                            sameItem,
+                            now,
+                            out var stalePendingCommand);
+                        if (staleDeferredCommand || stalePendingCommand)
+                        {
+                            // A command captured for a different session or item
+                            // must never be acknowledged or retried against the
+                            // current snapshot. Rebuild the barrier from the
+                            // current identities instead.
+                            runtime.ResetToWaiting();
+                        }
+                        if (!sameItem && runtime.State != RoomState.Waiting &&
+                            !runtime.MissingSessionSinceUtc.HasValue)
+                        {
+                            runtime.ResetToWaiting();
+                        }
+
+                        bool differentVideo = !sameItem && snapshots.Count == 2 &&
+                            snapshots.Values.All(s => s != null) &&
+                            snapshots.Values.All(s => !string.IsNullOrEmpty(s.ItemId)) &&
+                            snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+                        if (differentVideo && _notifyOnSyncActions && _differentVideoNoticeRooms.Add(room.Id))
+                        {
+                            NotifyParticipants(
+                                room,
+                                snapshots,
+                                "双方打开了不同视频，已暂停同步；请打开同一视频",
+                                now,
+                                includeAll: true);
+                        }
+                        else if (sameItem)
+                        {
+                            _differentVideoNoticeRooms.Remove(room.Id);
+                        }
+
+                        if (differentVideo &&
+                            !runtime.WaitingPauseRetries.Values.Any(state => state.Exhausted))
+                        {
+                            runtime.Error = "两位参与者打开了不同视频，暂不发送同步指令";
+                        }
+                        else if (sameItem && runtime.Error == "两位参与者打开了不同视频，暂不发送同步指令")
+                        {
+                            runtime.Error = null;
+                        }
+
+                        if (pendingFailed &&
+                            !(runtime.State == RoomState.Barrier &&
+                              runtime.Barrier?.Stage == BarrierStage.Seek) &&
+                            !string.Equals(runtime.Error, BarrierSeekRetryBudgetError, StringComparison.Ordinal))
+                        {
+                            ScheduleBarrierRetry(runtime, room.Id, "playback command was not acknowledged", now);
+                            _logger?.Warn($"Room {room.Id}: pending playback command not acknowledged; waiting for retry");
+                            results.Add(Result(room, runtime, eligible));
+                            continue;
+                        }
+
+                        if (runtime.State == RoomState.Watching)
+                        {
+                            if (eligible)
+                            {
+                                WatchingTick(runtime, room, snapshots, now);
+                            }
+                            else
+                            {
+                                if (runtime.MissingSessionSinceUtc.HasValue)
+                                {
+                                    results.Add(Result(room, runtime, eligible));
+                                    continue;
+                                }
+
+                                // A participant may have switched to the next episode or
+                                // another item. Do not seek across item boundaries; pause
+                                // any active peer(s) once the pair is no longer eligible.
+                                // PauseOtherWhenWaiting keeps the solo-player guard.
+                                PauseOtherWhenWaiting(runtime, room, snapshots, now);
+                                runtime.State = RoomState.Waiting;
+                                runtime.Barrier = null;
+                                runtime.Previous.Clear();
+                            }
+                        }
+                        else if (eligible)
+                        {
+                            bool automaticRetry = false;
+                            if (runtime.State == RoomState.Waiting && runtime.Error != null)
+                            {
+                                bool retryReady = runtime.BarrierRetryAtUtc.HasValue &&
+                                    now >= runtime.BarrierRetryAtUtc.Value;
+                                if (retryReady && sameItem)
+                                {
+                                    runtime.Error = null;
+                                    runtime.BarrierRetryAtUtc = null;
+                                    automaticRetry = true;
+                                }
+                                else
+                                {
+                                    results.Add(Result(room, runtime, eligible));
+                                    continue;
+                                }
+                            }
+
+                            if (runtime.State != RoomState.Barrier)
+                            {
+                                StartBarrier(runtime, room, snapshots, now);
+                            }
+
+                            if (automaticRetry)
+                            {
+                                NotifyAutomaticBarrierRetry(room, snapshots, now);
+                            }
+
+                            BarrierTick(runtime, room, snapshots, now);
+                        }
+                        else
+                        {
+                            // Waiting is also the safe state for a different-item pair:
+                            // pause active sessions instead of trying to seek one item to
+                            // the other. The helper avoids interrupting a solo player.
                             PauseOtherWhenWaiting(runtime, room, snapshots, now);
                             runtime.State = RoomState.Waiting;
                             runtime.Barrier = null;
                             runtime.Previous.Clear();
                         }
-                    }
-                    else if (eligible)
-                    {
-                        bool automaticRetry = false;
-                        if (runtime.State == RoomState.Waiting && runtime.Error != null)
-                        {
-                            bool retryReady = runtime.BarrierRetryAtUtc.HasValue &&
-                                now >= runtime.BarrierRetryAtUtc.Value;
-                            if (retryReady && sameItem)
-                            {
-                                runtime.Error = null;
-                                runtime.BarrierRetryAtUtc = null;
-                                automaticRetry = true;
-                            }
-                            else
-                            {
-                                results.Add(Result(room, runtime, eligible));
-                                continue;
-                            }
-                        }
-
-                        if (runtime.State != RoomState.Barrier)
-                        {
-                            StartBarrier(runtime, room, snapshots, now);
-                        }
-
-                        if (automaticRetry)
-                        {
-                            NotifyAutomaticBarrierRetry(room, snapshots, now);
-                        }
-
-                        BarrierTick(runtime, room, snapshots, now);
-                    }
-                    else
-                    {
-                        // Waiting is also the safe state for a different-item pair:
-                        // pause active sessions instead of trying to seek one item to
-                        // the other. The helper avoids interrupting a solo player.
-                        PauseOtherWhenWaiting(runtime, room, snapshots, now);
-                        runtime.State = RoomState.Waiting;
-                        runtime.Barrier = null;
-                        runtime.Previous.Clear();
-                    }
 
                         results.Add(Result(room, runtime, eligible));
                     }
@@ -1221,6 +1221,7 @@ namespace Emby.Plugins.WatchTogether
             RoomRuntime runtime,
             Room room,
             SessionSelectionDiagnostics selection,
+            RoomEligibilityEvaluation eligibility,
             DateTimeOffset now)
         {
             if (selection == null || !selection.HasMultipleCandidates)
@@ -1248,8 +1249,10 @@ namespace Emby.Plugins.WatchTogether
                 "|",
                 candidates.Select(candidate =>
                     candidate.UserId + ":" + candidate.Snapshot?.SessionId + "/" +
-                    candidate.Snapshot?.ItemId + ":" + candidate.Disposition)
-                    .Concat(selectedByUser));
+                    candidate.Snapshot?.ItemId + ":" + candidate.Disposition + ":" +
+                    FormatCapabilitySignature(candidate.Snapshot))
+                    .Concat(selectedByUser)
+                    .Concat(new[] { eligibility?.FailureReason.ToString() ?? "unknown" }));
             if (string.Equals(runtime.LastMultipleSessionDiagnosticSignature, signature, StringComparison.Ordinal))
             {
                 return;
@@ -1261,7 +1264,9 @@ namespace Emby.Plugins.WatchTogether
                 var snapshot = candidate.Snapshot;
                 if (snapshot == null)
                 {
-                    return $"user={candidate.UserId},session=-,item=-,position=-,paused=-,age=unknown,disposition={candidate.Disposition}";
+                    return $"user={candidate.UserId},session=-,item=-,position=-,paused=-,age=unknown," +
+                        "reportedSupportsRemoteControl=-,effectiveSupportsRemoteControl=-," +
+                        $"supportedCommandCount=-,disposition={candidate.Disposition}";
                 }
 
                 string age = snapshot.LastActivityDateUtc == default
@@ -1269,7 +1274,8 @@ namespace Emby.Plugins.WatchTogether
                     : Math.Max(0, (now - snapshot.LastActivityDateUtc).TotalSeconds).ToString("0.0") + "s";
                 return $"user={candidate.UserId},session={ShortMultipleSessionIdentity(snapshot.SessionId)}," +
                     $"item={ShortMultipleSessionIdentity(snapshot.ItemId)},position={snapshot.PositionSeconds:0.0}s," +
-                    $"paused={snapshot.IsPaused},age={age},disposition={candidate.Disposition}";
+                    $"paused={snapshot.IsPaused},age={age},{FormatCapabilitySummary(snapshot)}," +
+                    $"disposition={candidate.Disposition}";
             });
             string selectedSummary = string.Join(
                 ",",
@@ -1283,7 +1289,33 @@ namespace Emby.Plugins.WatchTogether
                 }));
             _logger?.Warn(
                 $"Room {room.Id}: multiple-session selection; candidates=[{string.Join("; ", details)}]; " +
-                $"selected=[{selectedSummary}]");
+                $"selected=[{selectedSummary}]; eligibilityReason={eligibility?.FailureReason.ToString() ?? "unknown"}");
+        }
+
+        private static string FormatCapabilitySignature(SessionSnapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                return "-";
+            }
+
+            return string.Concat(
+                snapshot.SupportsRemoteControl ? "reported=1" : "reported=0",
+                ",effective=",
+                snapshot.Capabilities?.SupportsRemoteControl == true ? "1" : "0",
+                ",commands=",
+                snapshot.Capabilities?.SupportedCommands?.Count ?? 0);
+        }
+
+        private static string FormatCapabilitySummary(SessionSnapshot snapshot)
+        {
+            return string.Concat(
+                "reportedSupportsRemoteControl=",
+                snapshot.SupportsRemoteControl,
+                ",effectiveSupportsRemoteControl=",
+                snapshot.Capabilities?.SupportsRemoteControl == true,
+                ",supportedCommandCount=",
+                snapshot.Capabilities?.SupportedCommands?.Count ?? 0);
         }
 
         private static string ShortMultipleSessionIdentity(string value)
@@ -1335,7 +1367,7 @@ namespace Emby.Plugins.WatchTogether
 
             return $"session={ShortIdentity(snapshot.SessionId)}, item={ShortIdentity(snapshot.ItemId)}, " +
                 $"online={snapshot.Online}, stopped={snapshot.Stopped}, " +
-                $"supportsRemoteControl={snapshot.SupportsRemoteControl}, paused={snapshot.IsPaused}, " +
+                $"{FormatCapabilitySummary(snapshot)}, paused={snapshot.IsPaused}, " +
                 $"playbackRate={snapshot.PlaybackRate:0.###}, runTimeTicks={FormatRuntime(snapshot.RunTimeTicks)}";
         }
 

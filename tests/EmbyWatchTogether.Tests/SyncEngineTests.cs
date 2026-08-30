@@ -352,6 +352,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Single(warnings);
             Assert.Contains("reason=MissingSnapshot", warnings[0]);
             Assert.Contains("missing=u2", warnings[0]);
+            Assert.Contains("reportedSupportsRemoteControl=True", warnings[0]);
+            Assert.Contains("effectiveSupportsRemoteControl=True", warnings[0]);
+            Assert.Contains("supportedCommandCount=3", warnings[0]);
 
             SetCandidates(
                 Snapshot("session-one", "u1", paused: false, position: 0, itemId: "item-a"),
@@ -371,6 +374,35 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Equal(3, warnings.Count);
             Assert.Contains("reason=EmptyOrDifferentItem", warnings[2]);
+            Assert.DoesNotContain("http://emby", string.Join("\n", warnings));
+        }
+
+        [Fact]
+        public void EligibilityAndMultipleSessionDiagnostics_IncludeReportedEffectiveAndCommandCount()
+        {
+            CreateRoom();
+            var warnings = new List<string>();
+            var engine = CreateEngine(logManager: CreateLogManager(warnings).Object);
+            var reportedFalseEffectiveTrue = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+
+            SetCandidates(
+                Snapshot("session-long-ABCDEFGHIJK", "u1", paused: false, position: 0,
+                    supportsRemoteControl: false,
+                    capabilities: reportedFalseEffectiveTrue),
+                Snapshot("session-older-XYZ", "u1", paused: false, position: 0,
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)),
+                Snapshot("session-two-123456789", "u2", paused: false, position: 0));
+
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(warnings, warning => warning.Contains("multiple-session selection"));
+            Assert.Contains(warnings, warning => warning.Contains("eligibilityReason=RemoteControlUnsupportedOrMismatch"));
+            Assert.Contains(warnings, warning => warning.Contains("eligibility failure reason="));
+            Assert.Contains(warnings, warning => warning.Contains("reportedSupportsRemoteControl=False"));
+            Assert.Contains(warnings, warning => warning.Contains("effectiveSupportsRemoteControl=True"));
+            Assert.Contains(warnings, warning => warning.Contains("supportedCommandCount=3"));
+            Assert.DoesNotContain("session-long-ABCDEFGHIJK", string.Join("\n", warnings));
             Assert.DoesNotContain("http://emby", string.Join("\n", warnings));
         }
 
@@ -3374,7 +3406,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Theory]
-        [InlineData(false)] [InlineData(true)]
+        [InlineData(false)]
+        [InlineData(true)]
         public void SyncActionMessageFailure_DoesNotChangePlaybackState(bool throwOnIssue)
         {
             var room = CreateRoom();
@@ -3420,13 +3453,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             bool stopped = false,
             double playbackRate = 1.0,
             DateTimeOffset? lastActivityDateUtc = null,
-            bool supportsRemoteControl = true)
+            bool supportsRemoteControl = true,
+            SessionCapabilityReport capabilities = null)
         {
             return new SessionSnapshot(
                 sessionId, userId, itemId, "m1",
                 position, 100 * SessionSnapshot.TicksPerSecond, paused, playbackRate,
                 stopped: stopped, supportsRemoteControl: supportsRemoteControl,
-                new SessionCapabilityReport(
+                capabilities ?? new SessionCapabilityReport(
                     supportsRemoteControl,
                     supportsRemoteControl
                         ? new[] { "Pause", "Unpause", "Seek" }
