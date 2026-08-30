@@ -114,3 +114,10 @@
 - 约束：退出后的自动暂停和群发提示都按目标统计成功、失败与未尝试；单个目标失败不得阻断后续目标，且响应和管理页不得把部分成功伪装成全部成功。
 - 规则：目标缺少可信 session、能力或在线状态属于未尝试；命令/提示异常只返回稳定错误代码和汇总计数，不回传底层异常详情。退出状态 `Changed` 始终只反映成员关系转换结果。
 - 验证：`WatchTogetherServiceRoomTests` 覆盖暂停返回 false、issuer 缺失、session identity 变化和首个群发目标异常后继续发送；`PluginPagesTests` 覆盖退出确认与成功、失败、中性三类文案。
+
+## 16. 管理结果和底层异常必须走不同反馈通道
+
+- 现象：普通 `Message` 不能稳定显示为 Emby Web 管理页短横条；把底层异常文本写入房间状态又会向参与者暴露传输细节。
+- 结论：更新检查、发现版本、安装成功或失败及待重启结果统一通过 `SendMessageToAdminSessions("GeneralCommand", ...)` 发送 `DisplayMessage`，并使用 3 秒超时；命令发送器对外只返回稳定错误码，完整异常只进入服务器私有日志。
+- 规则：提示发送失败不得改变已经完成的检查或安装事实，真实取消仍须传播；房间 API 只返回稳定错误码和当前房间两名参与者的受限摘要，不得开放全站用户目录或回传 `Exception.Message`。
+- 验证：`PluginUpdateManagerTests`、`WatchTogetherUpdateTaskTests`、`SessionBridgeCommandIssuerTests`、`WatchTogetherServiceRoomTests` 与 `PluginPagesTests` 覆盖结果提示、取消传播、错误脱敏、启动期服务不可用、参与者摘要和非管理员页面边界。
