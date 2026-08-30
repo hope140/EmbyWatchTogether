@@ -83,13 +83,13 @@ namespace Emby.Plugins.WatchTogether
         {
             if (snapshot == null || !snapshot.Online)
             {
-                error = "session is not online";
+                error = "session_offline";
                 return false;
             }
 
             if (!IsCommandSupported(snapshot.Capabilities, command))
             {
-                error = "session does not support remote control";
+                error = "remote_control_unsupported";
                 return false;
             }
 
@@ -110,16 +110,21 @@ namespace Emby.Plugins.WatchTogether
                             .GetAwaiter().GetResult();
                         break;
                     default:
-                        error = $"unsupported session command: {command}";
+                        error = "remote_control_unsupported";
                         return false;
                 }
 
                 error = null;
                 return true;
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
             {
-                error = ex.Message;
+                error = "command_timeout";
+                return false;
+            }
+            catch (Exception)
+            {
+                error = "command_failed";
                 return false;
             }
         }
@@ -190,13 +195,13 @@ namespace Emby.Plugins.WatchTogether
         {
             if (snapshot == null || !snapshot.Online)
             {
-                error = "session is not online";
+                error = "session_offline";
                 return false;
             }
 
             if (snapshot.Capabilities == null || !snapshot.Capabilities.CanDisplayMessage)
             {
-                error = "session does not support display messages";
+                error = "remote_control_unsupported";
                 return false;
             }
 
@@ -213,9 +218,14 @@ namespace Emby.Plugins.WatchTogether
                 error = null;
                 return true;
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
             {
-                error = ex.Message;
+                error = "command_timeout";
+                return false;
+            }
+            catch (Exception)
+            {
+                error = "command_failed";
                 return false;
             }
         }

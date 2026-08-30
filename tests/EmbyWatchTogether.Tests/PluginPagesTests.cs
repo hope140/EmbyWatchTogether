@@ -135,6 +135,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("saveUpdateConfiguration", javascript);
             Assert.DoesNotContain("_wtUpdateBusy", javascript);
             Assert.Contains("dataType: 'json'", javascript);
+            Assert.Contains("setAdminVisibility", javascript);
+            Assert.Contains("roomUserName", javascript);
+            Assert.DoesNotContain("innerHTML", javascript);
 
             var roomsIndex = html.IndexOf("id=\"wtRooms\"", System.StringComparison.Ordinal);
             var configIndex = html.IndexOf("id=\"wtConfigSection\"", System.StringComparison.Ordinal);
