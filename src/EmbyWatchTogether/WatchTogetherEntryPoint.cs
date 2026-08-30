@@ -69,7 +69,7 @@ namespace Emby.Plugins.WatchTogether
                     var store = new RoomStore(Path.Combine(plugin.DataFolderPath, "rooms.json"), _jsonSerializer);
                     var rooms = new RoomManager(store);
                     var provider = new SessionBridgeSnapshotProvider(bridge);
-                    var issuer = new SessionBridgeCommandIssuer(bridge);
+                    var issuer = new SessionBridgeCommandIssuer(bridge, _logManager);
                     var options = SyncEngineOptions.From(plugin.Configuration);
 
                     syncEngine = new SyncEngine(

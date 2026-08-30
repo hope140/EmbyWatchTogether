@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using MediaBrowser.Model.Logging;
 
 namespace Emby.Plugins.WatchTogether
 {
@@ -16,10 +17,19 @@ namespace Emby.Plugins.WatchTogether
     {
         private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
         private readonly SessionBridge _bridge;
+        private readonly ILogger _logger;
 
-        public SessionBridgeCommandIssuer(SessionBridge bridge)
+        public SessionBridgeCommandIssuer(SessionBridge bridge, ILogManager logManager = null)
         {
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
+            try
+            {
+                _logger = logManager?.GetLogger(nameof(SessionBridgeCommandIssuer));
+            }
+            catch
+            {
+                _logger = null;
+            }
         }
 
         public bool TryIssue(
@@ -117,13 +127,25 @@ namespace Emby.Plugins.WatchTogether
                 error = null;
                 return true;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException exception)
             {
+                LogFailure(
+                    "Watch Together remote command timed out",
+                    roomId,
+                    userId,
+                    command,
+                    exception);
                 error = "command_timeout";
                 return false;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
+                LogFailure(
+                    "Watch Together remote command failed",
+                    roomId,
+                    userId,
+                    command,
+                    exception);
                 error = "command_failed";
                 return false;
             }
@@ -218,15 +240,46 @@ namespace Emby.Plugins.WatchTogether
                 error = null;
                 return true;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException exception)
             {
+                LogFailure(
+                    "Watch Together display message timed out",
+                    roomId,
+                    userId,
+                    RemoteCommands.DisplayMessage,
+                    exception);
                 error = "command_timeout";
                 return false;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
+                LogFailure(
+                    "Watch Together display message failed",
+                    roomId,
+                    userId,
+                    RemoteCommands.DisplayMessage,
+                    exception);
                 error = "command_failed";
                 return false;
+            }
+        }
+
+        private void LogFailure(
+            string message,
+            string roomId,
+            string userId,
+            string operation,
+            Exception exception)
+        {
+            try
+            {
+                _logger?.ErrorException(
+                    $"{message} (room={roomId}, user={userId}, operation={operation})",
+                    exception);
+            }
+            catch
+            {
+                // Logging must never change the stable issuer result.
             }
         }
 

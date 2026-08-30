@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Session;
 using Moq;
 using Xunit;
@@ -78,6 +79,35 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void TryIssue_TransportFailure_LogsExceptionWithoutReturningDetails()
+        {
+            var manager = NewManager();
+            var exception = new InvalidOperationException("private transport detail");
+            manager.Setup(m => m.SendPlaystateCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                .Throws(exception);
+            var messages = new List<string>();
+            var exceptions = new List<Exception>();
+            var logManager = NewLogManager(messages, exceptions);
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge, logManager.Object);
+                string error;
+                var result = issuer.TryIssue(
+                    "room", "admin", "user", NewSnapshot(), RemoteCommands.Pause, null,
+                    DateTimeOffset.UtcNow, out error);
+
+                Assert.False(result);
+                Assert.Equal("command_failed", error);
+                Assert.DoesNotContain("private transport detail", error);
+                Assert.Single(exceptions);
+                Assert.Same(exception, exceptions[0]);
+                Assert.Contains("private transport detail", exceptions[0].Message);
+                Assert.Contains("room", messages[0]);
+            }
+        }
+
+        [Fact]
         public void TryIssue_CancelledTransport_ReturnsTimeoutCode()
         {
             var manager = NewManager();
@@ -94,6 +124,35 @@ namespace Emby.Plugins.WatchTogether.Tests
 
                 Assert.False(result);
                 Assert.Equal("command_timeout", error);
+            }
+        }
+
+        [Fact]
+        public void TryIssue_CancelledTransport_LogsExceptionWithoutReturningDetails()
+        {
+            var manager = NewManager();
+            var exception = new OperationCanceledException("private timeout detail");
+            manager.Setup(m => m.SendPlaystateCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                .Throws(exception);
+            var messages = new List<string>();
+            var exceptions = new List<Exception>();
+            var logManager = NewLogManager(messages, exceptions);
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge, logManager.Object);
+                string error;
+                var result = issuer.TryIssue(
+                    "room", "admin", "user", NewSnapshot(), RemoteCommands.Pause, null,
+                    DateTimeOffset.UtcNow, out error);
+
+                Assert.False(result);
+                Assert.Equal("command_timeout", error);
+                Assert.DoesNotContain("private timeout detail", error);
+                Assert.Single(exceptions);
+                Assert.Same(exception, exceptions[0]);
+                Assert.Contains("private timeout detail", exceptions[0].Message);
+                Assert.Contains("timed out", messages[0]);
             }
         }
 
@@ -128,6 +187,24 @@ namespace Emby.Plugins.WatchTogether.Tests
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             return manager;
+        }
+
+        private static Mock<ILogManager> NewLogManager(
+            List<string> messages,
+            List<Exception> exceptions)
+        {
+            var logger = new Mock<ILogger>();
+            logger.Setup(l => l.ErrorException(
+                    It.IsAny<string>(), It.IsAny<Exception>(), It.IsAny<object[]>()))
+                .Callback<string, Exception, object[]>((message, exception, _) =>
+                {
+                    messages.Add(message);
+                    exceptions.Add(exception);
+                });
+            var logManager = new Mock<ILogManager>();
+            logManager.Setup(l => l.GetLogger(nameof(SessionBridgeCommandIssuer)))
+                .Returns(logger.Object);
+            return logManager;
         }
 
         private static SessionSnapshot NewSnapshot()
