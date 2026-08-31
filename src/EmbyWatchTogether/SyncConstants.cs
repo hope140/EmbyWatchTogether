@@ -74,5 +74,9 @@ namespace Emby.Plugins.WatchTogether
 
         public const int MaxWaitingPauseAttempts = 3;
 
+        // A Watching room may tolerate a brief raw remote-control capability
+        // flap when the effective command capability remains available.
+        public const double RemoteControlRecoveryGraceSeconds = 8.0;
+
     }
 }

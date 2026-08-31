@@ -444,7 +444,21 @@ namespace Emby.Plugins.WatchTogether
                         {
                             if (eligible)
                             {
+                                runtime.ClearRemoteControlRecovery();
                                 WatchingTick(runtime, room, snapshots, now);
+                            }
+                            else if (TryHoldRemoteControlRecovery(
+                                runtime,
+                                room,
+                                snapshots,
+                                eligibility,
+                                now))
+                            {
+                                // Keep the established Watching state and all
+                                // previous/pending state intact while a known
+                                // short-lived remote-control flap recovers.
+                                results.Add(Result(room, runtime, eligible));
+                                continue;
                             }
                             else
                             {
@@ -2668,6 +2682,7 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
+            runtime.ClearRemoteControlRecovery();
             runtime.State = RoomState.Watching;
             runtime.Barrier = null;
             runtime.Pending.Clear();
@@ -2691,6 +2706,121 @@ namespace Emby.Plugins.WatchTogether
             _logger?.Info(
                 $"Room {room.Id}: entered Watching, members={string.Join(",", snapshots.Keys)}, " +
                 $"primaryPaused={barrier.PrimaryPaused}");
+        }
+
+        private static bool TryHoldRemoteControlRecovery(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            RoomEligibilityEvaluation eligibility,
+            DateTimeOffset now)
+        {
+            if (runtime == null || room == null || snapshots == null ||
+                runtime.State != RoomState.Watching ||
+                eligibility == null ||
+                eligibility.IsEligible ||
+                eligibility.FailureReason != RoomEligibilityFailureReason.RemoteControlUnsupportedOrMismatch)
+            {
+                runtime?.ClearRemoteControlRecovery();
+                return false;
+            }
+
+            // A command already in flight must be handled by the normal
+            // acknowledgement/retry path; do not hide it behind this grace
+            // period.
+            if (runtime.Pending.Count != 0)
+            {
+                runtime.ClearRemoteControlRecovery();
+                return false;
+            }
+
+            if (!TryBuildRemoteControlRecoverySignature(runtime, room, snapshots, out var signature))
+            {
+                runtime.ClearRemoteControlRecovery();
+                return false;
+            }
+
+            if (!runtime.RemoteControlRecoveryStartedAtUtc.HasValue)
+            {
+                runtime.StartRemoteControlRecovery(now, signature);
+                return true;
+            }
+
+            if (!string.Equals(
+                runtime.RemoteControlRecoverySignature,
+                signature,
+                StringComparison.Ordinal))
+            {
+                runtime.ClearRemoteControlRecovery();
+                return false;
+            }
+
+            if ((now - runtime.RemoteControlRecoveryStartedAtUtc.Value).TotalSeconds >=
+                SyncConstants.RemoteControlRecoveryGraceSeconds)
+            {
+                runtime.ClearRemoteControlRecovery();
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryBuildRemoteControlRecoverySignature(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            out string signature)
+        {
+            signature = null;
+            var members = room.JoinedParticipantUserIds;
+            if (members == null || members.Count != 2 ||
+                snapshots.Count != members.Count ||
+                runtime.Previous.Count != members.Count ||
+                string.IsNullOrEmpty(runtime.SyncItemId))
+            {
+                return false;
+            }
+
+            var affectedUsers = new List<string>();
+            var identityParts = new List<string>();
+            var currentValues = new List<SessionSnapshot>();
+            foreach (var userId in members.OrderBy(user => user, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!snapshots.TryGetValue(userId, out var current) || current == null ||
+                    !runtime.Previous.TryGetValue(userId, out var previous) || previous == null ||
+                    !current.Online || current.Stopped ||
+                    string.IsNullOrEmpty(current.ItemId) ||
+                    !string.Equals(current.ItemId, runtime.SyncItemId, StringComparison.OrdinalIgnoreCase) ||
+                    !HasSameIdentity(previous.SessionId, previous.ItemId, current) ||
+                    current.Capabilities?.SupportsRemoteControl != true ||
+                    Math.Abs(current.PlaybackRate - 1.0) > SyncConstants.PlaybackRateTolerance ||
+                    current.RunTimeTicks <= 0)
+                {
+                    return false;
+                }
+
+                currentValues.Add(current);
+                if (previous.SupportsRemoteControl && !current.SupportsRemoteControl)
+                {
+                    affectedUsers.Add(userId);
+                }
+
+                identityParts.Add(
+                    userId + "=" + current.SessionId + ":" + current.ItemId);
+            }
+
+            if (affectedUsers.Count == 0 ||
+                Math.Abs(currentValues[0].RunTimeTicks - currentValues[1].RunTimeTicks) >
+                    SyncConstants.MaxRuntimeDifferenceTicks)
+            {
+                return false;
+            }
+
+            signature = string.Join(
+                "|",
+                identityParts) +
+                ";affected=" + string.Join(",", affectedUsers.OrderBy(user => user, StringComparer.OrdinalIgnoreCase));
+            return true;
         }
 
         private void WatchingTick(
