@@ -121,3 +121,10 @@
 - 结论：更新检查、发现版本、安装成功或失败及待重启结果统一通过 `SendMessageToAdminSessions("GeneralCommand", ...)` 发送 `DisplayMessage`，并使用 3 秒超时；命令发送器对外只返回稳定错误码，完整异常只进入服务器私有日志。
 - 规则：提示发送失败不得改变已经完成的检查或安装事实，真实取消仍须传播；房间 API 只返回稳定错误码和当前房间两名参与者的受限摘要，不得开放全站用户目录或回传 `Exception.Message`。
 - 验证：`PluginUpdateManagerTests`、`WatchTogetherUpdateTaskTests`、`SessionBridgeCommandIssuerTests`、`WatchTogetherServiceRoomTests` 与 `PluginPagesTests` 覆盖结果提示、取消传播、错误脱敏、启动期服务不可用、参与者摘要和非管理员页面边界。
+
+## 17. 缓存能力不能证明远控连接仍然可用
+
+- 现象：已进入 `Watching` 的 embyToLocalPlayer 会话在远控 WebSocket 被重置后，原始 `SupportsRemoteControl` 先变为 `false`，缓存命令列表仍让有效能力报告为 `true`；普通 HTTP 进度继续上报，但 Pause 在重连前无法送达，插件立即暂停另一端会造成短暂分叉。
+- 结论：缓存能力只证明该会话曾声明远控命令，不能证明当前 WebSocket 可用；全局资格和初始 Barrier 继续使用严格规则。只有身份连续、同一有效媒体、没有 Pending 且仍有有效能力证据的既有 `Watching` 会话可以等待最多 8 秒恢复，窗口内不发送命令。
+- 规则：恢复窗口必须绑定 SessionId、ItemId 和受影响用户集合，不得刷新同一故障的起始时间；身份、Item、有效能力、Pending 或用户集合变化立即退出，超时仍执行现有安全暂停。窗口内真实暂停或 Seek 在能力恢复后按保留快照最多处理一次。
+- 验证：两次真实 ETLP/Emby 日志均显示 HTTP 进度正常、WebSocket `ConnectionResetError`、重连后重新声明能力并恢复命令；`SyncEngineTests` 覆盖短暂恢复、8 秒超时、初始 Waiting、Session/Item 变化、Pending、有效能力消失、恢复后的 Pause/Seek 以及重置清理。真实测试版客户端验收仍待执行。
