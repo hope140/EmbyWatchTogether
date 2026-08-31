@@ -65,8 +65,9 @@ namespace Emby.Plugins.WatchTogether
         public DateTimeOffset? PreviousAtUtc { get; set; }
 
         // Transient in-memory grace period for a Watching room whose raw
-        // remote-control flag briefly drops while effective capabilities remain
-        // usable. SyncEngine binds this state to session/item identities.
+        // remote-control flag briefly drops while effective capability evidence
+        // remains present. This does not assert that a live WebSocket is usable.
+        // SyncEngine binds this state to session/item identities.
         internal DateTimeOffset? RemoteControlRecoveryStartedAtUtc { get; private set; }
 
         internal string RemoteControlRecoverySignature { get; private set; }

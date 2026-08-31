@@ -75,7 +75,8 @@ namespace Emby.Plugins.WatchTogether
         public const int MaxWaitingPauseAttempts = 3;
 
         // A Watching room may tolerate a brief raw remote-control capability
-        // flap when the effective command capability remains available.
+        // flap when effective capability evidence remains present. This does
+        // not assert that a live WebSocket is usable.
         public const double RemoteControlRecoveryGraceSeconds = 8.0;
 
     }
