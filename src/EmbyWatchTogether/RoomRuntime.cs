@@ -64,6 +64,14 @@ namespace Emby.Plugins.WatchTogether
 
         public DateTimeOffset? PreviousAtUtc { get; set; }
 
+        // Transient in-memory grace period for a Watching room whose raw
+        // remote-control flag briefly drops while effective capability evidence
+        // remains present. This does not assert that a live WebSocket is usable.
+        // SyncEngine binds this state to session/item identities.
+        internal DateTimeOffset? RemoteControlRecoveryStartedAtUtc { get; private set; }
+
+        internal string RemoteControlRecoverySignature { get; private set; }
+
         public DateTimeOffset? MissingSessionSinceUtc { get; set; }
 
         public int DriftRounds { get; set; }
@@ -95,6 +103,7 @@ namespace Emby.Plugins.WatchTogether
             DriftRounds = 0;
             SyncItemId = null;
             BarrierRetryAtUtc = null;
+            ClearRemoteControlRecovery();
         }
 
         internal void ExitSnapshotUnavailableProtection()
@@ -143,6 +152,19 @@ namespace Emby.Plugins.WatchTogether
                 SyncItemId = null;
             }
             BarrierRetryAtUtc = null;
+            ClearRemoteControlRecovery();
+        }
+
+        internal void StartRemoteControlRecovery(DateTimeOffset startedAtUtc, string signature)
+        {
+            RemoteControlRecoveryStartedAtUtc = startedAtUtc;
+            RemoteControlRecoverySignature = signature;
+        }
+
+        internal void ClearRemoteControlRecovery()
+        {
+            RemoteControlRecoveryStartedAtUtc = null;
+            RemoteControlRecoverySignature = null;
         }
     }
 }

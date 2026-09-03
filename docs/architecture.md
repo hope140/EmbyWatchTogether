@@ -20,19 +20,19 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
                                   └──> WatchTogetherService + embedded Web UI
 ```
 
-- `SessionBridge` 将 Emby 会话和事件适配为快照、命令和立即轮询唤醒。
+- `SessionBridge` 将 Emby 会话和事件适配为快照、命令和立即轮询唤醒；内置命令发送器只向调用方返回稳定错误码，完整异常仅写入服务器私有日志。
 - `SessionSelector` 为参与者选择有效会话并绑定 session identity，避免旧会话确认新设备命令。
 - `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份；`RoomStore` 只持久化房间元数据。
 - `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Barrier`、`Watching`、`Unavailable`。
-- `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；管理页按钮不是安全边界。
+- `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。
 
 ## 状态与持久化
 
-起播 `Barrier` 按 Pause → Seek（仅非锚点用户）→ Restore 执行，远程命令等待会话快照确认；进入 Restore 前，锚点和另一端都必须在固定 Seek 目标的容差内。Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的绝对预算内重试；只有检测到锚点有当前远程命令无法解释的明显新位置操作时，才显式重建 Barrier。正常 `Watching` 期间只传播明确暂停/继续和明显手动 Seek，不做周期性追帧。运行时快照、Pending 命令和 Barrier 阶段不写入 `rooms.json`；房间文件采用候选文件替换并保留备份，损坏时报告错误而不静默覆盖。
+起播 `Barrier` 按 Pause → Seek（仅非锚点用户）→ Restore 执行，远程命令等待会话快照确认；进入 Restore 前，锚点和另一端都必须在固定 Seek 目标的容差内。Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的绝对预算内重试；只有检测到锚点有当前远程命令无法解释的明显新位置操作时，才显式重建 Barrier。正常 `Watching` 期间只传播明确暂停/继续和明显手动 Seek，不做周期性追帧；同一 Session/Item 的原始远控标志短暂丢失且仍有有效能力证据、没有 Pending 命令时，使用绑定身份和受影响用户集合的 8 秒内存恢复窗口，期间不发送命令，恢复后继续观察，超时或条件变化仍进入严格等待。运行时快照、Pending 命令、恢复窗口和 Barrier 阶段不写入 `rooms.json`；房间文件采用候选文件替换并保留备份，损坏时报告错误而不静默覆盖。
 
 ## 发布信任边界
 
-更新组件由 `GitHubReleaseClient`、`PluginUpdateManager`、`ReleaseSignatureVerifier` 和 `ReleaseTrustStore` 协作：默认 `stable` 通道从固定的 `releases/latest` 资产读取，管理员选择 `beta` 后先从公开 Releases API 选择最高版本的非 draft prerelease，再构造本仓库规范数字 tag 的固定资产地址；API 返回的下载地址不作为安装来源。两条通道最终都校验 manifest 的版本、大小、SHA-256、tag 与 detached RSA 签名，未知 key、当前插件版本不可读或校验失败时 fail closed；GitHub 资产下载允许其官方 CDN 重定向，但不会因此放宽内容验签。每次检查会使旧的已验证 release 缓存失效。发布 workflow 负责构建和资产发布，不负责服务器部署。
+更新组件由 `GitHubReleaseClient`、`PluginUpdateManager`、`ReleaseSignatureVerifier` 和 `ReleaseTrustStore` 协作：默认 `stable` 通道从固定的 `releases/latest` 资产读取，管理员选择 `beta` 后先从公开 Releases API 选择最高版本的非 draft prerelease，再构造本仓库规范数字 tag 的固定资产地址；API 返回的下载地址不作为安装来源。两条通道最终都校验 manifest 的版本、大小、SHA-256、tag 与 detached RSA 签名，未知 key、当前插件版本不可读或校验失败时 fail closed；GitHub 资产下载允许其官方 CDN 重定向，但不会因此放宽内容验签。每次检查会使旧的已验证 release 缓存失效。检查、发现版本、安装成功或失败及待重启等结果统一通过 Emby Web 管理端的 `GeneralCommand` / `DisplayMessage` 短提示反馈；提示发送失败只记录日志，不改变已经完成的检查或安装事实。发布 workflow 负责构建和资产发布，不负责服务器部署。
 
 ## 证据与维护
 

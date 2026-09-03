@@ -84,6 +84,46 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task RunCheckAsync_WhenInstallFails_NotifiesAndFailsTask()
+        {
+            var plugin = CreateInitializedPlugin();
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
+            var installation = new Mock<IInstallationManager>();
+            installation.Setup(x => x.InstallPackage(
+                    It.IsAny<PackageVersionInfo>(),
+                    true,
+                    It.IsAny<IProgress<double>>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("install details"));
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand",
+                    It.IsAny<GeneralCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                WatchTogetherUpdateTask.RunCheckAsync(
+                    plugin,
+                    releaseClient,
+                    installation.Object,
+                    null,
+                    null,
+                    CancellationToken.None,
+                    sessionManager.Object));
+
+            Assert.Equal("安装更新失败，请稍后重试。", exception.Message);
+            sessionManager.Verify(x => x.SendMessageToAdminSessions(
+                "GeneralCommand",
+                It.Is<GeneralCommand>(command =>
+                    command.Name == GeneralCommandType.DisplayMessage.ToString() &&
+                    command.Arguments["Header"] == "Watch Together" &&
+                    command.Arguments["Text"] == "安装更新失败，请稍后重试。" &&
+                    command.Arguments["TimeoutMs"] == "3000"),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public async Task RunCheckAsync_WhenAlreadyLatest_NotifiesAdminSessions()
         {
             var plugin = CreateInitializedPlugin();

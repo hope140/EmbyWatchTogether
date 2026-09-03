@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Api;
 using MediaBrowser.Controller.Net;
 using MediaBrowser.Model.Services;
@@ -76,13 +77,7 @@ namespace Emby.Plugins.WatchTogether
     {
         public object Get(GetRoomsRequest request)
         {
-            var plugin = RequirePlugin();
-            if (plugin.Rooms == null)
-            {
-                // The entry point may still be starting (server restart);
-                // return an empty list instead of failing the poll.
-                return new List<object>();
-            }
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
 
             string currentUserId = CurrentUserId();
             bool admin = IsAdmin();
@@ -96,11 +91,12 @@ namespace Emby.Plugins.WatchTogether
                     RoomId = r.Id,
                     Name = r.Name,
                     State = runtime.State.ToString(),
-                    Error = runtime.Error,
+                    Error = ToPublicError(runtime.Error),
                     StatusReason = GetStatusReason(plugin, r, runtime),
                     PrimaryUserId = r.PrimaryUserId,
                     ParticipantUserIds = r.ParticipantUserIds,
                     JoinedParticipantUserIds = r.JoinedParticipantUserIds,
+                    Participants = BuildParticipantSummaries(r),
                     CurrentUserJoined = r.IsJoined(currentUserId),
                     IsAdmin = admin,
                     CreatedAtUtc = r.CreatedAtUtc,
@@ -111,11 +107,12 @@ namespace Emby.Plugins.WatchTogether
         public object Post(CreateRoomRequest request)
         {
             RequireAdmin();
-            var plugin = RequirePlugin();
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
             string serverId = plugin.ResolveServerId();
             if (string.IsNullOrWhiteSpace(serverId))
             {
-                throw new ArgumentException("server identity is not resolved yet");
+                throw new ServiceUnavailableException(
+                    "Watch Together is still initializing. Please retry shortly.");
             }
 
             var room = plugin.Rooms.CreateRoom(
@@ -133,20 +130,21 @@ namespace Emby.Plugins.WatchTogether
                 Name = room.Name,
                 PrimaryUserId = room.PrimaryUserId,
                 ParticipantUserIds = room.ParticipantUserIds,
+                Participants = BuildParticipantSummaries(room),
             };
         }
 
         public object Delete(DeleteRoomRequest request)
         {
             RequireAdmin();
-            var plugin = RequirePlugin();
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
             return new { Deleted = plugin.Rooms.DeleteRoom(request.Id) };
         }
 
         public object Post(ControlRoomRequest request)
         {
             RequireAdmin();
-            var plugin = RequirePlugin();
+            var plugin = RequireRuntime(requireBridge: true, requireIssuer: true);
             var room = plugin.Rooms.GetRoom(request.Id);
             if (room == null)
             {
@@ -177,13 +175,13 @@ namespace Emby.Plugins.WatchTogether
                 State = result.State.ToString(),
                 Command = result.Command,
                 Users = result.Users,
-                Error = result.Error,
+                Error = ToPublicError(result.Error),
             };
         }
 
         public object Get(GetRoomStateRequest request)
         {
-            var plugin = RequirePlugin();
+            var plugin = RequireRuntime(requireBridge: true, requireIssuer: false);
             var room = plugin.Rooms.GetRoom(request.Id);
             if (room == null)
             {
@@ -209,13 +207,14 @@ namespace Emby.Plugins.WatchTogether
                 RoomId = room.Id,
                 Name = room.Name,
                 State = runtime.State.ToString(),
-                Error = runtime.Error,
+                Error = ToPublicError(runtime.Error),
                 StatusReason = GetStatusReason(plugin, room, runtime),
                 Eligible = RoomEligibility.IsPairEligible(snapshots),
                 SyncItemId = runtime.SyncItemId,
                 PrimaryUserId = room.PrimaryUserId,
                 ParticipantUserIds = room.ParticipantUserIds,
                 JoinedParticipantUserIds = room.JoinedParticipantUserIds,
+                Participants = BuildParticipantSummaries(room),
                 CurrentUserJoined = room.IsJoined(CurrentUserId()),
                 Sessions = snapshots.Values.Select(s => new
                 {
@@ -232,7 +231,7 @@ namespace Emby.Plugins.WatchTogether
 
         public object Post(JoinRoomRequest request)
         {
-            var plugin = RequirePlugin();
+            var plugin = RequireRuntime(requireBridge: true, requireIssuer: false);
             string userId = CurrentUserId();
             var room = plugin.Rooms.GetRoom(request.Id);
             if (room == null || !room.HasParticipant(userId)) throw new UnauthorizedAccessException("not a room participant");
@@ -247,7 +246,7 @@ namespace Emby.Plugins.WatchTogether
 
         public object Post(LeaveRoomRequest request)
         {
-            var plugin = RequirePlugin();
+            var plugin = RequireRuntime(requireBridge: true, requireIssuer: false);
             string userId = CurrentUserId();
             var room = plugin.Rooms.GetRoom(request.Id);
             if (room == null || !room.HasParticipant(userId)) throw new UnauthorizedAccessException("not a room participant");
@@ -371,7 +370,7 @@ namespace Emby.Plugins.WatchTogether
         public object Post(SendRoomMessageRequest request)
         {
             RequireAdmin();
-            var plugin = RequirePlugin();
+            var plugin = RequireRuntime(requireBridge: true, requireIssuer: false);
             int sent = 0;
             int failed = 0;
             int skipped = 0;
@@ -449,6 +448,12 @@ namespace Emby.Plugins.WatchTogether
         public object Get(GetUsersRequest request)
         {
             RequireAdmin();
+            RequirePlugin();
+            if (UserManager == null)
+            {
+                throw new ServiceUnavailableException(
+                    "Watch Together is still initializing. Please retry shortly.");
+            }
 #pragma warning disable CS0618 // IUserManager.Users is obsolete but fine for an admin-only picker.
             return UserManager.Users
                 .Select(u => new { Id = u.Id.ToString("N"), Name = u.Name })
@@ -617,9 +622,76 @@ namespace Emby.Plugins.WatchTogether
                 string.Equals(roomServerId, currentServerId, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static Plugin RequireRuntime(bool requireBridge, bool requireIssuer)
+        {
+            var plugin = RequirePlugin();
+            if (plugin.Rooms == null ||
+                (requireBridge && plugin.Bridge == null) ||
+                (requireIssuer && plugin.Issuer == null))
+            {
+                throw new ServiceUnavailableException(
+                    "Watch Together is still initializing. Please retry shortly.");
+            }
+
+            return plugin;
+        }
+
         private static Plugin RequirePlugin()
         {
-            return Plugin.Instance ?? throw new InvalidOperationException("plugin is not initialized");
+            return Plugin.Instance ?? throw new ServiceUnavailableException(
+                "Watch Together is still initializing. Please retry shortly.");
+        }
+
+        private object[] BuildParticipantSummaries(Room room)
+        {
+            return (room?.ParticipantUserIds ?? Array.Empty<string>())
+                .Select(userId => new
+                {
+                    Id = userId,
+                    Name = GetParticipantName(userId),
+                    Joined = room.IsJoined(userId),
+                    IsPrimary = string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase),
+                })
+                .Cast<object>()
+                .ToArray();
+        }
+
+        private string GetParticipantName(string userId)
+        {
+            try
+            {
+                var user = UserManager?.GetUserById(userId);
+                if (!string.IsNullOrWhiteSpace(user?.Name))
+                {
+                    return user.Name;
+                }
+            }
+            catch
+            {
+                // A missing/deleted user must not make a room response fail.
+            }
+
+            return "未知用户";
+        }
+
+        private static string ToPublicError(string error)
+        {
+            if (string.IsNullOrEmpty(error))
+            {
+                return null;
+            }
+
+            // Preserve only stable, intentionally user-facing room outcomes.
+            switch (error)
+            {
+                case "room server is unavailable":
+                case "manual action conflicts with active synchronization":
+                case "两位参与者打开了不同视频，暂不发送同步指令":
+                case "播放已停止，等待双方重新打开同一视频":
+                    return error;
+                default:
+                    return "command_failed";
+            }
         }
 
         private string CurrentUserId()

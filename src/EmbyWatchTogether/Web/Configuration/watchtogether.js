@@ -86,6 +86,23 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             error.statusCode === 401 || error.statusCode === 403));
     }
 
+    function setAdminVisibility(page, isAdmin) {
+        var adminSection = page.querySelector('#wtAdminSection');
+        var settingsSection = page.querySelector('#wtSettingsSection');
+        if (adminSection) {
+            adminSection.style.display = isAdmin ? '' : 'none';
+        }
+        if (settingsSection) {
+            settingsSection.style.display = isAdmin ? '' : 'none';
+        }
+    }
+
+    function clearChildren(element) {
+        while (element && element.firstChild) {
+            element.removeChild(element.firstChild);
+        }
+    }
+
     function setConfigBusy(page, isBusy) {
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
@@ -145,6 +162,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         setConfigBusy(page, true);
         return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
             applyPluginConfiguration(page, config);
+            setAdminVisibility(page, true);
             setConfigStatus(page, '配置已读取');
             return config;
         }).catch(function (error) {
@@ -169,9 +187,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             if (saveButton) {
                 saveButton.disabled = true;
             }
-            setConfigStatus(page,
-                isPermissionError(error) ? '只有管理员可以查看和修改此设置。' : '配置读取失败：' + errorMessage(error),
-                true);
+            if (isPermissionError(error)) {
+                setAdminVisibility(page, false);
+                setConfigStatus(page, '只有管理员可以查看和修改此设置。', true);
+            } else {
+                setConfigStatus(page, '配置读取失败：' + errorMessage(error), true);
+            }
             throw error;
         }).finally(function () {
             if (page._wtConfigReady) {
@@ -250,6 +271,23 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return room && (room.Name || room.RoomId) || '未命名房间';
     }
 
+    function roomParticipant(room, id) {
+        var participants = room && Array.isArray(room.Participants) ? room.Participants : [];
+        var normalizedId = String(id || '').toLowerCase();
+        return participants.filter(function (participant) {
+            return participant && String(participant.Id || '').toLowerCase() === normalizedId;
+        })[0] || null;
+    }
+
+    function roomUserName(room, id) {
+        var participant = roomParticipant(room, id);
+        if (participant && participant.Name) {
+            return participant.Name;
+        }
+        var user = findUser(id);
+        return user && user.Name ? user.Name : '未知用户';
+    }
+
     function findRoomForUser(page, userId) {
         var rooms = Array.isArray(page._wtRooms) ? page._wtRooms : [];
         var normalizedId = String(userId || '').toLowerCase();
@@ -283,7 +321,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
-        select.innerHTML = '';
+        clearChildren(select);
         options.forEach(function (user) {
             var opt = document.createElement('option');
             opt.value = user.Id;
@@ -371,23 +409,26 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function loadUsers(page) {
         return apiGet('WatchTogether/Users').then(function (list) {
             page._wtIsAdmin = true;
+            setAdminVisibility(page, true);
             users = Array.isArray(list) ? list : [];
             page._wtRooms = null;
             fillSelect(page.querySelector('#wtUserA'), users, users.length > 0 ? users[0].Id : null);
             fillSelect(page.querySelector('#wtUserB'), users, users.length > 1 ? users[1].Id : null);
             syncForm(page);
         }).catch(function (err) {
-            page._wtIsAdmin = false;
+            page._wtIsAdmin = isPermissionError(err) ? false : undefined;
             page._wtRooms = null;
             users = [];
             fillSelect(page.querySelector('#wtUserA'), [], null);
             fillSelect(page.querySelector('#wtUserB'), [], null);
             syncForm(page);
-            setFormHint(page, '无法加载用户列表，请确认当前账号有管理员权限。', true);
-            setStatus(page, '用户列表加载失败：' + errorMessage(err), true);
-            var adminSection = page.querySelector('#wtAdminSection');
-            if (adminSection) {
-                adminSection.style.display = 'none';
+            if (isPermissionError(err)) {
+                setAdminVisibility(page, false);
+                setFormHint(page, '只有管理员可以创建房间。', true);
+                setStatus(page, '当前账号没有管理员权限，已隐藏管理设置。', true);
+            } else {
+                setFormHint(page, '用户列表暂时无法加载，请稍后重试。', true);
+                setStatus(page, '用户列表加载失败：' + errorMessage(err), true);
             }
         });
     }
@@ -523,11 +564,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
-        container.innerHTML = '';
+        clearChildren(container);
         container.setAttribute('aria-busy', 'false');
-        var adminSection = page.querySelector('#wtAdminSection');
-        if (adminSection && page._wtIsAdmin !== undefined) {
-            adminSection.style.display = page._wtIsAdmin ? '' : 'none';
+        if (page._wtIsAdmin !== undefined) {
+            setAdminVisibility(page, page._wtIsAdmin);
         }
         if (!rooms || rooms.length === 0) {
             var empty = document.createElement('div');
@@ -578,9 +618,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             meta.className = 'fieldDescription wt-roomMeta';
             var participantLine = document.createElement('div');
             var participantIds = room.ParticipantUserIds || [];
-            participantLine.textContent = '参与者：' + participantIds.map(userName).join('、');
+            participantLine.textContent = '参与者：' + participantIds.map(function (id) {
+                return roomUserName(room, id);
+            }).join('、');
             var primaryLine = document.createElement('div');
-            primaryLine.textContent = '主用户：' + userName(room.PrimaryUserId);
+            primaryLine.textContent = '主用户：' + roomUserName(room, room.PrimaryUserId);
             meta.appendChild(participantLine);
             meta.appendChild(primaryLine);
             card.appendChild(meta);

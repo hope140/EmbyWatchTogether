@@ -5,8 +5,10 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using MediaBrowser.Common.Extensions;
 using System.Linq;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Net;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Dto;
@@ -26,6 +28,93 @@ namespace Emby.Plugins.WatchTogether.Tests
     [Collection("Plugin singleton")]
     public class WatchTogetherServiceRoomTests
     {
+        [Fact]
+        public void Rooms_ExposeRestrictedParticipantSummariesAndSanitizeRuntimeError()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var otherUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "", "room", primaryUserId,
+                new[] { primaryUserId, otherUserId }, primaryUserId);
+            manager.GetRuntime(room.Id).Error = "Pause command failed: private transport detail";
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(primaryUserId, true);
+            var userManager = new Mock<IUserManager>();
+            userManager.Setup(m => m.GetUserById(primaryUserId)).Returns(NewUser(primaryUserId, "主用户"));
+            userManager.Setup(m => m.GetUserById(otherUserId)).Returns(NewUser(otherUserId, "另一位用户"));
+            service.UserManager = userManager.Object;
+
+            var response = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            var roomResponse = GetRoomResponse(response, room.Id);
+            var summaries = ((System.Collections.IEnumerable)roomResponse.GetType()
+                .GetProperty("Participants").GetValue(roomResponse)).Cast<object>().ToList();
+
+            Assert.Equal("command_failed", GetString(roomResponse, "Error"));
+            Assert.Equal(2, summaries.Count);
+            Assert.Equal(primaryUserId, GetString(summaries[0], "Id"));
+            Assert.Equal("主用户", GetString(summaries[0], "Name"));
+            Assert.True(GetBoolean(summaries[0], "Joined"));
+            Assert.True(GetBoolean(summaries[0], "IsPrimary"));
+            Assert.Equal("另一位用户", GetString(summaries[1], "Name"));
+            Assert.False(GetBoolean(summaries[1], "IsPrimary"));
+        }
+
+        [Fact]
+        public void Rooms_WhenRuntimeIsNotReady_ReturnsRetryableServiceUnavailable()
+        {
+            var plugin = NewPlugin(null, null, null, "server-1");
+            var service = NewService(Guid.NewGuid().ToString("N"), true);
+
+            var exception = Assert.Throws<ServiceUnavailableException>(() =>
+                WithPlugin(plugin, () => service.Get(new GetRoomsRequest())));
+
+            Assert.Contains("retry", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Control_WhenBridgeOrIssuerIsNotReady_ReturnsRetryableServiceUnavailable()
+        {
+            var manager = new RoomManager();
+            var userId = Guid.NewGuid().ToString("N");
+            var room = manager.CreateRoom("server-1", "", "room", userId, new[] { userId, Guid.NewGuid().ToString("N") }, userId);
+            var plugin = NewPlugin(manager, null, null, "server-1");
+            var service = NewService(userId, true);
+
+            Assert.Throws<ServiceUnavailableException>(() =>
+                WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "pause" })));
+        }
+
+        [Fact]
+        public void Create_WhenServerIdentityIsNotReady_ReturnsRetryableServiceUnavailable()
+        {
+            var plugin = NewPlugin(new RoomManager(), null, null, null);
+            var service = NewService(Guid.NewGuid().ToString("N"), true);
+
+            var exception = Assert.Throws<ServiceUnavailableException>(() =>
+                WithPlugin(plugin, () => service.Post(new CreateRoomRequest
+                {
+                    Name = "room",
+                    ParticipantUserIds = new[] { Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N") },
+                    PrimaryUserId = Guid.NewGuid().ToString("N"),
+                })));
+
+            Assert.Contains("retry", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Users_WhenUserManagerIsNotReady_ReturnsRetryableServiceUnavailable()
+        {
+            var plugin = NewPlugin(new RoomManager(), null, null, "server-1");
+            var service = NewService(Guid.NewGuid().ToString("N"), true);
+
+            var exception = Assert.Throws<ServiceUnavailableException>(() =>
+                WithPlugin(plugin, () => service.Get(new GetUsersRequest())));
+
+            Assert.Contains("retry", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
         [Fact]
         public void Leave_FromWatching_PausesTheOtherOnlineParticipant()
         {
@@ -494,7 +583,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             var user4 = Guid.NewGuid().ToString("N");
             var manager = new RoomManager();
             var room = manager.CreateRoom("other-server", "", "room", user1, new[] { user1, user2 }, user1);
-            var plugin = NewPlugin(manager, null, new RecordingIssuer(), "server-1");
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
             var service = NewService(user1, true);
             manager.GetRuntime(room.Id).Error = "command failed";
             var result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
@@ -547,7 +637,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             var user2 = Guid.NewGuid().ToString("N");
             var manager = new RoomManager();
             var room = manager.CreateRoom("server-1", "", "room", user1, new[] { user1, user2 }, user1);
-            var plugin = NewPlugin(manager, null, new RecordingIssuer(), "server-1");
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
             var runtime = manager.GetRuntime(room.Id);
             var service = NewService(user1, true);
             SetEligibilityFailure(runtime, "RemoteControlUnsupportedOrMismatch");
@@ -1148,6 +1239,16 @@ namespace Emby.Plugins.WatchTogether.Tests
             {
                 AuthorizationContext = auth.Object,
             };
+        }
+
+        private static User NewUser(string userId, string name)
+        {
+#pragma warning disable SYSLIB0050
+            var user = (User)FormatterServices.GetUninitializedObject(typeof(User));
+#pragma warning restore SYSLIB0050
+            user.Id = Guid.Parse(userId);
+            user.Name = name;
+            return user;
         }
 
         private static object WithPlugin(Plugin plugin, Func<object> action)

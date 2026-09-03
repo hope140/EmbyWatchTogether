@@ -19,7 +19,7 @@
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
 
-程序集目标框架为 `netstandard2.0`，项目版本为 `1.4.3.0`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
+程序集目标框架为 `netstandard2.0`，当前测试版项目版本为 `1.4.3.2`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
 
 ## 2. 组件和数据流
 
@@ -104,6 +104,12 @@ Barrier 的三个阶段按顺序执行，每条远程命令都等待 SessionInfo
 Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确认时错误为 `playback command was not acknowledged`，约 3 秒冷却后在条件仍满足时自动重新开始 Barrier。远程命令和提示消息都支持取消，并有约 5 秒的外部调用超时；引擎停止等待线程结束的时间有 10 秒上限。自动重试提示是尽力发送的消息，消息失败不会阻塞状态机。
 
 ## 6. Watching 阶段的同步规则
+
+### 远控能力短暂恢复窗口
+
+已经进入 `Watching` 的房间若仅有一端原始 `SupportsRemoteControl` 从 `true` 短暂变为 `false`，插件只在以下条件同时成立时保留最多 8 秒恢复窗口：双方仍在线且未停止、SessionId 与 ItemId 继续匹配上一轮身份、媒体相同且时长与倍速有效、有效能力证据仍在、当前没有 Pending 命令。窗口按受影响用户集合和两端身份绑定，不因重复快照刷新起始时间。
+
+窗口内保持 `Watching`，但不运行普通暂停/Seek 检测，也不发送播放命令或提示。能力恢复后使用窗口前保留的快照继续判断，自然播放不会被误认为 Seek；窗口内发生的真实暂停或明显 Seek 在恢复后按既有规则处理一次。超过 8 秒，或 Session、Item、受影响用户、有效能力、Pending 等条件变化时，立即退出保护并执行原有严格等待和安全暂停。初始 `Waiting`、Barrier、换片、停止/离线与快照源保护不使用这个窗口。
 
 ### 暂停和继续
 

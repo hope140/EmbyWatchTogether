@@ -233,6 +233,31 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task AutomaticCheck_NotificationCancellationPropagates()
+        {
+            using (var cancellation = new CancellationTokenSource())
+            {
+                var sessionManager = new Mock<ISessionManager>();
+                sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                        "GeneralCommand",
+                        It.IsAny<GeneralCommand>(),
+                        It.IsAny<CancellationToken>()))
+                    .Callback(() => cancellation.Cancel())
+                    .ThrowsAsync(new OperationCanceledException());
+                using (var manager = new PluginUpdateManager(
+                    new PluginConfiguration(),
+                    new Version(1, 2, 0),
+                    new FakeReleaseClient(CreateRelease(1, 2, 0)),
+                    CreateInstallationManager(out _),
+                    sessionManager: sessionManager.Object))
+                {
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                        manager.CheckForUpdatesAsync(true, cancellation.Token));
+                }
+            }
+        }
+
+        [Fact]
         public async Task PluginConstructor_NullVersionFailsClosed()
         {
 #pragma warning disable SYSLIB0050
@@ -506,17 +531,70 @@ namespace Emby.Plugins.WatchTogether.Tests
             var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
             var installation = CreateInstallationManager(out var installMock);
             var applicationHost = new Mock<MediaBrowser.Controller.IServerApplicationHost>();
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand",
+                    It.IsAny<GeneralCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
             using (var manager = new PluginUpdateManager(
                 configuration,
                 new Version(1, 0, 0),
                 releaseClient,
                 installation,
-                applicationHost.Object))
+                applicationHost.Object,
+                sessionManager: sessionManager.Object))
             {
                 var status = await manager.CheckForUpdatesAsync(true);
 
                 Assert.True(status.RestartRequired);
                 applicationHost.Verify(x => x.NotifyPendingRestart(), Times.Once);
+                sessionManager.Verify(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand",
+                    It.Is<GeneralCommand>(command =>
+                        command.Name == GeneralCommandType.DisplayMessage.ToString() &&
+                        command.Arguments["Header"] == "Watch Together" &&
+                        command.Arguments["Text"] == "发现正式版 v2.0.0，正在安装。" &&
+                        command.Arguments["TimeoutMs"] == "3000"),
+                    It.IsAny<CancellationToken>()), Times.Once);
+                sessionManager.Verify(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand",
+                    It.Is<GeneralCommand>(command =>
+                        command.Name == GeneralCommandType.DisplayMessage.ToString() &&
+                        command.Arguments["Header"] == "Watch Together" &&
+                        command.Arguments["Text"] == "已安装 v2.0.0，重启 Emby 后生效。" &&
+                        command.Arguments["TimeoutMs"] == "3000"),
+                    It.IsAny<CancellationToken>()), Times.Once);
+            }
+        }
+
+        [Fact]
+        public async Task AutomaticCheck_FailureNotifiesAdmins_AndKeepsStatusFailure()
+        {
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand",
+                    It.IsAny<GeneralCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            using (var manager = new PluginUpdateManager(
+                new PluginConfiguration(),
+                new Version(1, 0, 0),
+                new ThrowingReleaseClient("network details must stay in logs"),
+                CreateInstallationManager(out _),
+                sessionManager: sessionManager.Object))
+            {
+                var status = await manager.CheckForUpdatesAsync(true);
+
+                Assert.Contains("检查更新失败", status.LastError);
+                Assert.DoesNotContain("network details", status.LastError);
+                sessionManager.Verify(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand",
+                    It.Is<GeneralCommand>(command =>
+                        command.Name == GeneralCommandType.DisplayMessage.ToString() &&
+                        command.Arguments["Text"] == "检查更新失败，请稍后重试。" &&
+                        command.Arguments["TimeoutMs"] == "3000"),
+                    It.IsAny<CancellationToken>()), Times.Once);
             }
         }
 
@@ -669,6 +747,21 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
 
                 throw new InvalidOperationException("second check failed");
+            }
+        }
+
+        private sealed class ThrowingReleaseClient : IPluginReleaseClient
+        {
+            private readonly string _message;
+
+            public ThrowingReleaseClient(string message)
+            {
+                _message = message;
+            }
+
+            public Task<VerifiedPluginRelease> CheckForLatestAsync(CancellationToken cancellationToken)
+            {
+                throw new InvalidOperationException(_message);
             }
         }
 

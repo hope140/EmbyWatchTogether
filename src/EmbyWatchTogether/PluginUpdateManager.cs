@@ -227,7 +227,9 @@ namespace Emby.Plugins.WatchTogether
 
                     if (_verifiedRelease == null)
                     {
-                        SetError("请先检查更新，再安装插件更新。", null);
+                        var message = "请先检查更新，再安装插件更新。";
+                        SetError(message, null);
+                        await NotifyAdminAsync(message, linked.Token).ConfigureAwait(false);
                     }
                     else
                     {
@@ -237,10 +239,14 @@ namespace Emby.Plugins.WatchTogether
                         {
                             _verifiedRelease = null;
                             SetError(CurrentVersionUnavailableMessage, currentVersionException);
+                            await NotifyAdminAsync(CurrentVersionUnavailableMessage, linked.Token)
+                                .ConfigureAwait(false);
                         }
                         else if (!IsNewer(_verifiedRelease.Release.Version, currentVersion))
                         {
-                            SetError("当前已经是最新" + GetChannelLabel(_verifiedRelease) + "。", null);
+                            var message = "当前已经是最新" + GetChannelLabel(_verifiedRelease) + "。";
+                            SetError(message, null);
+                            await NotifyAdminAsync(message, linked.Token).ConfigureAwait(false);
                         }
                         else
                         {
@@ -248,7 +254,9 @@ namespace Emby.Plugins.WatchTogether
                             if (!string.IsNullOrWhiteSpace(configuration.PendingUpdateVersion) &&
                                 VersionsEqual(configuration.PendingUpdateVersion, _verifiedRelease.Release.Version))
                             {
-                                SetError("该版本已等待重启生效。", null);
+                                var message = "该版本已等待重启生效。";
+                                SetError(message, null);
+                                await NotifyAdminAsync(message, linked.Token).ConfigureAwait(false);
                             }
                             else
                             {
@@ -264,7 +272,9 @@ namespace Emby.Plugins.WatchTogether
                 }
                 catch (Exception ex)
                 {
-                    SetError("安装更新失败，请稍后重试。", ex);
+                    var message = "安装更新失败，请稍后重试。";
+                    SetError(message, ex);
+                    await NotifyAdminAsync(message, linked.Token).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -324,6 +334,8 @@ namespace Emby.Plugins.WatchTogether
                     }
 
                     SetError(CurrentVersionUnavailableMessage, currentVersionException);
+                    await NotifyAdminAsync(CurrentVersionUnavailableMessage, cancellationToken)
+                        .ConfigureAwait(false);
                     return GetStatus();
                 }
 
@@ -373,10 +385,37 @@ namespace Emby.Plugins.WatchTogether
                         {
                             _status.UpdateAvailable = false;
                         }
+                        await NotifyAdminAsync(
+                            "版本 v" + FormatVersion(release.Version) + " 已等待重启生效。",
+                            cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {
-                        await InstallVerifiedReleaseAsync(verifiedRelease, cancellationToken).ConfigureAwait(false);
+                        await NotifyAdminAsync(
+                            "发现" + GetChannelLabel(verifiedRelease) + " v" +
+                            FormatVersion(release.Version) + "，正在安装。",
+                            cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            await InstallVerifiedReleaseAsync(verifiedRelease, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            lock (_stateLock)
+                            {
+                                _verifiedRelease = null;
+                                _status.UpdateAvailable = false;
+                            }
+
+                            const string installFailureMessage = "安装更新失败，请稍后重试。";
+                            SetError(installFailureMessage, ex);
+                            await NotifyAdminAsync(installFailureMessage, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
                     }
                 }
 
@@ -398,6 +437,7 @@ namespace Emby.Plugins.WatchTogether
                     _status.UpdateAvailable = false;
                 }
                 SetError(ex.UserMessage, ex);
+                await NotifyAdminAsync(ex.UserMessage, cancellationToken).ConfigureAwait(false);
                 return GetStatus();
             }
             catch (Exception ex)
@@ -408,6 +448,7 @@ namespace Emby.Plugins.WatchTogether
                     _status.UpdateAvailable = false;
                 }
                 SetError("检查更新失败，请稍后重试。", ex);
+                await NotifyAdminAsync("检查更新失败，请稍后重试。", cancellationToken).ConfigureAwait(false);
                 return GetStatus();
             }
             finally
@@ -500,11 +541,15 @@ namespace Emby.Plugins.WatchTogether
 
                 if (configurationSaved && notificationException == null)
                 {
-                    LogInfo("已安装 v" + FormatVersion(release.Version) + "，重启 Emby 后生效。");
+                    var message = "已安装 v" + FormatVersion(release.Version) + "，重启 Emby 后生效。";
+                    LogInfo(message);
+                    await NotifyAdminAsync(message, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
-                    LogInfo(BuildPostInstallDiagnostic(configurationSaved, notificationException != null));
+                    var message = BuildPostInstallDiagnostic(configurationSaved, notificationException != null);
+                    LogInfo(message);
+                    await NotifyAdminAsync(message, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch
@@ -520,12 +565,19 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private async Task NotifyLatestVersionAsync(
+        private Task NotifyLatestVersionAsync(
             Version currentVersion,
             VerifiedPluginRelease verifiedRelease,
             CancellationToken cancellationToken)
         {
-            if (_sessionManager == null)
+            return NotifyAdminAsync(
+                BuildLatestVersionMessage(currentVersion, verifiedRelease),
+                cancellationToken);
+        }
+
+        private async Task NotifyAdminAsync(string message, CancellationToken cancellationToken)
+        {
+            if (_sessionManager == null || string.IsNullOrWhiteSpace(message))
             {
                 return;
             }
@@ -534,7 +586,7 @@ namespace Emby.Plugins.WatchTogether
             {
                 var command = MessageCommandFactory.DisplayMessageCommand(
                     "Watch Together",
-                    BuildLatestVersionMessage(currentVersion, verifiedRelease),
+                    message,
                     timeoutMs: 3000);
 
                 await _sessionManager.SendMessageToAdminSessions(
@@ -548,7 +600,7 @@ namespace Emby.Plugins.WatchTogether
             }
             catch (Exception ex)
             {
-                LogException("检查完成，但发送“已是最新”提示失败。", ex);
+                LogException("发送插件更新提示失败。", ex);
             }
         }
 

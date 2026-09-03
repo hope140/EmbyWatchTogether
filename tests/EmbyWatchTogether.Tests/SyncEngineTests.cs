@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Session;
@@ -352,6 +353,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Single(warnings);
             Assert.Contains("reason=MissingSnapshot", warnings[0]);
             Assert.Contains("missing=u2", warnings[0]);
+            Assert.Contains("reportedSupportsRemoteControl=True", warnings[0]);
+            Assert.Contains("effectiveSupportsRemoteControl=True", warnings[0]);
+            Assert.Contains("supportedCommandCount=3", warnings[0]);
 
             SetCandidates(
                 Snapshot("session-one", "u1", paused: false, position: 0, itemId: "item-a"),
@@ -371,6 +375,35 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Equal(3, warnings.Count);
             Assert.Contains("reason=EmptyOrDifferentItem", warnings[2]);
+            Assert.DoesNotContain("http://emby", string.Join("\n", warnings));
+        }
+
+        [Fact]
+        public void EligibilityAndMultipleSessionDiagnostics_IncludeReportedEffectiveAndCommandCount()
+        {
+            CreateRoom();
+            var warnings = new List<string>();
+            var engine = CreateEngine(logManager: CreateLogManager(warnings).Object);
+            var reportedFalseEffectiveTrue = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+
+            SetCandidates(
+                Snapshot("session-long-ABCDEFGHIJK", "u1", paused: false, position: 0,
+                    supportsRemoteControl: false,
+                    capabilities: reportedFalseEffectiveTrue),
+                Snapshot("session-older-XYZ", "u1", paused: false, position: 0,
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)),
+                Snapshot("session-two-123456789", "u2", paused: false, position: 0));
+
+            engine.PollOnce(_clock.Now);
+            Assert.Contains(warnings, warning => warning.Contains("multiple-session selection"));
+            Assert.Contains(warnings, warning => warning.Contains("eligibilityReason=RemoteControlUnsupportedOrMismatch"));
+            Assert.Contains(warnings, warning => warning.Contains("eligibility failure reason="));
+            Assert.Contains(warnings, warning => warning.Contains("reportedSupportsRemoteControl=False"));
+            Assert.Contains(warnings, warning => warning.Contains("effectiveSupportsRemoteControl=True"));
+            Assert.Contains(warnings, warning => warning.Contains("supportedCommandCount=3"));
+            Assert.DoesNotContain("session-long-ABCDEFGHIJK", string.Join("\n", warnings));
             Assert.DoesNotContain("http://emby", string.Join("\n", warnings));
         }
 
@@ -2011,6 +2044,315 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void WatchingRemoteControlRecovery_HoldsWatchingUntilCapabilityRestores()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 57 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 57 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(6);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 58 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 58 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Empty(_issuer.Issued);
+        }
+
+        [Fact]
+        public void WatchingRemoteControlRecovery_ExpiresAndUsesStrictWaitingPath()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+
+            _clock.Advance(SyncConstants.RemoteControlRecoveryGraceSeconds + 0.1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Contains(_issuer.Issued, issued => issued.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void WaitingRoom_DoesNotEnterRemoteControlRecovery()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 0));
+
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Equal(2, _issuer.Issued.Count(issued => issued.command == RemoteCommands.Pause));
+            Assert.Equal(new[] { "u1", "u2" }, _issuer.Issued
+                .Where(issued => issued.command == RemoteCommands.Pause)
+                .Select(issued => issued.userId)
+                .OrderBy(userId => userId));
+        }
+
+        [Fact]
+        public void WatchingRemoteControlRecovery_SessionChangeFallsThroughToWaiting()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Contains(_issuer.Issued, issued => issued.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void WatchingRemoteControlRecovery_DoesNotHidePendingCommand()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+            runtime.Pending["u1"] = new PendingCommand
+            {
+                UserId = "u1",
+                SessionId = "s1",
+                ItemId = "i1",
+                Command = RemoteCommands.Seek,
+                PositionTicks = 90 * SessionSnapshot.TicksPerSecond,
+                IssuedAtUtc = _clock.Now,
+            };
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+        }
+
+        [Fact]
+        public void WatchingRemoteControlRecovery_RequiresEffectiveCapability()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false,
+                    capabilities: new SessionCapabilityReport(false, Array.Empty<string>())),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+        }
+
+        [Fact]
+        public void WatchingRemoteControlRecovery_PauseDuringWindow_IsPropagatedOnceAfterRecovery()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 52 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 52 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+
+            Assert.Single(_issuer.Issued, issued =>
+                issued.userId == "u2" && issued.command == RemoteCommands.Pause);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 52 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(_issuer.Issued, issued =>
+                issued.userId == "u2" && issued.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void WatchingRemoteControlRecovery_SeekDuringWindow_StartsOneBarrierAfterRecovery()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 80 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 52 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 80 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.NotNull(runtime.Barrier);
+            Assert.Equal(BarrierStage.Pause, runtime.Barrier.Stage);
+            Assert.Equal("u1", runtime.Barrier.AnchorUserId);
+            Assert.Empty(_issuer.Issued);
+        }
+
+        [Fact]
+        public void WatchingRemoteControlRecovery_ItemChangeFallsThroughToWaiting()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    itemId: "i2", supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    itemId: "i2"));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Equal(2, _issuer.Issued.Count(issued => issued.command == RemoteCommands.Pause));
+        }
+
+        [Fact]
+        public void RemoteControlRecovery_ResetPathsClearStartAndSignature()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+            var effectiveCapabilities = new SessionCapabilityReport(
+                true,
+                new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek });
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.NotNull(GetRecoveryProperty(runtime, "RemoteControlRecoveryStartedAtUtc"));
+            Assert.NotNull(GetRecoveryProperty(runtime, "RemoteControlRecoverySignature"));
+
+            runtime.ResetToWaiting();
+            Assert.Null(GetRecoveryProperty(runtime, "RemoteControlRecoveryStartedAtUtc"));
+            Assert.Null(GetRecoveryProperty(runtime, "RemoteControlRecoverySignature"));
+
+            EnterWatching(engine, room);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.NotNull(GetRecoveryProperty(runtime, "RemoteControlRecoveryStartedAtUtc"));
+            Assert.NotNull(GetRecoveryProperty(runtime, "RemoteControlRecoverySignature"));
+
+            _provider.Throw = true;
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(2.1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Null(GetRecoveryProperty(runtime, "RemoteControlRecoveryStartedAtUtc"));
+            Assert.Null(GetRecoveryProperty(runtime, "RemoteControlRecoverySignature"));
+        }
+
+        [Fact]
         public void WatchingTick_PropagatesPauseFromPrimary()
         {
             var room = CreateRoom();
@@ -3374,7 +3716,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Theory]
-        [InlineData(false)] [InlineData(true)]
+        [InlineData(false)]
+        [InlineData(true)]
         public void SyncActionMessageFailure_DoesNotChangePlaybackState(bool throwOnIssue)
         {
             var room = CreateRoom();
@@ -3411,6 +3754,13 @@ namespace Emby.Plugins.WatchTogether.Tests
             _provider.Snapshots = snapshots.ToList();
         }
 
+        private static object GetRecoveryProperty(RoomRuntime runtime, string propertyName)
+        {
+            return typeof(RoomRuntime)
+                .GetProperty(propertyName, BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(runtime);
+        }
+
         private static SessionSnapshot Snapshot(
             string sessionId,
             string userId,
@@ -3420,13 +3770,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             bool stopped = false,
             double playbackRate = 1.0,
             DateTimeOffset? lastActivityDateUtc = null,
-            bool supportsRemoteControl = true)
+            bool supportsRemoteControl = true,
+            SessionCapabilityReport capabilities = null)
         {
             return new SessionSnapshot(
                 sessionId, userId, itemId, "m1",
                 position, 100 * SessionSnapshot.TicksPerSecond, paused, playbackRate,
                 stopped: stopped, supportsRemoteControl: supportsRemoteControl,
-                new SessionCapabilityReport(
+                capabilities ?? new SessionCapabilityReport(
                     supportsRemoteControl,
                     supportsRemoteControl
                         ? new[] { "Pause", "Unpause", "Seek" }
@@ -3473,7 +3824,17 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             public List<SessionSnapshot> Snapshots { get; set; } = new List<SessionSnapshot>();
 
-            public IReadOnlyList<SessionSnapshot> GetSessionSnapshots() => Snapshots;
+            public bool Throw { get; set; }
+
+            public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
+            {
+                if (Throw)
+                {
+                    throw new InvalidOperationException("snapshot provider unavailable");
+                }
+
+                return Snapshots;
+            }
         }
 
         private sealed class ToggleSnapshotProvider : ISessionSnapshotProvider
