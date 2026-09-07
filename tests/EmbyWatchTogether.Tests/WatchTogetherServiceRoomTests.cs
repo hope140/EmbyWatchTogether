@@ -387,6 +387,68 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void ParticipantResync_ReturnsAcceptedThenBusyForRepeatedRequest()
+        {
+            var user1 = Guid.NewGuid().ToString("N");
+            var user2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "room", "admin-1", new[] { user1, user2 }, user1);
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, null, "server-1");
+            var service = NewService(user2);
+
+            var accepted = WithPlugin(plugin, () =>
+                service.Post(new ParticipantResyncRoomRequest { Id = room.Id }));
+            Assert.Equal("accepted", GetString(accepted, "Status"));
+            Assert.Equal("Waiting", GetString(accepted, "State"));
+
+            var busy = WithPlugin(plugin, () =>
+                service.Post(new ParticipantResyncRoomRequest { Id = room.Id }));
+            Assert.Equal("busy", GetString(busy, "Status"));
+            Assert.Equal("resync_cooldown", GetString(busy, "Reason"));
+        }
+
+        [Fact]
+        public void ParticipantResync_ReturnsUnavailableForServerOrSnapshotProtection()
+        {
+            var user1 = Guid.NewGuid().ToString("N");
+            var user2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "room", "admin-1", new[] { user1, user2 }, user1);
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var service = NewService(user2);
+
+            var wrongServerPlugin = NewPlugin(manager, bridge, null, "server-2");
+            var wrongServer = WithPlugin(wrongServerPlugin, () =>
+                service.Post(new ParticipantResyncRoomRequest { Id = room.Id }));
+            Assert.Equal("unavailable", GetString(wrongServer, "Status"));
+            Assert.Equal("server_unavailable", GetString(wrongServer, "Reason"));
+
+            SetSnapshotUnavailable(manager.GetRuntime(room.Id), true);
+            var unavailablePlugin = NewPlugin(manager, bridge, null, "server-1");
+            var unavailable = WithPlugin(unavailablePlugin, () =>
+                service.Post(new ParticipantResyncRoomRequest { Id = room.Id }));
+            Assert.Equal("unavailable", GetString(unavailable, "Status"));
+            Assert.Equal("snapshot_unavailable", GetString(unavailable, "Reason"));
+        }
+
+        [Fact]
+        public void ParticipantResync_RejectsParticipantWhoHasLeft()
+        {
+            var user1 = Guid.NewGuid().ToString("N");
+            var user2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "room", "admin-1", new[] { user1, user2 }, user1);
+            manager.SetParticipantJoined(room.Id, user2, false);
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, null, "server-1");
+            var service = NewService(user2);
+
+            Assert.Throws<UnauthorizedAccessException>(() => WithPlugin(plugin, () =>
+                service.Post(new ParticipantResyncRoomRequest { Id = room.Id })));
+        }
+
+        [Fact]
         public void SyncNoticesDisabled_SuppressesMembershipAndControl_ButExplicitMessageStillSends()
         {
             var u1 = Guid.NewGuid().ToString("N");

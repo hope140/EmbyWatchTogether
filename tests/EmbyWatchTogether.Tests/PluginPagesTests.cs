@@ -145,6 +145,13 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("setAdminVisibility", javascript);
             Assert.Contains("roomUserName", javascript);
             Assert.Contains("查看诊断", javascript);
+            Assert.Contains("participantResync", javascript);
+            Assert.Contains("请求重新同步", javascript);
+            Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync", javascript);
+            Assert.Contains("status === 'accepted'", javascript);
+            Assert.Contains("status === 'busy'", javascript);
+            Assert.Contains("status === 'unavailable'", javascript);
+            Assert.Contains("room.CurrentUserJoined && !room.IsAdmin", javascript);
             Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Diagnostics", javascript);
             Assert.Contains("function sanitizeDiagnostic", javascript);
             Assert.Contains("SnapshotHealth", javascript);

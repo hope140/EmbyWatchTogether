@@ -33,6 +33,17 @@ namespace Emby.Plugins.WatchTogether
         public string ServerId { get; set; }
     }
 
+    public sealed class ParticipantResyncResult
+    {
+        public string RoomId { get; set; }
+
+        public RoomState State { get; set; }
+
+        public string Status { get; set; }
+
+        public string Reason { get; set; }
+    }
+
     /// <summary>
     /// In-memory room registry and lifecycle. Runtime state is intentionally not
     /// persisted; metadata changes are committed to the store before the
@@ -42,6 +53,10 @@ namespace Emby.Plugins.WatchTogether
     {
         private const string RoomServerUnavailableError = "room server is unavailable";
         private const string RoomActionConflictError = "manual action conflicts with active synchronization";
+        private const string ParticipantResyncBusyReason = "synchronization_in_progress";
+        private const string ParticipantResyncCooldownReason = "resync_cooldown";
+        private const string ParticipantResyncSnapshotUnavailableReason = "snapshot_unavailable";
+        private const string ParticipantResyncServerUnavailableReason = "server_unavailable";
 
         private readonly object _lock = new object();
         private readonly RoomStore _store;
@@ -274,6 +289,81 @@ namespace Emby.Plugins.WatchTogether
         public bool LeaveParticipant(string roomId, string userId)
         {
             return LeaveParticipantResult(roomId, userId).Changed;
+        }
+
+        public ParticipantResyncResult RequestParticipantResync(
+            string roomId,
+            string userId,
+            Func<string> currentServerIdProvider,
+            DateTimeOffset now)
+        {
+            using (var access = TryEnterRoom(roomId))
+            {
+                if (access == null)
+                {
+                    throw new KeyNotFoundException("room not found");
+                }
+
+                var room = access.Room;
+                if (!room.HasParticipant(userId))
+                {
+                    throw new UnauthorizedAccessException("not a room participant");
+                }
+
+                if (!room.IsJoined(userId))
+                {
+                    throw new UnauthorizedAccessException("room participant has left");
+                }
+
+                var runtime = access.Runtime;
+                var result = new ParticipantResyncResult
+                {
+                    RoomId = room.Id,
+                    State = runtime.State,
+                };
+
+                if (currentServerIdProvider == null ||
+                    !IsSameServer(room.ServerId, currentServerIdProvider()))
+                {
+                    result.Status = "unavailable";
+                    result.Reason = ParticipantResyncServerUnavailableReason;
+                    return result;
+                }
+
+                if (runtime.SnapshotUnavailable)
+                {
+                    result.Status = "unavailable";
+                    result.Reason = ParticipantResyncSnapshotUnavailableReason;
+                    return result;
+                }
+
+                // Check every pending command, including a command left by a
+                // participant whose membership is changing. This keeps a
+                // participant request from clearing an in-flight operation.
+                if (runtime.Barrier != null || runtime.Pending.Count > 0)
+                {
+                    result.Status = "busy";
+                    result.Reason = ParticipantResyncBusyReason;
+                    return result;
+                }
+
+                if (runtime.ParticipantResyncRequestedAtUtc.HasValue &&
+                    now < runtime.ParticipantResyncRequestedAtUtc.Value.AddSeconds(
+                        SyncConstants.ParticipantResyncCooldownSeconds))
+                {
+                    result.Status = "busy";
+                    result.Reason = ParticipantResyncCooldownReason;
+                    return result;
+                }
+
+                runtime.ParticipantResyncRequestedAtUtc = now;
+                runtime.ResetToWaiting();
+                runtime.RecordDiagnosticEvent(
+                    "resync", userId, null, "accepted", null, null, now);
+                result.Status = "accepted";
+                result.State = runtime.State;
+                return result;
+            }
         }
 
         public ParticipantStateChangeResult LeaveParticipantResult(string roomId, string userId)

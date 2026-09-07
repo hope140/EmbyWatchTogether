@@ -17,6 +17,7 @@
 - 命令具备取消、超时和有限重试；起播失败会进入冷却并自动重试。每个房间独立串行处理并隔离异常，不影响其他房间的轮询。
 - `SessionInfo` 是服务器轮询快照，不是播放器内部时钟。明显位置跳变的阈值会根据已观测的命令确认延迟提高（普通情况下约 4 秒起），不保证每一帧一致，也不主动消除长期小幅漂移。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 是只读诊断接口，普通参与者和管理员可读取当前房间。接口在 room gate 内重新检查房间、成员和当前 `ServerId`，初始化未完成、房间不存在或服务器身份不匹配时沿用现有稳定错误语义；读取不会调用 `ICommandIssuer` 或消息发送器。返回字段采用白名单 DTO，`RoomRuntime` 保存最多 100 条连续去重事件、最近选中快照和最近动作，均为内存状态，删除房间或重启后清空。快照位置、能力和命令确认延迟均表示服务端观察值，不代表客户端已实际执行。
+- 已加入的普通参与者可以通过 `POST /WatchTogether/Rooms/{Id}/Resync` 请求重新同步。请求在 room gate 内再次核验成员、加入状态、当前 `ServerId`、快照保护状态和运行中操作；`Barrier` 或任意 Pending 存在时返回稳定的 busy 结果，不清理当前同步。受理后仅将 runtime 复位为 `Waiting`，由现有轮询在资格满足时进入原有 `Barrier`；房间级短冷却会合并重复请求。响应的 `Status` 只使用 `accepted`、`busy`、`unavailable`，`Reason` 使用稳定原因码。
 
 ## 配置与运行时参数
 
@@ -110,6 +111,7 @@ docs/                          当前实现说明、排错和协作流程
 | `POST` | `/WatchTogether/Rooms/{id}/Join` | 参与者加入房间 |
 | `POST` | `/WatchTogether/Rooms/{id}/Leave` | 参与者退出房间 |
 | `POST` | `/WatchTogether/Rooms/{id}/Action` | 管理员执行 `pause`、`resume` 或 `resync` |
+| `POST` | `/WatchTogether/Rooms/{id}/Resync` | 已加入参与者请求重新同步 |
 | `POST` | `/WatchTogether/Rooms/{id}/Message` | 管理员向在线参与者发送提示 |
 | `GET` | `/WatchTogether/Info` | 管理员读取当前版本与 GitHub 仓库地址 |
 
