@@ -21,6 +21,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
+            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics");
+            Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
             Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics.js");
         }
 
@@ -47,7 +49,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogether");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherDiagnostics");
             Assert.Equal("sync", page.MenuIcon);
         }
 

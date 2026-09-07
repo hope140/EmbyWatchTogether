@@ -120,7 +120,9 @@ namespace Emby.Plugins.WatchTogether
             {
                 new PluginPageInfo
                 {
-                    Name = "WatchTogether",
+                    // Change the page key together with the controller key so
+                    // Emby Web refreshes the embedded HTML cache as well.
+                    Name = "WatchTogetherDiagnostics",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = true,
