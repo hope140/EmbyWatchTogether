@@ -144,6 +144,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("_wtUpdateBusy", javascript);
             Assert.Contains("dataType: 'json'", javascript);
             Assert.Contains("setAdminVisibility", javascript);
+            Assert.Contains("wtRoomsHeading", html);
+            Assert.Contains("我的房间", javascript);
+            Assert.Contains("暂无参与的房间", javascript);
+            Assert.Contains("请求重新同步", javascript);
             Assert.Contains("roomUserName", javascript);
             Assert.Contains("查看诊断", javascript);
             Assert.Contains("participantResync", javascript);

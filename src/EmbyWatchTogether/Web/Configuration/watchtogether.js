@@ -533,12 +533,35 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function setAdminVisibility(page, isAdmin) {
         var adminSection = page.querySelector('#wtAdminSection');
         var settingsSection = page.querySelector('#wtSettingsSection');
+        var roomsHeading = page.querySelector('#wtRoomsHeading');
+        var helpSteps = [
+            page.querySelector('#wtHelpStep1'),
+            page.querySelector('#wtHelpStep2'),
+            page.querySelector('#wtHelpStep3')
+        ];
         if (adminSection) {
             adminSection.style.display = isAdmin ? '' : 'none';
         }
         if (settingsSection) {
             settingsSection.style.display = isAdmin ? '' : 'none';
         }
+        if (roomsHeading) {
+            roomsHeading.textContent = isAdmin ? '2. 房间' : '我的房间';
+        }
+        var helpText = isAdmin ? [
+            '创建房间并选择两名参与者。',
+            '两人分别登录 Emby，打开同一视频。',
+            '看到“同步中”后即可一起观看。'
+        ] : [
+            '加入房间后，与另一位参与者打开同一视频。',
+            '播放、暂停和进度会自动同步。',
+            '需要重新对齐时，点击“请求重新同步”。'
+        ];
+        helpSteps.forEach(function (step, index) {
+            if (step) {
+                step.textContent = helpText[index];
+            }
+        });
     }
 
     function clearChildren(element) {
@@ -1028,10 +1051,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var empty = document.createElement('div');
             empty.className = 'wt-emptyState';
             var emptyTitle = document.createElement('strong');
-            emptyTitle.textContent = '还没有房间';
+            emptyTitle.textContent = page._wtIsAdmin === true ? '还没有房间' : '暂无参与的房间';
             var emptyText = document.createElement('p');
             emptyText.className = 'fieldDescription';
-            emptyText.textContent = '先在上方创建一个房间，再让两位参与者打开同一视频。';
+            emptyText.textContent = page._wtIsAdmin === true
+                ? '先在上方创建一个房间，再让两位参与者打开同一视频。'
+                : '请让管理员把你的账号加入房间。';
             empty.appendChild(emptyTitle);
             empty.appendChild(emptyText);
             container.appendChild(empty);
@@ -1140,7 +1165,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             renderRooms(page, list);
             syncForm(page);
             if (announce) {
-                setStatus(page, list.length > 0 ? '已更新 ' + list.length + ' 个房间' : '暂无房间，可以创建一个。');
+                setStatus(page, list.length > 0
+                    ? '已更新 ' + list.length + ' 个房间'
+                    : page._wtIsAdmin === true ? '暂无房间，可以创建一个。' : '暂无参与的房间。');
             }
             return list;
         }).catch(function (err) {
