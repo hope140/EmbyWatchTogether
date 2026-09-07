@@ -73,6 +73,14 @@ namespace Emby.Plugins.WatchTogether
 
         internal string RemoteControlRecoverySignature { get; private set; }
 
+        private readonly HashSet<string> _remoteControlRecoveryAffectedUserIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        internal IReadOnlyList<string> RemoteControlRecoveryAffectedUserIds
+        {
+            get { return _remoteControlRecoveryAffectedUserIds.ToList(); }
+        }
+
         public DateTimeOffset? MissingSessionSinceUtc { get; set; }
 
         public int DriftRounds { get; set; }
@@ -286,16 +294,28 @@ namespace Emby.Plugins.WatchTogether
             ClearRemoteControlRecovery();
         }
 
-        internal void StartRemoteControlRecovery(DateTimeOffset startedAtUtc, string signature)
+        internal void StartRemoteControlRecovery(
+            DateTimeOffset startedAtUtc,
+            string signature,
+            IEnumerable<string> affectedUserIds)
         {
             RemoteControlRecoveryStartedAtUtc = startedAtUtc;
             RemoteControlRecoverySignature = signature;
+            _remoteControlRecoveryAffectedUserIds.Clear();
+            if (affectedUserIds != null)
+            {
+                foreach (var userId in affectedUserIds.Where(id => !string.IsNullOrWhiteSpace(id)))
+                {
+                    _remoteControlRecoveryAffectedUserIds.Add(userId);
+                }
+            }
         }
 
         internal void ClearRemoteControlRecovery()
         {
             RemoteControlRecoveryStartedAtUtc = null;
             RemoteControlRecoverySignature = null;
+            _remoteControlRecoveryAffectedUserIds.Clear();
         }
     }
 }

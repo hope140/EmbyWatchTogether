@@ -53,6 +53,7 @@ namespace Emby.Plugins.WatchTogether
         public double PlaybackRate { get; set; }
         public double? RuntimeSeconds { get; set; }
         public double? LastActivityAgeSeconds { get; set; }
+        public double? AckLatencySeconds { get; set; }
         public bool ReportedSupportsRemoteControl { get; set; }
         public bool EffectiveSupportsRemoteControl { get; set; }
         public bool CanPause { get; set; }
@@ -154,12 +155,19 @@ namespace Emby.Plugins.WatchTogether
     {
         public const string SchemaVersion = "1";
         public const int MaxEvents = 100;
+        private const double SnapshotFreshnessSeconds = 10;
         private const int HashLength = 12;
 
         private static readonly HashSet<string> AllowedCommands = new HashSet<string>(
             new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.PlayPause,
                 RemoteCommands.Seek, RemoteCommands.Stop, RemoteCommands.DisplayMessage },
             StringComparer.OrdinalIgnoreCase);
+
+        private static readonly HashSet<string> AllowedEventTypes = new HashSet<string>(
+            new[] { "barrier_started", "barrier_stage_changed", "entered_watching", "command_issued",
+                "command_acknowledged", "command_failed", "retry_scheduled", "stop_confirmed",
+                "snapshot_protection_entered", "snapshot_protection_recovered", "eligibility_changed",
+                "manual_action", "resync" }, StringComparer.OrdinalIgnoreCase);
 
         public static string Hash(string value)
         {
@@ -189,6 +197,16 @@ namespace Emby.Plugins.WatchTogether
                 if (string.Equals(allowed, command, StringComparison.OrdinalIgnoreCase)) return allowed;
             }
             return null;
+        }
+
+        internal static string NormalizeEventType(string type)
+        {
+            if (string.IsNullOrWhiteSpace(type)) return "observed";
+            foreach (var allowed in AllowedEventTypes)
+            {
+                if (string.Equals(allowed, type.Trim(), StringComparison.OrdinalIgnoreCase)) return allowed;
+            }
+            return "observed";
         }
 
         internal static string NormalizeResult(string result)
@@ -228,7 +246,20 @@ namespace Emby.Plugins.WatchTogether
 
             var selected = (state.Snapshots ?? new Dictionary<string, SessionSnapshot>())
                 .Where(p => p.Value != null && room.HasParticipant(p.Key))
-                .Select(p => ToSession(room, p.Key, p.Value, now)).ToList();
+                .Select(p => ToSession(room, runtime, p.Key, p.Value, now)).ToList();
+            var selectedByUser = new Dictionary<string, RoomDiagnosticSession>(StringComparer.OrdinalIgnoreCase);
+            foreach (var session in selected)
+            {
+                selectedByUser[session.Alias] = session;
+            }
+            var allSessions = (room.ParticipantUserIds ?? Array.Empty<string>())
+                .Take(2).Select(userId =>
+                {
+                    var alias = AliasFor(room, userId);
+                    return selectedByUser.TryGetValue(alias, out var session)
+                        ? session
+                        : MissingSession(room, runtime, userId);
+                }).ToList();
             var pending = runtime.Pending.ToList().Take(2).Select(p => ToPending(room, p.Key, p.Value, now)).ToList();
             var barrier = ToBarrier(room, runtime.Barrier, now);
             var recovery = new RoomDiagnosticRecovery
@@ -237,7 +268,13 @@ namespace Emby.Plugins.WatchTogether
                 AgeSeconds = runtime.RemoteControlRecoveryStartedAtUtc.HasValue
                     ? (double?)Math.Max(0, (now - runtime.RemoteControlRecoveryStartedAtUtc.Value).TotalSeconds) : null,
                 AffectedAliases = runtime.RemoteControlRecoveryStartedAtUtc.HasValue
-                    ? new[] { "userA", "userB" } : Array.Empty<string>(),
+                    ? runtime.RemoteControlRecoveryAffectedUserIds
+                        .Select(userId => AliasFor(room, userId))
+                        .Where(alias => alias != "unknown")
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
+                        .ToList()
+                    : Array.Empty<string>(),
             };
 
             return new RoomDiagnostics
@@ -249,11 +286,12 @@ namespace Emby.Plugins.WatchTogether
                 RoomState = runtime.State.ToString(),
                 StatusReason = statusReason,
                 SnapshotHealth = runtime.SnapshotUnavailable ? "unavailable" :
-                    state.SnapshotsAtUtc.HasValue ? "fresh" : "unknown",
+                    !state.SnapshotsAtUtc.HasValue ? "unknown" :
+                    (now - state.SnapshotsAtUtc.Value).TotalSeconds > SnapshotFreshnessSeconds ? "stale" : "fresh",
                 SyncItemHash = Hash(runtime.SyncItemId),
                 Participants = aliases,
-                Sessions = selected,
-                Snapshots = selected,
+                Sessions = allSessions,
+                Snapshots = allSessions,
                 Pending = pending,
                 Barrier = barrier,
                 RecoveryWindow = recovery,
@@ -265,7 +303,7 @@ namespace Emby.Plugins.WatchTogether
             };
         }
 
-        private static RoomDiagnosticSession ToSession(Room room, string userId, SessionSnapshot s, DateTimeOffset now)
+        private static RoomDiagnosticSession ToSession(Room room, RoomRuntime runtime, string userId, SessionSnapshot s, DateTimeOffset now)
         {
             var caps = s.Capabilities;
             return new RoomDiagnosticSession
@@ -277,6 +315,8 @@ namespace Emby.Plugins.WatchTogether
                 RuntimeSeconds = s.RunTimeTicks > 0 ? (double?)s.RunTimeTicks / SessionSnapshot.TicksPerSecond : null,
                 LastActivityAgeSeconds = s.LastActivityDateUtc == default(DateTimeOffset)
                     ? null : (double?)Math.Max(0, (now - s.LastActivityDateUtc).TotalSeconds),
+                AckLatencySeconds = runtime.AckLatencySeconds.TryGetValue(userId, out var latency)
+                    ? (double?)Math.Max(0, latency) : null,
                 ReportedSupportsRemoteControl = s.SupportsRemoteControl,
                 EffectiveSupportsRemoteControl = caps?.SupportsRemoteControl == true,
                 CanPause = caps?.CanPause == true, CanUnpause = caps?.CanUnpause == true,
@@ -284,6 +324,17 @@ namespace Emby.Plugins.WatchTogether
                 SupportedCommandNames = (caps?.SupportedCommands ?? Array.Empty<string>())
                     .Select(NormalizeCommand).Where(c => c != null).Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList(),
+            };
+        }
+
+        private static RoomDiagnosticSession MissingSession(Room room, RoomRuntime runtime, string userId)
+        {
+            return new RoomDiagnosticSession
+            {
+                Alias = AliasFor(room, userId), Online = false,
+                SupportedCommandNames = Array.Empty<string>(),
+                AckLatencySeconds = runtime.AckLatencySeconds.TryGetValue(userId, out var latency)
+                    ? (double?)Math.Max(0, latency) : null,
             };
         }
 
@@ -317,7 +368,7 @@ namespace Emby.Plugins.WatchTogether
             if (a == null) return null;
             return new RoomDiagnosticAction
             {
-                Type = a.Type, Command = NormalizeCommand(a.Command), Alias = AliasFor(room, a.UserId),
+                Type = NormalizeEventType(a.Type), Command = NormalizeCommand(a.Command), Alias = AliasFor(room, a.UserId),
                 Result = NormalizeResult(a.Result), PositionTicks = a.PositionTicks,
                 LatencySeconds = a.LatencySeconds, AtUtc = a.AtUtc,
             };
@@ -327,7 +378,7 @@ namespace Emby.Plugins.WatchTogether
         {
             return new RoomDiagnosticEvent
             {
-                Type = e.Type, Command = NormalizeCommand(e.Command), Alias = AliasFor(room, e.UserId),
+                Type = NormalizeEventType(e.Type), Command = NormalizeCommand(e.Command), Alias = AliasFor(room, e.UserId),
                 Result = NormalizeResult(e.Result), PositionTicks = e.PositionTicks,
                 LatencySeconds = e.LatencySeconds, AtUtc = e.AtUtc,
             };

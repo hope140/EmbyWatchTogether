@@ -2790,7 +2790,8 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
-            if (!TryBuildRemoteControlRecoverySignature(runtime, room, snapshots, out var signature))
+            if (!TryBuildRemoteControlRecoverySignature(
+                runtime, room, snapshots, out var signature, out var affectedUserIds))
             {
                 runtime.ClearRemoteControlRecovery();
                 return false;
@@ -2798,7 +2799,7 @@ namespace Emby.Plugins.WatchTogether
 
             if (!runtime.RemoteControlRecoveryStartedAtUtc.HasValue)
             {
-                runtime.StartRemoteControlRecovery(now, signature);
+                runtime.StartRemoteControlRecovery(now, signature, affectedUserIds);
                 return true;
             }
 
@@ -2825,9 +2826,11 @@ namespace Emby.Plugins.WatchTogether
             RoomRuntime runtime,
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
-            out string signature)
+            out string signature,
+            out IReadOnlyList<string> affectedUserIds)
         {
             signature = null;
+            affectedUserIds = Array.Empty<string>();
             var members = room.JoinedParticipantUserIds;
             if (members == null || members.Count != 2 ||
                 snapshots.Count != members.Count ||
@@ -2876,6 +2879,7 @@ namespace Emby.Plugins.WatchTogether
                 "|",
                 identityParts) +
                 ";affected=" + string.Join(",", affectedUsers.OrderBy(user => user, StringComparer.OrdinalIgnoreCase));
+            affectedUserIds = affectedUsers;
             return true;
         }
 

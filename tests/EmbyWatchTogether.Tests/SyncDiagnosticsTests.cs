@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Linq;
 using System.Runtime.Serialization;
 using Emby.Plugins.WatchTogether;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Net;
 using MediaBrowser.Controller.Session;
@@ -75,6 +76,51 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void ExportIncludesMissingParticipantAndActualRecoveryAliases()
+        {
+            string userA = "11111111111111111111111111111111";
+            string userB = "22222222222222222222222222222222";
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", userA,
+                new[] { userA, userB }, userA);
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.AckLatencySeconds[userA] = 1.25;
+            var now = DateTimeOffset.UtcNow;
+
+            typeof(RoomRuntime).GetMethod("StartRemoteControlRecovery", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(runtime, new object[] { now.AddSeconds(-2), "signature", new[] { userA } });
+            var exported = SyncDiagnostics.Build(room, runtime, "server-1", "1.4.3.2", "waiting", now);
+
+            Assert.Equal(2, exported.Sessions.Count);
+            Assert.Contains(exported.Sessions, session => session.Alias == "userB" && !session.Online);
+            Assert.Equal(1.25, exported.Sessions.Single(session => session.Alias == "userA").AckLatencySeconds);
+            Assert.Equal(new[] { "userA" }, exported.RecoveryWindow.AffectedAliases);
+
+            typeof(RoomRuntime).GetMethod("ClearRemoteControlRecovery", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(runtime, null);
+            exported = SyncDiagnostics.Build(room, runtime, "server-1", "1.4.3.2", "waiting", now);
+            Assert.Empty(exported.RecoveryWindow.AffectedAliases);
+        }
+
+        [Fact]
+        public void ExportNormalizesUnknownEventTypeAndStaleSnapshots()
+        {
+            string userA = "11111111111111111111111111111111";
+            string userB = "22222222222222222222222222222222";
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", userA,
+                new[] { userA, userB }, userA);
+            var runtime = manager.GetRuntime(room.Id);
+            var old = DateTimeOffset.UtcNow.AddSeconds(-30);
+            Record(runtime, "private_detail_should_not_escape", userA, null, "observed", null, null, old);
+            RecordSnapshots(runtime, new Dictionary<string, SessionSnapshot>(), old);
+
+            var exported = SyncDiagnostics.Build(room, runtime, "server-1", "1.4.3.2", "waiting", DateTimeOffset.UtcNow);
+            Assert.Equal("observed", exported.Events.Single().Type);
+            Assert.Equal("stale", exported.SnapshotHealth);
+        }
+
+        [Fact]
         public void DiagnosticsEndpointAllowsMemberAndRejectsOutsiderWithoutIssuer()
         {
             string userA = "11111111111111111111111111111111";
@@ -86,16 +132,37 @@ namespace Emby.Plugins.WatchTogether.Tests
             sessions.Setup(m => m.Sessions).Returns(new List<SessionInfo>());
             using (var bridge = new SessionBridge(sessions.Object))
             {
-                var plugin = NewPlugin(manager, bridge, "server-1");
+                var issuer = new RecordingIssuer();
+                var plugin = NewPlugin(manager, bridge, "server-1", issuer);
                 var member = NewService(userA);
                 var response = WithPlugin(plugin, () => member.Get(new GetRoomDiagnosticsRequest { Id = room.Id }));
                 var diagnostics = Assert.IsType<RoomDiagnostics>(response);
                 Assert.Equal("1", diagnostics.SchemaVersion);
                 Assert.Equal("userA", diagnostics.Participants[0].Alias);
+                Assert.Empty(issuer.Issued);
 
                 var outsider = NewService("33333333333333333333333333333333");
                 Assert.Throws<UnauthorizedAccessException>(() =>
                     WithPlugin(plugin, () => outsider.Get(new GetRoomDiagnosticsRequest { Id = room.Id })));
+            }
+        }
+
+        [Fact]
+        public void DiagnosticsEndpointRejectsServerMismatch()
+        {
+            string userA = "11111111111111111111111111111111";
+            string userB = "22222222222222222222222222222222";
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", userA,
+                new[] { userA, userB }, userA);
+            var sessions = new Mock<ISessionManager>();
+            sessions.Setup(m => m.Sessions).Returns(new List<SessionInfo>());
+            using (var bridge = new SessionBridge(sessions.Object))
+            {
+                var plugin = NewPlugin(manager, bridge, "server-2");
+                var member = NewService(userA);
+                Assert.Throws<ServiceUnavailableException>(() =>
+                    WithPlugin(plugin, () => member.Get(new GetRoomDiagnosticsRequest { Id = room.Id })));
             }
         }
 
@@ -119,14 +186,15 @@ namespace Emby.Plugins.WatchTogether.Tests
                 .Invoke(runtime, null);
         }
 
-        private static Plugin NewPlugin(RoomManager manager, SessionBridge bridge, string serverId)
+        private static Plugin NewPlugin(RoomManager manager, SessionBridge bridge, string serverId,
+            ICommandIssuer issuer = null)
         {
 #pragma warning disable SYSLIB0050
             var plugin = (Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin));
 #pragma warning restore SYSLIB0050
             SetPluginProperty(plugin, "Rooms", manager);
             SetPluginProperty(plugin, "Bridge", bridge);
-            SetPluginProperty(plugin, "Issuer", null);
+            SetPluginProperty(plugin, "Issuer", issuer);
             SetPluginProperty(plugin, "ServerId", serverId);
             return plugin;
         }
@@ -158,6 +226,20 @@ namespace Emby.Plugins.WatchTogether.Tests
             property.SetValue(null, plugin);
             try { return action(); }
             finally { property.SetValue(null, previous); }
+        }
+
+        private sealed class RecordingIssuer : ICommandIssuer
+        {
+            public List<string> Issued { get; } = new List<string>();
+
+            public bool TryIssue(string roomId, string controllingUserId, string userId,
+                SessionSnapshot snapshot, string command, long? positionTicks,
+                DateTimeOffset now, out string error)
+            {
+                Issued.Add(command);
+                error = null;
+                return true;
+            }
         }
     }
 }
