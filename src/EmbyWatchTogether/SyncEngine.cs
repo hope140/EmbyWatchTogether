@@ -303,6 +303,7 @@ namespace Emby.Plugins.WatchTogether
                             SessionSelector.StaleSessionTimeoutSeconds,
                             runtime.Previous);
                         var snapshots = selection.Selected;
+                        runtime.RecordDiagnosticSnapshots(snapshots, now);
                         var eligibility = RoomEligibility.Evaluate(snapshots);
                         bool eligible = eligibility.IsEligible;
                         LogMultipleSessionDiagnostics(runtime, room, selection, eligibility, now);
@@ -310,7 +311,8 @@ namespace Emby.Plugins.WatchTogether
                             runtime,
                             room,
                             snapshots,
-                            eligibility);
+                            eligibility,
+                            now);
                         bool sameItem = snapshots.Count == 2 &&
                             snapshots.Values.All(s => s != null) &&
                             snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
@@ -347,6 +349,8 @@ namespace Emby.Plugins.WatchTogether
                             runtime.PreviousAtUtc = null;
                             runtime.MissingSessionSinceUtc = null;
                             runtime.Error = StoppedPlaybackError;
+                            runtime.RecordDiagnosticEvent(
+                                "stop_confirmed", null, RemoteCommands.Stop, "stopped", null, null, now);
                             results.Add(Result(room, runtime, eligible));
                             continue;
                         }
@@ -794,7 +798,13 @@ namespace Emby.Plugins.WatchTogether
                             continue;
                         }
 
+                        bool wasUnavailable = access.Runtime.SnapshotUnavailable;
                         access.Runtime.EnterSnapshotUnavailableProtection();
+                        if (!wasUnavailable)
+                        {
+                            access.Runtime.RecordDiagnosticEvent(
+                                "snapshot_protection_entered", null, null, "entered", null, null, now);
+                        }
                         results.Add(Result(access.Room, access.Runtime, eligible: false));
                     }
                 }
@@ -879,6 +889,14 @@ namespace Emby.Plugins.WatchTogether
             _snapshotProviderProtectionActive = false;
             _snapshotProviderRecoverySinceUtc = null;
             _logger?.Info("Session snapshot provider protection cleared");
+            foreach (var roomId in validRoomIds)
+            {
+                using (var access = _roomManager.TryEnterRoom(roomId))
+                {
+                    access?.Runtime.RecordDiagnosticEvent(
+                        "snapshot_protection_recovered", null, null, "recovered", null, null, now);
+                }
+            }
             return false;
         }
 
@@ -1212,10 +1230,16 @@ namespace Emby.Plugins.WatchTogether
             RoomRuntime runtime,
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
-            RoomEligibilityEvaluation eligibility)
+            RoomEligibilityEvaluation eligibility,
+            DateTimeOffset now)
         {
             if (eligibility.IsEligible)
             {
+                if (runtime.LastEligibilityFailureReason.HasValue)
+                {
+                    runtime.RecordDiagnosticEvent(
+                        "eligibility_changed", null, null, "recovered", null, null, now);
+                }
                 runtime.LastEligibilityFailureReason = null;
                 return;
             }
@@ -1226,6 +1250,8 @@ namespace Emby.Plugins.WatchTogether
             }
 
             runtime.LastEligibilityFailureReason = eligibility.FailureReason;
+            runtime.RecordDiagnosticEvent(
+                "eligibility_changed", null, null, eligibility.FailureReason.ToString(), null, null, now);
             _logger?.Warn(
                 $"Room {room.Id}: eligibility failure reason={eligibility.FailureReason}; " +
                 FormatEligibilitySnapshotSummary(room, snapshots));
@@ -1612,6 +1638,9 @@ namespace Emby.Plugins.WatchTogether
                     double latencySeconds = Math.Max(0, (now - pending.IssuedAtUtc).TotalSeconds);
                     UpdateAckLatency(runtime, userId, latencySeconds);
                     runtime.Pending.Remove(userId);
+                    runtime.RecordDiagnosticEvent(
+                        "command_acknowledged", userId, pending.Command, "acknowledged",
+                        pending.PositionTicks, latencySeconds, now);
                     runtime.Suppressed[userId] = new SuppressedCommand
                     {
                         SessionId = pending.SessionId,
@@ -1661,6 +1690,9 @@ namespace Emby.Plugins.WatchTogether
                         $"retry {pending.Retries + 1}/{SyncConstants.MaxPendingRetries}");
                     if (Issue(runtime, room, userId, snapshot, pending.Command, positionTicks, now, out _))
                     {
+                        runtime.RecordDiagnosticEvent(
+                            "retry_scheduled", userId, pending.Command, "retry_scheduled",
+                            pending.PositionTicks, null, now);
                         if (runtime.Pending.TryGetValue(userId, out var retry))
                         {
                             retry.Retries = pending.Retries + 1;
@@ -1688,6 +1720,9 @@ namespace Emby.Plugins.WatchTogether
                         pending,
                         snapshot,
                         $"after {SyncConstants.MaxPendingRetries + 1} attempts");
+                    runtime.RecordDiagnosticEvent(
+                        "command_failed", userId, pending.Command, "failed",
+                        pending.PositionTicks, null, now);
                 }
             }
 
@@ -1730,6 +1765,8 @@ namespace Emby.Plugins.WatchTogether
             runtime.ResetToWaiting();
             runtime.Error = error;
             runtime.BarrierRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
+            runtime.RecordDiagnosticEvent(
+                "retry_scheduled", null, null, "retry_scheduled", null, null, now);
             _logger?.Info(
                 $"Room {roomId}: barrier retry scheduled; failureDetailPresent={HasFailureDetail(error)}");
         }
@@ -1950,6 +1987,8 @@ namespace Emby.Plugins.WatchTogether
             if (!ok)
             {
                 failure = $"{command} command failed: {error}";
+                runtime.RecordDiagnosticEvent(
+                    "command_failed", userId, command, "failed", positionTicks, null, now);
                 _logger?.Warn(
                     $"Room {room.Id}: immediate-issue-failure command={command}, targetUser={userId}, " +
                     $"failureDetailPresent={HasFailureDetail(error)}");
@@ -1973,6 +2012,10 @@ namespace Emby.Plugins.WatchTogether
 
             _logger?.Info(
                 $"Room {room.Id}: issue {command} to {userId} (position {FormatPosition(positionTicks)}s)");
+            runtime.RecordDiagnosticAction(
+                "command_issued", userId, command, "pending", positionTicks, null, now);
+            runtime.RecordDiagnosticEvent(
+                "command_issued", userId, command, "pending", positionTicks, null, now);
             return true;
         }
 
@@ -2263,6 +2306,8 @@ namespace Emby.Plugins.WatchTogether
                 RestoreSent = false,
             };
             runtime.SyncItemId = anchor.ItemId;
+            runtime.RecordDiagnosticEvent(
+                "barrier_started", anchorUser, null, "entered", anchor.PositionTicks, null, now);
             foreach (var pair in snapshots)
             {
                 if (pair.Value != null)
@@ -2354,6 +2399,9 @@ namespace Emby.Plugins.WatchTogether
                         barrier.StartedAtUtc = now;
                         EnsureSeekRetryDeadline(barrier, now);
                         RememberBarrierSnapshots(runtime, snapshots, now);
+                        runtime.RecordDiagnosticEvent(
+                            "barrier_stage_changed", barrier.AnchorUserId, null, "changed",
+                            barrier.PrimaryPositionTicks, null, now);
                         return;
                     }
 
@@ -2405,6 +2453,9 @@ namespace Emby.Plugins.WatchTogether
                         ClearAnchorPositionCandidate(barrier);
                         barrier.Stage = BarrierStage.Restore;
                         barrier.StartedAtUtc = now;
+                        runtime.RecordDiagnosticEvent(
+                            "barrier_stage_changed", barrier.AnchorUserId, null, "changed",
+                            barrier.PrimaryPositionTicks, null, now);
                         return;
                     }
 
@@ -2454,6 +2505,9 @@ namespace Emby.Plugins.WatchTogether
                         ClearAnchorPositionCandidate(barrier);
                         barrier.Stage = BarrierStage.Restore;
                         barrier.StartedAtUtc = now;
+                        runtime.RecordDiagnosticEvent(
+                            "barrier_stage_changed", barrier.AnchorUserId, null, "changed",
+                            barrier.PrimaryPositionTicks, null, now);
                         return;
                     }
 
@@ -2697,6 +2751,8 @@ namespace Emby.Plugins.WatchTogether
 
             runtime.PreviousAtUtc = now;
             runtime.SyncItemId = barrier.ItemId;
+            runtime.RecordDiagnosticEvent(
+                "entered_watching", null, null, "entered", barrier.PrimaryPositionTicks, null, now);
             NotifyParticipants(
                 room,
                 snapshots,
@@ -2928,6 +2984,10 @@ namespace Emby.Plugins.WatchTogether
                     if (!suppressPause && !alreadyPendingPause)
                     {
                         pauseChanges.Add((user, current.IsPaused));
+                        runtime.RecordDiagnosticEvent(
+                            "manual_action", user,
+                            current.IsPaused ? RemoteCommands.Pause : RemoteCommands.Unpause,
+                            "observed", current.PositionTicks, null, now);
                     }
                 }
 
@@ -2946,6 +3006,9 @@ namespace Emby.Plugins.WatchTogether
                     if (!suppressSeek && !pendingSeek)
                     {
                         seekChanges.Add((user, current.PositionTicks));
+                        runtime.RecordDiagnosticEvent(
+                            "manual_action", user, RemoteCommands.Seek, "observed",
+                            current.PositionTicks, null, now);
                         _logger?.Info(
                             $"Room {room.Id}: manual seek detected for {user} " +
                             $"({FormatPosition(old.PositionTicks)}s -> {FormatPosition(current.PositionTicks)}s)");

@@ -419,6 +419,8 @@ namespace Emby.Plugins.WatchTogether
                     lock (_lock)
                     {
                         runtime.ResetToWaiting();
+                        runtime.RecordDiagnosticEvent(
+                            "resync", null, null, "success", null, null, now);
                         return new RoomActionResult { RoomId = roomId, State = runtime.State };
                     }
                 }
@@ -487,6 +489,8 @@ namespace Emby.Plugins.WatchTogether
                                     IssuedAtUtc = now,
                                     Retries = 0,
                                 };
+                                runtime.RecordDiagnosticEvent(
+                                    "manual_action", user, command, "pending", null, null, now);
                             }
                             issued.Add(user);
                         }
@@ -497,6 +501,8 @@ namespace Emby.Plugins.WatchTogether
                         {
                             operationError = $"{command} command failed: {error}";
                             runtime.Error = operationError;
+                            runtime.RecordDiagnosticEvent(
+                                "manual_action", user, command, "failed", null, null, now);
                         }
                     }
                 }
