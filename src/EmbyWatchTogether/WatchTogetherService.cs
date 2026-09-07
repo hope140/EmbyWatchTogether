@@ -48,6 +48,12 @@ namespace Emby.Plugins.WatchTogether
         public string Id { get; set; }
     }
 
+    [Route("/WatchTogether/Rooms/{Id}/Resync", "POST")]
+    public class ParticipantResyncRoomRequest
+    {
+        public string Id { get; set; }
+    }
+
     [Route("/WatchTogether/Rooms/{Id}/Join", "POST")]
     public class JoinRoomRequest
     {
@@ -274,6 +280,29 @@ namespace Emby.Plugins.WatchTogether
                     GetStatusReason(plugin, room, access.Runtime),
                     now);
             }
+        }
+
+        public object Post(ParticipantResyncRoomRequest request)
+        {
+            var plugin = RequireRuntime(requireBridge: true, requireIssuer: false);
+            var result = plugin.Rooms.RequestParticipantResync(
+                request.Id,
+                CurrentUserId(),
+                plugin.ResolveServerId,
+                DateTimeOffset.UtcNow);
+
+            if (string.Equals(result.Status, "accepted", StringComparison.Ordinal))
+            {
+                NotifyParticipantResync(plugin, request.Id, CurrentUserId());
+            }
+
+            return new
+            {
+                RoomId = result.RoomId,
+                State = result.State.ToString(),
+                Status = result.Status,
+                Reason = result.Reason,
+            };
         }
 
         public object Post(JoinRoomRequest request)
@@ -618,6 +647,11 @@ namespace Emby.Plugins.WatchTogether
         private static void NotifyAdminResync(Plugin plugin, string roomId)
         {
             NotifyMembershipChange(plugin, roomId, null, "管理员已发起重新同步，请稍候");
+        }
+
+        private static void NotifyParticipantResync(Plugin plugin, string roomId, string requesterUserId)
+        {
+            NotifyMembershipChange(plugin, roomId, requesterUserId, "参与者已请求重新同步，请稍候");
         }
 
         private static bool IsSyncNotificationsEnabled(Plugin plugin)

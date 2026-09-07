@@ -18,7 +18,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     var actionLabels = {
         pause: '暂停播放',
         resume: '继续播放',
-        resync: '重新同步'
+        resync: '重新同步',
+        participantResync: '请求重新同步'
     };
 
     function apiUrl(path) {
@@ -972,7 +973,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             ? 'wt-action--primary'
             : action === 'leave' || action === 'delete'
                 ? 'wt-action--danger'
-                : action === 'resync'
+                : action === 'resync' || action === 'participantResync'
                     ? 'wt-action--accent'
                     : '';
         button.className = 'button-flat wt-action' + (toneClass ? ' ' + toneClass : '');
@@ -987,7 +988,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     ? '加入后需要与另一位参与者打开同一视频'
                     : action === 'diagnostics'
                         ? '读取当前房间的脱敏同步诊断'
-            : actionLabels[action] + '：' + (getStateInfo(room.State).description || '');
+                        : action === 'participantResync'
+                            ? '请求服务端重新对齐双方播放位置'
+                            : actionLabels[action] + '：' + (getStateInfo(room.State).description || '');
         button.addEventListener('click', function () {
             if (action === 'delete') {
                 deleteRoom(page, room, button);
@@ -995,6 +998,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 membership(page, room, action, button);
             } else if (action === 'diagnostics') {
                 loadRoomDiagnostics(page, room.RoomId, button);
+            } else if (action === 'participantResync') {
+                participantResync(page, room.RoomId, button);
             } else {
                 control(page, room.RoomId, action, button);
             }
@@ -1095,6 +1100,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             actions.className = 'wt-roomActions';
             actions.appendChild(createActionButton(page, room, room.CurrentUserJoined ? 'leave' : 'join'));
             actions.appendChild(createActionButton(page, room, 'diagnostics'));
+            if (room.CurrentUserJoined && !room.IsAdmin) {
+                actions.appendChild(createActionButton(page, room, 'participantResync'));
+            }
             if (room.IsAdmin) {
                 ['pause', 'resume', 'resync', 'delete'].forEach(function (action) {
                     actions.appendChild(createActionButton(page, room, action));
@@ -1191,6 +1199,38 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             })
             .catch(function (err) {
                 roomFeedback(page, roomId, label + '失败：' + errorMessage(err), true, true);
+            })
+            .then(function () {
+                setRoomBusy(page, roomId, false);
+                renderRooms(page, page._wtRooms || []);
+            });
+    }
+
+    function participantResync(page, roomId, button) {
+        setRoomBusy(page, roomId, true);
+        clearRoomFeedback(page, roomId);
+        roomFeedback(page, roomId, '重新同步请求处理中…', false, true);
+        renderRooms(page, page._wtRooms || []);
+        apiSend('WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync', 'POST')
+            .then(function (result) {
+                var status = result && result.Status;
+                if (status === 'accepted') {
+                    roomFeedback(page, roomId, '重新同步请求已受理，双方将暂时暂停并重新对齐。', false, false);
+                } else if (status === 'busy') {
+                    roomFeedback(page, roomId, result.Reason === 'resync_cooldown'
+                        ? '刚刚已请求重新同步，请稍后再试。'
+                        : '同步正在进行，请等待当前同步完成。', true, true);
+                } else if (status === 'unavailable') {
+                    roomFeedback(page, roomId, result.Reason === 'snapshot_unavailable'
+                        ? '当前播放会话暂时不可读，请稍后再试。'
+                        : '当前房间暂时不可用，请稍后再试。', true, true);
+                } else {
+                    roomFeedback(page, roomId, '重新同步请求未完成，请稍后再试。', true, true);
+                }
+                return loadRooms(page, false);
+            })
+            .catch(function (err) {
+                roomFeedback(page, roomId, '重新同步请求失败：' + errorMessage(err), true, true);
             })
             .then(function () {
                 setRoomBusy(page, roomId, false);

@@ -26,6 +26,8 @@ namespace Emby.Plugins.WatchTogether
 
         public string Error { get; set; }
 
+        internal DateTimeOffset? ParticipantResyncRequestedAtUtc { get; set; }
+
         internal RoomEligibilityFailureReason? LastEligibilityFailureReason { get; set; }
 
         internal string LastMultipleSessionDiagnosticSignature { get; set; }
