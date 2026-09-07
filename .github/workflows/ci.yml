@@ -1,0 +1,104 @@
+name: Pull request and branch CI
+
+on:
+  push:
+    branches:
+      - main
+      - beta
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate on Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore solution
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          dotnet restore src/EmbyWatchTogether.sln --nologo
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+
+      - name: Run .NET tests
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          dotnet test tests/EmbyWatchTogether.Tests/EmbyWatchTogether.Tests.csproj -c Release --nologo -v minimal --logger "trx;LogFileName=EmbyWatchTogether.Tests.trx" --results-directory artifacts/test-results
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+
+      - name: Build solution
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          dotnet build src/EmbyWatchTogether.sln -c Release --nologo
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+
+      - name: Run build path guard
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          pwsh -NoProfile -File tests/build-path-guard.tests.ps1
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+
+      - name: Run release signing checks
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          pwsh -NoProfile -File tests/release-signing.tests.ps1
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+
+      - name: Run release workflow checks
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          pwsh -NoProfile -File tests/release-workflow.tests.ps1
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+
+      - name: Run CI workflow checks
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          pwsh -NoProfile -File tests/ci-workflow.tests.ps1
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+
+      - name: Upload test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dotnet-test-results
+          path: artifacts/test-results/*.trx
+          if-no-files-found: warn
