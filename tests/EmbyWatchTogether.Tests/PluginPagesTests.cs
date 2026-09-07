@@ -51,6 +51,7 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherDiagnostics");
             Assert.Equal("sync", page.MenuIcon);
+            Assert.True(page.EnableInUserMenu);
         }
 
         private static int ReadBigEndianInt32(byte[] bytes)
