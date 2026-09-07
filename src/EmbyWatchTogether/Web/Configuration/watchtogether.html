@@ -335,6 +335,97 @@
             background: var(--wt-hover) !important;
         }
 
+        .wt-diagnostics {
+            margin-top: .9em;
+            padding: .85em 1em;
+            border: 1px solid var(--wt-border);
+            border-radius: .3em;
+            background: var(--wt-surface);
+        }
+
+        .wt-diagnostics summary {
+            cursor: pointer;
+            color: var(--wt-text);
+            font-weight: 600;
+        }
+
+        .wt-diagnostics summary:focus-visible {
+            outline: 2px solid #2d88bd;
+            outline-offset: 2px;
+        }
+
+        .wt-diagnosticToolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: .55em;
+            margin: .8em 0;
+        }
+
+        .wt-diagnosticToolbar button {
+            min-height: 2.25em;
+            padding: .4em .8em;
+            border: 1px solid #aeb8bf !important;
+            border-radius: .3em;
+            background: var(--wt-button) !important;
+            color: var(--wt-text) !important;
+        }
+
+        .wt-diagnosticToolbar button:hover:not(:disabled) {
+            border-color: #6f7d87 !important;
+            background: var(--wt-hover) !important;
+        }
+
+        .wt-diagnosticSummary {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(12em, 1fr));
+            gap: .4em 1.2em;
+            margin: 0;
+        }
+
+        .wt-diagnosticSummary > div {
+            min-width: 0;
+        }
+
+        .wt-diagnosticLabel {
+            color: var(--wt-muted);
+        }
+
+        .wt-diagnosticValue {
+            color: var(--wt-text);
+            font-weight: 600;
+        }
+
+        .wt-diagnosticGroup {
+            margin-top: 1em;
+            padding-top: .75em;
+            border-top: 1px solid var(--wt-border);
+        }
+
+        .wt-diagnosticGroup h4 {
+            margin: 0 0 .45em;
+            color: var(--wt-text);
+        }
+
+        .wt-diagnosticList {
+            margin: 0;
+            padding-left: 1.35em;
+            color: var(--wt-muted);
+            line-height: 1.55;
+        }
+
+        .wt-diagnosticError {
+            margin: .6em 0 0;
+            color: #a43b44 !important;
+            font-weight: 600;
+        }
+
+        @media (max-width: 40em) {
+            .wt-diagnosticSummary {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .wt-emptyState {
             padding: 1.25em;
             border: 1px dashed #aeb8bf;
