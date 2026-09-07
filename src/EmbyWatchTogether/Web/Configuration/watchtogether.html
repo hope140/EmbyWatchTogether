@@ -540,7 +540,7 @@
         <div class="verticalSection wt-section">
             <div class="wt-sectionHeading">
                 <div>
-                    <h2>2. 房间</h2>
+                    <h2 id="wtRoomsHeading">房间</h2>
                     <p class="fieldDescription wt-sectionDescription">状态变为“同步中”后，两位参与者会自动保持一致。</p>
                 </div>
                 <button is="emby-button" id="wtRefresh" type="button" class="button-flat wt-refresh">刷新</button>
@@ -549,11 +549,11 @@
         </div>
 
         <div class="verticalSection wt-section wt-help">
-            <h2>使用方法</h2>
-            <ol>
-                <li>创建房间并选择两名参与者。</li>
-                <li>两人分别登录 Emby，打开同一视频。</li>
-                <li>看到“同步中”后即可一起观看。</li>
+            <h2 id="wtHelpTitle">使用方法</h2>
+            <ol id="wtHelpSteps">
+                <li id="wtHelpStep1">创建房间并选择两名参与者。</li>
+                <li id="wtHelpStep2">两人分别登录 Emby，打开同一视频。</li>
+                <li id="wtHelpStep3">看到“同步中”后即可一起观看。</li>
             </ol>
             <p class="fieldDescription">一方暂时不在线时，房间会等待；恢复后会继续尝试同步。</p>
         </div>
