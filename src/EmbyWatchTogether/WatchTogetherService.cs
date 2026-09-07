@@ -42,6 +42,12 @@ namespace Emby.Plugins.WatchTogether
         public string Id { get; set; }
     }
 
+    [Route("/WatchTogether/Rooms/{Id}/Diagnostics", "GET")]
+    public class GetRoomDiagnosticsRequest
+    {
+        public string Id { get; set; }
+    }
+
     [Route("/WatchTogether/Rooms/{Id}/Join", "POST")]
     public class JoinRoomRequest
     {
@@ -227,6 +233,47 @@ namespace Emby.Plugins.WatchTogether
                     SupportsRemoteControl = s.SupportsRemoteControl,
                 }),
             };
+        }
+
+        /// <summary>
+        /// Returns a bounded, redacted diagnostic snapshot. This endpoint only
+        /// reads the bridge and runtime; it never issues a remote command.
+        /// </summary>
+        public object Get(GetRoomDiagnosticsRequest request)
+        {
+            var plugin = RequireRuntime(requireBridge: true, requireIssuer: false);
+            using (var access = plugin.Rooms.TryEnterRoom(request.Id))
+            {
+                if (access == null)
+                {
+                    throw new KeyNotFoundException("room not found");
+                }
+
+                var room = access.Room;
+                bool admin = IsAdmin();
+                if (!admin && !room.HasParticipant(CurrentUserId()))
+                {
+                    throw new UnauthorizedAccessException("not a room participant");
+                }
+
+                string serverId = plugin.ResolveServerId();
+                if (!IsSameServer(room.ServerId, serverId))
+                {
+                    throw new ServiceUnavailableException(
+                        "Watch Together is unavailable on the current server. Please retry shortly.");
+                }
+
+                var snapshots = BuildSnapshots(plugin, room);
+                var now = DateTimeOffset.UtcNow;
+                access.Runtime.RecordDiagnosticSnapshots(snapshots, now);
+                return SyncDiagnostics.Build(
+                    room,
+                    access.Runtime,
+                    serverId,
+                    plugin.Version?.ToString(),
+                    GetStatusReason(plugin, room, access.Runtime),
+                    now);
+            }
         }
 
         public object Post(JoinRoomRequest request)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Emby.Plugins.WatchTogether
 {
@@ -72,6 +73,14 @@ namespace Emby.Plugins.WatchTogether
 
         internal string RemoteControlRecoverySignature { get; private set; }
 
+        private readonly HashSet<string> _remoteControlRecoveryAffectedUserIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        internal IReadOnlyList<string> RemoteControlRecoveryAffectedUserIds
+        {
+            get { return _remoteControlRecoveryAffectedUserIds.ToList(); }
+        }
+
         public DateTimeOffset? MissingSessionSinceUtc { get; set; }
 
         public int DriftRounds { get; set; }
@@ -81,6 +90,136 @@ namespace Emby.Plugins.WatchTogether
         public BarrierState Barrier { get; set; }
 
         public DateTimeOffset? BarrierRetryAtUtc { get; set; }
+
+        private readonly object _diagnosticsLock = new object();
+        private readonly Dictionary<string, SessionSnapshot> _diagnosticSnapshots =
+            new Dictionary<string, SessionSnapshot>(StringComparer.OrdinalIgnoreCase);
+        private readonly LinkedList<SyncDiagnosticEventRecord> _diagnosticEvents =
+            new LinkedList<SyncDiagnosticEventRecord>();
+        private DateTimeOffset? _diagnosticSnapshotsAtUtc;
+        private SyncDiagnosticActionRecord _diagnosticLastAction;
+
+        internal void RecordDiagnosticSnapshots(
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset observedAtUtc)
+        {
+            lock (_diagnosticsLock)
+            {
+                _diagnosticSnapshots.Clear();
+                if (snapshots != null)
+                {
+                    foreach (var pair in snapshots)
+                    {
+                        if (!string.IsNullOrEmpty(pair.Key) && pair.Value != null)
+                        {
+                            _diagnosticSnapshots[pair.Key] = CopySnapshot(pair.Value);
+                        }
+                    }
+                }
+                _diagnosticSnapshotsAtUtc = observedAtUtc;
+            }
+        }
+
+        internal void RecordDiagnosticEvent(
+            string type,
+            string userId,
+            string command,
+            string result,
+            long? positionTicks,
+            double? latencySeconds,
+            DateTimeOffset atUtc)
+        {
+            if (string.IsNullOrWhiteSpace(type)) return;
+            var record = new SyncDiagnosticEventRecord
+            {
+                Type = type.Trim(), UserId = userId, Command = SyncDiagnostics.NormalizeCommand(command),
+                Result = SyncDiagnostics.NormalizeResult(result), PositionTicks = positionTicks,
+                LatencySeconds = latencySeconds, AtUtc = atUtc,
+            };
+            lock (_diagnosticsLock)
+            {
+                var last = _diagnosticEvents.Last?.Value;
+                if (last != null && string.Equals(EventSignature(last), EventSignature(record), StringComparison.Ordinal))
+                {
+                    return;
+                }
+                _diagnosticEvents.AddLast(record);
+                while (_diagnosticEvents.Count > SyncDiagnostics.MaxEvents)
+                {
+                    _diagnosticEvents.RemoveFirst();
+                }
+                _diagnosticLastAction = new SyncDiagnosticActionRecord
+                {
+                    Type = record.Type, UserId = record.UserId, Command = record.Command,
+                    Result = record.Result, PositionTicks = record.PositionTicks,
+                    LatencySeconds = record.LatencySeconds, AtUtc = record.AtUtc,
+                };
+            }
+        }
+
+        internal void RecordDiagnosticAction(
+            string type,
+            string userId,
+            string command,
+            string result,
+            long? positionTicks,
+            double? latencySeconds,
+            DateTimeOffset atUtc)
+        {
+            RecordDiagnosticEvent(type, userId, command, result, positionTicks, latencySeconds, atUtc);
+        }
+
+        internal SyncDiagnosticsRuntimeSnapshot CaptureDiagnostics()
+        {
+            lock (_diagnosticsLock)
+            {
+                return new SyncDiagnosticsRuntimeSnapshot
+                {
+                    Snapshots = _diagnosticSnapshots.ToDictionary(
+                        pair => pair.Key,
+                        pair => CopySnapshot(pair.Value),
+                        StringComparer.OrdinalIgnoreCase),
+                    SnapshotsAtUtc = _diagnosticSnapshotsAtUtc,
+                    Events = _diagnosticEvents.Select(CopyEvent).ToList(),
+                    LastAction = CopyAction(_diagnosticLastAction),
+                };
+            }
+        }
+
+        private static string EventSignature(SyncDiagnosticEventRecord record)
+        {
+            return string.Join("|", record.Type, record.UserId, record.Command, record.Result,
+                record.PositionTicks?.ToString() ?? "", record.LatencySeconds?.ToString("0.###") ?? "");
+        }
+
+        private static SessionSnapshot CopySnapshot(SessionSnapshot source)
+        {
+            if (source == null) return null;
+            return new SessionSnapshot(source.SessionId, source.UserId, source.ItemId, source.MediaSourceId,
+                source.PositionTicks, source.RunTimeTicks, source.IsPaused, source.PlaybackRate,
+                source.Stopped, source.SupportsRemoteControl,
+                new SessionCapabilityReport(source.Capabilities?.SupportsRemoteControl == true,
+                    source.Capabilities?.SupportedCommands ?? Array.Empty<string>()),
+                source.LastActivityDateUtc);
+        }
+
+        private static SyncDiagnosticEventRecord CopyEvent(SyncDiagnosticEventRecord source)
+        {
+            return new SyncDiagnosticEventRecord
+            {
+                Type = source.Type, UserId = source.UserId, Command = source.Command, Result = source.Result,
+                PositionTicks = source.PositionTicks, LatencySeconds = source.LatencySeconds, AtUtc = source.AtUtc,
+            };
+        }
+
+        private static SyncDiagnosticActionRecord CopyAction(SyncDiagnosticActionRecord source)
+        {
+            return source == null ? null : new SyncDiagnosticActionRecord
+            {
+                Type = source.Type, UserId = source.UserId, Command = source.Command, Result = source.Result,
+                PositionTicks = source.PositionTicks, LatencySeconds = source.LatencySeconds, AtUtc = source.AtUtc,
+            };
+        }
 
         internal void EnterSnapshotUnavailableProtection()
         {
@@ -155,16 +294,28 @@ namespace Emby.Plugins.WatchTogether
             ClearRemoteControlRecovery();
         }
 
-        internal void StartRemoteControlRecovery(DateTimeOffset startedAtUtc, string signature)
+        internal void StartRemoteControlRecovery(
+            DateTimeOffset startedAtUtc,
+            string signature,
+            IEnumerable<string> affectedUserIds)
         {
             RemoteControlRecoveryStartedAtUtc = startedAtUtc;
             RemoteControlRecoverySignature = signature;
+            _remoteControlRecoveryAffectedUserIds.Clear();
+            if (affectedUserIds != null)
+            {
+                foreach (var userId in affectedUserIds.Where(id => !string.IsNullOrWhiteSpace(id)))
+                {
+                    _remoteControlRecoveryAffectedUserIds.Add(userId);
+                }
+            }
         }
 
         internal void ClearRemoteControlRecovery()
         {
             RemoteControlRecoveryStartedAtUtc = null;
             RemoteControlRecoverySignature = null;
+            _remoteControlRecoveryAffectedUserIds.Clear();
         }
     }
 }
