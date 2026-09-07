@@ -18,6 +18,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", names);
             Assert.Contains("Emby.Plugins.WatchTogether.Configuration.WatchTogether.js", names);
             Assert.Contains("Emby.Plugins.WatchTogether.Resources.watch-together-thumb.png", names);
+#pragma warning disable SYSLIB0050
+            var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
+#pragma warning restore SYSLIB0050
+            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics.js");
         }
 
         [Fact]
@@ -61,6 +65,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherDiagnostics.js\"", html);
             Assert.DoesNotContain("<h1>一起看</h1>", html);
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);

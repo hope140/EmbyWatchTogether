@@ -132,7 +132,9 @@ namespace Emby.Plugins.WatchTogether
                 // as its own page entry (same convention as ChapterApi pages).
                 new PluginPageInfo
                 {
-                    Name = "WatchTogether.js",
+                    // Use a new controller name so Emby Web does not reuse a
+                    // cached copy of the previous embedded module.
+                    Name = "WatchTogetherDiagnostics.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };
