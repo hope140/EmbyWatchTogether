@@ -142,6 +142,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("function sanitizeDiagnostic", javascript);
             Assert.Contains("SnapshotHealth", javascript);
             Assert.Contains("AckLatencySeconds", javascript);
+            Assert.Contains("barrier_retry_exhausted", javascript);
+            Assert.Contains("waiting_pause_retry_limit", javascript);
+            Assert.Contains("reportedRemoteControl", javascript);
+            Assert.Contains("session.ReportedSupportsRemoteControl", javascript);
+            Assert.Contains("session.online ? (session.paused ? '已暂停' : '播放中') : '状态未知'", javascript);
+            Assert.Contains("上报远控", javascript);
             Assert.Contains("raw.Pending", javascript);
             Assert.Contains("raw.Barrier", javascript);
             Assert.Contains("raw.RecoveryWindow", javascript);

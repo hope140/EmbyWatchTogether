@@ -66,6 +66,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         different_video: '两位参与者打开了不同视频',
         playback_stopped: '播放已停止，等待重新打开视频',
         action_conflict: '检测到手动操作冲突',
+        barrier_retry_exhausted: '对齐重试次数已用尽',
+        waiting_pause_retry_limit: '等待暂停重试次数已用尽',
         command_failed: '播放控制未完成',
         aligning: '正在对齐播放位置',
         watching: '两位参与者已连接',
@@ -162,6 +164,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             runtimeSeconds: diagnosticFiniteNumber(session.RuntimeSeconds),
             lastActivityAgeSeconds: diagnosticFiniteNumber(session.LastActivityAgeSeconds),
             ackLatencySeconds: diagnosticFiniteNumber(session.AckLatencySeconds),
+            reportedRemoteControl: session.ReportedSupportsRemoteControl === true,
             effectiveRemoteControl: session.EffectiveSupportsRemoteControl === true,
             canPause: session.CanPause === true,
             canUnpause: session.CanUnpause === true,
@@ -330,8 +333,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 var sessionSummary = document.createElement('div');
                 sessionSummary.className = 'wt-diagnosticSummary';
                 diagnosticField(sessionSummary, session.alias, (session.online ? '在线' : '离线') + '，位置 ' + diagnosticFormatPosition(session.positionSeconds));
-                diagnosticField(sessionSummary, '播放状态', session.paused ? '已暂停' : '播放中');
-                diagnosticField(sessionSummary, '能力', session.effectiveRemoteControl ? '支持远程控制' : '不支持远程控制');
+                diagnosticField(sessionSummary, '播放状态', session.online ? (session.paused ? '已暂停' : '播放中') : '状态未知');
+                diagnosticField(sessionSummary, '能力', '上报远控 ' + (session.reportedRemoteControl ? '支持' : '不支持') + '；有效远控 ' + (session.effectiveRemoteControl ? '支持' : '不支持'));
                 diagnosticField(sessionSummary, '确认延迟', diagnosticFormatNumber(session.ackLatencySeconds, ' 秒'));
                 diagnosticField(sessionSummary, '播放速率', diagnosticFormatNumber(session.playbackRate, ' 倍'));
                 diagnosticField(sessionSummary, '可用控制', session.supportedCommands.length > 0 ? session.supportedCommands.map(function (command) {
