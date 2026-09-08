@@ -420,6 +420,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function createDiagnosticPanel(page, room) {
         page._wtDiagnosticPanels = page._wtDiagnosticPanels || {};
+        page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
         var details = document.createElement('details');
         details.className = 'wt-diagnostics';
         var summary = document.createElement('summary');
@@ -428,7 +429,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var body = document.createElement('div');
         body.className = 'wt-diagnosticBody';
         details.appendChild(body);
+        details.addEventListener('toggle', function () {
+            page._wtDiagnosticOpen[room.RoomId] = details.open;
+        });
         page._wtDiagnosticPanels[room.RoomId] = { details: details, body: body };
+        var diagnostic = page._wtDiagnostics && page._wtDiagnostics[room.RoomId];
+        if (diagnostic) {
+            renderDiagnosticDetails(page, room.RoomId, diagnostic, body);
+        }
+        details.open = page._wtDiagnosticOpen[room.RoomId] === true;
         return details;
     }
 
@@ -453,23 +462,29 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 throw { name: 'InvalidDiagnostic' };
             }
             if (page._wtDiagnosticRequests[roomId] !== requestToken ||
-                !page._wtDiagnosticPanels[roomId] || page._wtDiagnosticPanels[roomId].body !== panel.body) {
+                !page._wtDiagnosticPanels[roomId]) {
                 return;
             }
             page._wtDiagnostics = page._wtDiagnostics || {};
             page._wtDiagnostics[roomId] = diagnostic;
-            renderDiagnosticDetails(page, roomId, diagnostic, panel.body);
+            page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
+            page._wtDiagnosticOpen[roomId] = true;
+            var currentPanel = page._wtDiagnosticPanels[roomId];
+            renderDiagnosticDetails(page, roomId, diagnostic, currentPanel.body);
+            currentPanel.details.open = true;
         }).catch(function (error) {
             if (page._wtDiagnosticRequests[roomId] !== requestToken ||
-                !page._wtDiagnosticPanels[roomId] || page._wtDiagnosticPanels[roomId].body !== panel.body) {
+                !page._wtDiagnosticPanels[roomId]) {
                 return;
             }
-            clearChildren(panel.body);
+            var currentPanel = page._wtDiagnosticPanels[roomId];
+            clearChildren(currentPanel.body);
             var errorText = document.createElement('p');
             errorText.className = 'wt-diagnosticError';
             errorText.setAttribute('role', 'alert');
             errorText.textContent = diagnosticErrorMessage(error);
-            panel.body.appendChild(errorText);
+            currentPanel.body.appendChild(errorText);
+            currentPanel.details.open = true;
         }).finally(function () {
             if (page._wtDiagnosticRequests[roomId] === requestToken) {
                 delete page._wtDiagnosticBusy[roomId];
@@ -1027,10 +1042,25 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 control(page, room.RoomId, action, button);
             }
         });
+        if (action === 'diagnostics' && page._wtDiagnosticBusy && page._wtDiagnosticBusy[room.RoomId]) {
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            button.textContent = '读取中…';
+        }
         if (page._wtRoomBusy && page._wtRoomBusy[room.RoomId]) {
             button.disabled = true;
         }
         return button;
+    }
+
+    function rememberDiagnosticPanelState(page) {
+        page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
+        var panels = page._wtDiagnosticPanels || {};
+        Object.keys(panels).forEach(function (roomId) {
+            if (panels[roomId] && panels[roomId].details) {
+                page._wtDiagnosticOpen[roomId] = panels[roomId].details.open;
+            }
+        });
     }
 
     function renderRooms(page, rooms) {
@@ -1039,10 +1069,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
+        rememberDiagnosticPanelState(page);
         clearChildren(container);
         page._wtDiagnosticPanels = {};
-        page._wtDiagnosticBusy = {};
-        page._wtDiagnosticRequests = {};
+        page._wtDiagnosticBusy = page._wtDiagnosticBusy || {};
+        page._wtDiagnosticRequests = page._wtDiagnosticRequests || {};
+        page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
         container.setAttribute('aria-busy', 'false');
         if (page._wtIsAdmin !== undefined) {
             setAdminVisibility(page, page._wtIsAdmin);
@@ -1160,6 +1192,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             Object.keys(page._wtDiagnostics).forEach(function (roomId) {
                 if (!list.some(function (room) { return room && room.RoomId === roomId; })) {
                     delete page._wtDiagnostics[roomId];
+                }
+            });
+            Object.keys(page._wtDiagnosticOpen || {}).forEach(function (roomId) {
+                if (!list.some(function (room) { return room && room.RoomId === roomId; })) {
+                    delete page._wtDiagnosticOpen[roomId];
                 }
             });
             renderRooms(page, list);
