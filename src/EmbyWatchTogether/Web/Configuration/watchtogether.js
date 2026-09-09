@@ -646,7 +646,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         setInvitationStatus(page, '正在创建邀请码…', false);
         apiSend('WatchTogether/Invitations', 'POST', { Name: name || null }).then(function (result) {
             result = result || {};
-            if (!result.Code) {
+            if (result.Status === 'creator_already_in_room') {
+                setInvitationStatus(page, '你已属于一个房间，请先结束当前房间后再创建邀请码。', true);
+                return null;
+            }
+            if (result.Status === 'invitation_unavailable') {
+                setInvitationStatus(page, '当前邀请码数量已达上限，请稍后再试。', true);
+                return null;
+            }
+            if (result.Created !== true || !result.Code || result.Status !== 'created') {
                 throw new Error('invitation_unavailable');
             }
             page._wtInvitationCode = {
@@ -661,7 +669,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             setInvitationStatus(page, '邀请码已创建，请立即复制并发送给对方。', false);
             return loadInvitations(page);
         }).catch(function (error) {
-            setInvitationStatus(page, '邀请码创建失败：' + errorMessage(error), true);
+            setInvitationStatus(page, error && error.message === 'invitation_unavailable'
+                ? '当前邀请码数量已达上限，请稍后再试。'
+                : '邀请码创建失败，请稍后重试。', true);
         }).then(function () {
             setButtonBusy(button, false);
         });
@@ -773,7 +783,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             settingsSection.style.display = isAdmin ? '' : 'none';
         }
         if (roomsHeading) {
-            roomsHeading.textContent = isAdmin ? '2. 房间' : '我的房间';
+            roomsHeading.textContent = isAdmin ? '房间' : '我的房间';
         }
         var helpText = isAdmin ? [
             '创建房间并选择两名参与者。',
@@ -1229,11 +1239,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         button.className = 'button-flat wt-action' + (toneClass ? ' ' + toneClass : '');
         button.dataset.act = action;
         button.dataset.action = action;
-        button.textContent = action === 'delete' ? (room.IsSelfService && room.CanEnd ? '结束房间' : '删除房间') : action === 'leave' ? '退出房间' : action === 'join' ? '加入房间' : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
+        button.textContent = action === 'delete' ? (room.CanEnd ? '结束房间' : '删除房间') : action === 'leave' ? '暂离房间' : action === 'join' ? '加入房间' : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
         button.title = action === 'delete'
-            ? (room.IsSelfService && room.CanEnd ? '结束这个自助房间；只删除同步关系，不删除媒体' : '删除这个房间；只删除同步关系，不删除媒体')
+            ? (room.CanEnd ? '结束房间会解除双方成员关系；只删除同步关系，不删除媒体' : '删除这个房间；只删除同步关系，不删除媒体')
             : action === 'leave'
-                ? '退出后将尝试暂停仍在房间的一方'
+                ? '暂离只退出同步状态，不解除成员关系；将尝试暂停仍在房间的一方'
                 : action === 'join'
                     ? '加入后需要与另一位参与者打开同一视频'
                     : action === 'diagnostics'
@@ -1353,7 +1363,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
             var membershipLine = document.createElement('div');
             membershipLine.className = 'fieldDescription wt-roomMeta wt-roomMembership';
-            membershipLine.textContent = '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已退出');
+            membershipLine.textContent = '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
+                '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。';
             card.appendChild(membershipLine);
 
             var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
@@ -1376,7 +1387,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 ['pause', 'resume', 'resync', 'delete'].forEach(function (action) {
                     actions.appendChild(createActionButton(page, room, action));
                 });
-            } else if (room.IsSelfService && room.CanEnd) {
+            } else if (room.CanEnd) {
                 actions.appendChild(createActionButton(page, room, 'delete'));
             }
             card.appendChild(actions);
@@ -1518,7 +1529,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function deleteRoom(page, room, button) {
         var roomName = room.Name || '未命名房间';
-        if (!window.confirm('确认删除“' + roomName + '”吗？这只删除同步关系，不删除媒体。')) {
+        var ending = room.CanEnd === true;
+        if (!window.confirm((ending ? '确认结束“' : '确认删除“') + roomName + '”吗？' +
+            (ending ? '结束房间会解除双方成员关系，只删除同步关系，不删除媒体。' : '这只删除同步关系，不删除媒体。'))) {
             return;
         }
 
@@ -1531,7 +1544,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     throw new Error('房间不存在或已删除');
                 }
                 clearRoomFeedback(page, room.RoomId);
-                setTransientStatus(page, '房间“' + roomName + '”已删除；只移除同步关系，媒体未删除。', false);
+                setTransientStatus(page, ending
+                    ? '房间“' + roomName + '”已结束；双方成员关系已解除，媒体未删除。'
+                    : '房间“' + roomName + '”已删除；只移除同步关系，媒体未删除。', false);
                 return loadRooms(page, false);
             })
             .catch(function (err) {
@@ -1544,12 +1559,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function membership(page, room, action, button) {
-        if (action === 'leave' && !window.confirm('退出“' + (room.Name || '未命名房间') + '”吗？将尝试暂停仍在房间的一方。')) {
+        if (action === 'leave' && !window.confirm('暂离“' + (room.Name || '未命名房间') + '”吗？暂离不会解除成员关系，并将尝试暂停仍在房间的一方。')) {
             return;
         }
         setRoomBusy(page, room.RoomId, true);
         clearRoomFeedback(page, room.RoomId);
-        roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '退出中…', false, true);
+        roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '暂离中…', false, true);
         renderRooms(page, page._wtRooms || []);
         apiSend('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/' + (action === 'join' ? 'Join' : 'Leave'), 'POST')
             .then(function (result) {
@@ -1561,7 +1576,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 return loadRooms(page, false);
             })
             .catch(function (err) {
-                roomFeedback(page, room.RoomId, (action === 'join' ? '加入' : '退出') + '失败：' + errorMessage(err), true, true);
+                roomFeedback(page, room.RoomId, (action === 'join' ? '加入' : '暂离') + '失败：' + errorMessage(err), true, true);
             })
             .then(function () {
                 setRoomBusy(page, room.RoomId, false);
@@ -1574,12 +1589,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var succeeded = Number(result && result.PauseSucceeded) || 0;
         var failed = Number(result && result.PauseFailed) || 0;
         if (failed > 0) {
-            return '已退出房间，但仍在房间的一方暂停失败，请检查客户端。';
+            return '已暂离房间，但仍在房间的一方暂停失败，请检查客户端；成员关系仍保留。';
         }
         if (attempted > 0 && succeeded === attempted) {
-            return '已退出房间，仍在房间的一方已暂停。';
+            return '已暂离房间，仍在房间的一方已暂停；成员关系仍保留。';
         }
-        return '已退出房间，自动同步已停止。';
+        return '已暂离房间，自动同步已停止；成员关系仍保留。';
     }
 
     function createRoom(page) {
