@@ -20,7 +20,7 @@ namespace Emby.Plugins.WatchTogether
             IEnumerable<string> participantUserIds,
             DateTimeOffset createdAtUtc)
             : this(id, serverId, serverUrl, name, adminUserId, primaryUserId,
-                participantUserIds, participantUserIds, createdAtUtc)
+                participantUserIds, participantUserIds, createdAtUtc, adminUserId, false)
         {
         }
 
@@ -34,12 +34,31 @@ namespace Emby.Plugins.WatchTogether
             IEnumerable<string> participantUserIds,
             IEnumerable<string> joinedParticipantUserIds,
             DateTimeOffset createdAtUtc)
+            : this(id, serverId, serverUrl, name, adminUserId, primaryUserId,
+                participantUserIds, joinedParticipantUserIds, createdAtUtc, adminUserId, false)
+        {
+        }
+
+        public Room(
+            string id,
+            string serverId,
+            string serverUrl,
+            string name,
+            string adminUserId,
+            string primaryUserId,
+            IEnumerable<string> participantUserIds,
+            IEnumerable<string> joinedParticipantUserIds,
+            DateTimeOffset createdAtUtc,
+            string creatorUserId,
+            bool isSelfService)
         {
             Id = id ?? throw new ArgumentNullException(nameof(id));
             ServerId = serverId ?? throw new ArgumentNullException(nameof(serverId));
             ServerUrl = serverUrl ?? string.Empty;
             Name = name ?? string.Empty;
             AdminUserId = adminUserId ?? throw new ArgumentNullException(nameof(adminUserId));
+            CreatorUserId = string.IsNullOrWhiteSpace(creatorUserId) ? AdminUserId : creatorUserId;
+            IsSelfService = isSelfService;
             PrimaryUserId = primaryUserId ?? throw new ArgumentNullException(nameof(primaryUserId));
             ParticipantUserIds = (participantUserIds ?? Enumerable.Empty<string>())
                 .Select(u => u ?? string.Empty)
@@ -60,6 +79,10 @@ namespace Emby.Plugins.WatchTogether
         public string Name { get; }
 
         public string AdminUserId { get; }
+
+        public string CreatorUserId { get; }
+
+        public bool IsSelfService { get; }
 
         public string PrimaryUserId { get; }
 

@@ -22,6 +22,27 @@ namespace Emby.Plugins.WatchTogether
         public string PrimaryUserId { get; set; }
     }
 
+    [Route("/WatchTogether/Invitations", "POST")]
+    public class CreateInvitationRequest
+    {
+        public string Name { get; set; }
+    }
+
+    [Route("/WatchTogether/Invitations", "GET")]
+    public class GetInvitationsRequest { }
+
+    [Route("/WatchTogether/Invitations/{Id}", "DELETE")]
+    public class DeleteInvitationRequest
+    {
+        public string Id { get; set; }
+    }
+
+    [Route("/WatchTogether/Invitations/{Code}/Accept", "POST")]
+    public class AcceptInvitationRequest
+    {
+        public string Code { get; set; }
+    }
+
     [Route("/WatchTogether/Rooms/{Id}", "DELETE")]
     public class DeleteRoomRequest
     {
@@ -111,6 +132,8 @@ namespace Emby.Plugins.WatchTogether
                     Participants = BuildParticipantSummaries(r),
                     CurrentUserJoined = r.IsJoined(currentUserId),
                     IsAdmin = admin,
+                    IsSelfService = r.IsSelfService,
+                    CanEnd = admin || (r.IsSelfService && string.Equals(r.CreatorUserId, currentUserId, StringComparison.OrdinalIgnoreCase)),
                     CreatedAtUtc = r.CreatedAtUtc,
                 };
             }).Where(x => x != null).ToList();
@@ -148,9 +171,96 @@ namespace Emby.Plugins.WatchTogether
 
         public object Delete(DeleteRoomRequest request)
         {
-            RequireAdmin();
             var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
+            var room = plugin.Rooms.GetRoom(request.Id);
+            if (!IsAdmin() && (room == null || !room.IsSelfService ||
+                !string.Equals(room.CreatorUserId, CurrentUserId(), StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new UnauthorizedAccessException("room owner required");
+            }
             return new { Deleted = plugin.Rooms.DeleteRoom(request.Id) };
+        }
+
+        public object Post(CreateInvitationRequest request)
+        {
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false, requireInvitations: true);
+            if (string.IsNullOrWhiteSpace(plugin.ResolveServerId()))
+            {
+                throw new ServiceUnavailableException("Watch Together is still initializing. Please retry shortly.");
+            }
+            if (plugin.Rooms.IsUserInAnyRoom(CurrentUserId()))
+            {
+                throw new InvalidOperationException("creator already belongs to a room");
+            }
+            try
+            {
+                var invitation = plugin.Invitations.Create(CurrentUserId(), request?.Name);
+                return new
+                {
+                    InvitationId = invitation.Id,
+                    Code = invitation.Code,
+                    Name = invitation.Name,
+                    CreatedAtUtc = invitation.CreatedAtUtc,
+                    ExpiresAtUtc = invitation.ExpiresAtUtc,
+                };
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new ServiceUnavailableException(ex.Message);
+            }
+        }
+
+        public object Get(GetInvitationsRequest request)
+        {
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false, requireInvitations: true);
+            return plugin.Invitations.List(CurrentUserId()).Select(i => new
+            {
+                InvitationId = i.Id,
+                Name = i.Name,
+                CreatedAtUtc = i.CreatedAtUtc,
+                ExpiresAtUtc = i.ExpiresAtUtc,
+            }).ToList();
+        }
+
+        public object Delete(DeleteInvitationRequest request)
+        {
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false, requireInvitations: true);
+            return new { Deleted = plugin.Invitations.Revoke(request?.Id, CurrentUserId(), IsAdmin()) };
+        }
+
+        public object Post(AcceptInvitationRequest request)
+        {
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false, requireInvitations: true);
+            string serverId = plugin.ResolveServerId();
+            if (string.IsNullOrWhiteSpace(serverId))
+            {
+                throw new ServiceUnavailableException("Watch Together is still initializing. Please retry shortly.");
+            }
+
+            var result = plugin.Invitations.Accept(
+                request?.Code,
+                CurrentUserId(),
+                invitation => plugin.Rooms.CreateSelfServiceRoom(
+                    serverId,
+                    string.Empty,
+                    invitation.Name,
+                    invitation.CreatorUserId,
+                    CurrentUserId()),
+                DateTimeOffset.UtcNow);
+            if (!result.Succeeded)
+            {
+                return new { Accepted = false, Status = result.Status, Reason = result.Reason };
+            }
+            return new
+            {
+                Accepted = true,
+                Status = result.Status,
+                RoomId = result.Room.Id,
+                Name = result.Room.Name,
+                PrimaryUserId = result.Room.PrimaryUserId,
+                IsSelfService = result.Room.IsSelfService,
+                Participants = BuildParticipantSummaries(result.Room),
+            };
         }
 
         public object Post(ControlRoomRequest request)
@@ -226,6 +336,8 @@ namespace Emby.Plugins.WatchTogether
                 PrimaryUserId = room.PrimaryUserId,
                 ParticipantUserIds = room.ParticipantUserIds,
                 JoinedParticipantUserIds = room.JoinedParticipantUserIds,
+                IsSelfService = room.IsSelfService,
+                CanEnd = admin || (room.IsSelfService && string.Equals(room.CreatorUserId, CurrentUserId(), StringComparison.OrdinalIgnoreCase)),
                 Participants = BuildParticipantSummaries(room),
                 CurrentUserJoined = room.IsJoined(CurrentUserId()),
                 Sessions = snapshots.Values.Select(s => new
@@ -703,10 +815,10 @@ namespace Emby.Plugins.WatchTogether
                 string.Equals(roomServerId, currentServerId, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static Plugin RequireRuntime(bool requireBridge, bool requireIssuer)
+        private static Plugin RequireRuntime(bool requireBridge, bool requireIssuer, bool requireInvitations = false)
         {
             var plugin = RequirePlugin();
-            if (plugin.Rooms == null ||
+            if (plugin.Rooms == null || (requireInvitations && plugin.Invitations == null) ||
                 (requireBridge && plugin.Bridge == null) ||
                 (requireIssuer && plugin.Issuer == null))
             {
