@@ -100,6 +100,19 @@
             margin: 0;
         }
 
+        .wt-invitationCode {
+            margin-top: 1em;
+            padding: .8em 1em;
+            border: 1px solid var(--wt-border);
+            border-radius: .35em;
+            background: var(--wt-card);
+        }
+
+        .wt-invitationCode strong {
+            color: var(--wt-text);
+            letter-spacing: .12em;
+        }
+
         .wt-page input::placeholder {
             color: var(--wt-muted) !important;
             opacity: 1;
@@ -535,6 +548,47 @@
                 <button is="emby-button" id="wtCreate" type="button" class="raised button-submit" disabled>创建房间</button>
                 <p class="fieldDescription wt-formHint" id="wtFormHint" role="status" aria-live="polite">正在加载用户列表…</p>
             </div>
+        </div>
+
+        <div class="verticalSection wt-section" id="wtInvitationSection">
+            <div class="wt-sectionHeading">
+                <div>
+                    <h2>邀请一起观看</h2>
+                    <p class="fieldDescription wt-sectionDescription">
+                        创建一次性邀请码，发送给另一位已登录 Emby 的用户。邀请码有效期为 15 分钟。
+                    </p>
+                </div>
+            </div>
+
+            <div class="wt-formGrid">
+                <div class="inputContainer wt-fieldWide">
+                    <input is="emby-input" id="wtInvitationName" label="房间名称（可选）" placeholder="例如：今晚的电影" autocomplete="off" />
+                </div>
+            </div>
+            <div class="wt-formActions">
+                <button is="emby-button" id="wtCreateInvitation" type="button" class="raised button-submit">创建邀请码</button>
+                <p class="fieldDescription wt-formHint" id="wtInvitationStatus" role="status" aria-live="polite"></p>
+            </div>
+
+            <div id="wtInvitationCodePanel" class="wt-invitationCode" hidden>
+                <div class="wt-roomMeta">
+                    <div>本次邀请码：<strong id="wtInvitationCode"></strong></div>
+                    <div id="wtInvitationExpires"></div>
+                </div>
+                <div class="wt-formActions">
+                    <button is="emby-button" id="wtCopyInvitationCode" type="button" class="button-flat">复制邀请码</button>
+                </div>
+            </div>
+
+            <div class="wt-formGrid">
+                <div class="inputContainer wt-fieldWide">
+                    <input is="emby-input" id="wtInvitationAcceptCode" label="邀请码" placeholder="输入对方发来的邀请码" autocomplete="off" />
+                </div>
+            </div>
+            <div class="wt-formActions">
+                <button is="emby-button" id="wtAcceptInvitation" type="button" class="raised button-submit">接受邀请</button>
+            </div>
+            <div id="wtInvitations" class="wt-roomList" aria-live="polite"></div>
         </div>
 
         <div class="verticalSection wt-section">

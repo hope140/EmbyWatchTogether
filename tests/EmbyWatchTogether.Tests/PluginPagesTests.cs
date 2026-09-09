@@ -188,6 +188,25 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("session.SessionHash", javascript);
             Assert.DoesNotContain("session.ItemHash", javascript);
             Assert.DoesNotContain("innerHTML", javascript);
+            Assert.Contains("wtInvitationSection", html);
+            Assert.Contains("wtInvitationName", html);
+            Assert.Contains("wtInvitationAcceptCode", html);
+            Assert.Contains("wtInvitationCodePanel", html);
+            Assert.Contains("wtCopyInvitationCode", html);
+            Assert.Contains("wtInvitations", html);
+            Assert.Contains("WatchTogether/Invitations", javascript);
+            Assert.Contains("WatchTogether/Invitations/' + encodeURIComponent(code) + '/Accept", javascript);
+            Assert.Contains("WatchTogether/Invitations/' + encodeURIComponent(invitation.InvitationId)", javascript);
+            Assert.Contains("accepted", javascript);
+            Assert.Contains("invalid_or_expired", javascript);
+            Assert.Contains("creator_cannot_accept", javascript);
+            Assert.Contains("rate_limited", javascript);
+            Assert.Contains("room_unavailable", javascript);
+            Assert.Contains("复制失败，请手动选择并复制邀请码。", javascript);
+            Assert.Contains("room.IsSelfService && room.CanEnd", javascript);
+            Assert.Contains("CanEnd", javascript);
+            Assert.Contains("IsSelfService", javascript);
+            Assert.DoesNotContain("AdminUserId", javascript);
 
             var roomsIndex = html.IndexOf("id=\"wtRooms\"", System.StringComparison.Ordinal);
             var configIndex = html.IndexOf("id=\"wtConfigSection\"", System.StringComparison.Ordinal);
