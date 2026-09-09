@@ -18,6 +18,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", names);
             Assert.Contains("Emby.Plugins.WatchTogether.Configuration.WatchTogether.js", names);
             Assert.Contains("Emby.Plugins.WatchTogether.Resources.watch-together-thumb.png", names);
+#pragma warning disable SYSLIB0050
+            var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
+#pragma warning restore SYSLIB0050
+            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics");
+            Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics.js");
         }
 
         [Fact]
@@ -43,8 +49,9 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogether");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherDiagnostics");
             Assert.Equal("sync", page.MenuIcon);
+            Assert.True(page.EnableInUserMenu);
         }
 
         private static int ReadBigEndianInt32(byte[] bytes)
@@ -61,6 +68,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherDiagnostics.js\"", html);
             Assert.DoesNotContain("<h1>一起看</h1>", html);
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
@@ -136,7 +144,49 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("_wtUpdateBusy", javascript);
             Assert.Contains("dataType: 'json'", javascript);
             Assert.Contains("setAdminVisibility", javascript);
+            Assert.Contains("wtRoomsHeading", html);
+            Assert.Contains("我的房间", javascript);
+            Assert.Contains("暂无参与的房间", javascript);
+            Assert.Contains("请求重新同步", javascript);
             Assert.Contains("roomUserName", javascript);
+            Assert.Contains("查看诊断", javascript);
+            Assert.Contains("participantResync", javascript);
+            Assert.Contains("请求重新同步", javascript);
+            Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync", javascript);
+            Assert.Contains("status === 'accepted'", javascript);
+            Assert.Contains("status === 'busy'", javascript);
+            Assert.Contains("status === 'unavailable'", javascript);
+            Assert.Contains("room.CurrentUserJoined && !room.IsAdmin", javascript);
+            Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Diagnostics", javascript);
+            Assert.Contains("function sanitizeDiagnostic", javascript);
+            Assert.Contains("SnapshotHealth", javascript);
+            Assert.Contains("AckLatencySeconds", javascript);
+            Assert.Contains("barrier_retry_exhausted", javascript);
+            Assert.Contains("waiting_pause_retry_limit", javascript);
+            Assert.Contains("reportedRemoteControl", javascript);
+            Assert.Contains("session.ReportedSupportsRemoteControl", javascript);
+            Assert.Contains("session.online ? (session.paused ? '已暂停' : '播放中') : '状态未知'", javascript);
+            Assert.Contains("上报远控", javascript);
+            Assert.Contains("raw.Pending", javascript);
+            Assert.Contains("raw.Barrier", javascript);
+            Assert.Contains("raw.RecoveryWindow", javascript);
+            Assert.Contains("raw.LastAction", javascript);
+            Assert.Contains("raw.Events", javascript);
+            Assert.Contains("导出诊断 JSON", javascript);
+            Assert.Contains("maxDiagnosticEvents = 50", javascript);
+            Assert.Contains("slice(-maxDiagnosticEvents)", javascript);
+            Assert.Contains(".reverse()", javascript);
+            Assert.Contains("rememberDiagnosticPanelState", javascript);
+            Assert.Contains("page._wtDiagnosticOpen", javascript);
+            Assert.Contains("details.addEventListener('toggle'", javascript);
+            Assert.Contains("var currentPanel = page._wtDiagnosticPanels[roomId]", javascript);
+            Assert.Contains("Blob", javascript);
+            Assert.Contains("createObjectURL", javascript);
+            Assert.Contains("textContent", javascript);
+            Assert.DoesNotContain("raw.RoomHash", javascript);
+            Assert.DoesNotContain("raw.ServerHash", javascript);
+            Assert.DoesNotContain("session.SessionHash", javascript);
+            Assert.DoesNotContain("session.ItemHash", javascript);
             Assert.DoesNotContain("innerHTML", javascript);
 
             var roomsIndex = html.IndexOf("id=\"wtRooms\"", System.StringComparison.Ordinal);
