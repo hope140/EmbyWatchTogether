@@ -52,6 +52,26 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Accept_EnforcesFiveAttemptsPerUserPerMinute()
+        {
+            var now = new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero);
+            var invitations = new RoomInvitationManager(() => now, () => "invite-code");
+
+            for (var i = 0; i < RoomInvitationManager.AttemptsPerUserPerMinute; i++)
+            {
+                var result = invitations.Accept("wrong-code", "u2", _ => null, now);
+                Assert.Equal(RoomInvitationManager.InvalidOrExpiredStatus, result.Status);
+            }
+
+            var limited = invitations.Accept("wrong-code", "u2", _ => null, now);
+            Assert.Equal(RoomInvitationManager.RateLimitedStatus, limited.Status);
+
+            var afterWindow = invitations.Accept(
+                "wrong-code", "u2", _ => null, now.AddMinutes(1).AddSeconds(1));
+            Assert.Equal(RoomInvitationManager.InvalidOrExpiredStatus, afterWindow.Status);
+        }
+
+        [Fact]
         public void Create_RejectsCreatorAlreadyInRoomAndLegacyRoomFallsBackCreator()
         {
             var rooms = new RoomManager();
