@@ -22,6 +22,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         participantResync: '请求重新同步'
     };
 
+    var maxDiagnosticEvents = 50;
+
     function apiUrl(path) {
         return ApiClient.getUrl(path);
     }
@@ -245,7 +247,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             recovery: recovery,
             lastAction: raw.LastAction && typeof raw.LastAction === 'object' ? sanitizeDiagnosticEvent(raw.LastAction) : null,
             lastError: diagnosticReasonLabels[raw.LastError] ? raw.LastError : null,
-            events: (Array.isArray(raw.Events) ? raw.Events : []).slice(0, 100).map(sanitizeDiagnosticEvent),
+            events: (Array.isArray(raw.Events) ? raw.Events : [])
+                .slice(-maxDiagnosticEvents)
+                .reverse()
+                .map(sanitizeDiagnosticEvent),
             generatedAtUtc: typeof raw.GeneratedAtUtc === 'string' ? raw.GeneratedAtUtc : null
         };
     }

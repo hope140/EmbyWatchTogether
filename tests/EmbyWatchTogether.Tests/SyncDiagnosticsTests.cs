@@ -21,6 +21,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Fact]
         public void EventRingIsBoundedAndEvictsOldestEntry()
         {
+            Assert.Equal(500, SyncDiagnostics.MaxEvents);
             var runtime = new RoomRuntime();
             for (int i = 0; i < SyncDiagnostics.MaxEvents + 5; i++)
             {

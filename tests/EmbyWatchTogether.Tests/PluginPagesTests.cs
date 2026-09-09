@@ -173,6 +173,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("raw.LastAction", javascript);
             Assert.Contains("raw.Events", javascript);
             Assert.Contains("导出诊断 JSON", javascript);
+            Assert.Contains("maxDiagnosticEvents = 50", javascript);
+            Assert.Contains("slice(-maxDiagnosticEvents)", javascript);
+            Assert.Contains(".reverse()", javascript);
             Assert.Contains("rememberDiagnosticPanelState", javascript);
             Assert.Contains("page._wtDiagnosticOpen", javascript);
             Assert.Contains("details.addEventListener('toggle'", javascript);

@@ -154,7 +154,7 @@ namespace Emby.Plugins.WatchTogether
     public static class SyncDiagnostics
     {
         public const string SchemaVersion = "1";
-        public const int MaxEvents = 100;
+        public const int MaxEvents = 500;
         private const double SnapshotFreshnessSeconds = 10;
         private const int HashLength = 12;
 
