@@ -112,6 +112,89 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void ParticipantResync_AcceptsJoinedParticipantAndResetsWaiting()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Watching;
+            runtime.Error = "old error";
+
+            var now = DateTimeOffset.UtcNow;
+            var result = manager.RequestParticipantResync(room.Id, "u2", () => "server-1", now);
+
+            Assert.Equal("accepted", result.Status);
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Null(runtime.Error);
+            Assert.Null(runtime.Barrier);
+            Assert.Empty(runtime.Pending);
+            var requestedAt = (DateTimeOffset?)typeof(RoomRuntime).GetProperty(
+                "ParticipantResyncRequestedAtUtc",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .GetValue(runtime);
+            Assert.Equal(now, requestedAt);
+        }
+
+        [Fact]
+        public void ParticipantResync_BusyDoesNotClearBarrierOrPending()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            var barrier = new BarrierState { Stage = BarrierStage.Seek, AnchorUserId = "u1" };
+            runtime.State = RoomState.Barrier;
+            runtime.Barrier = barrier;
+            var pending = new PendingCommand { UserId = "u1", Command = RemoteCommands.Pause };
+            runtime.Pending["u1"] = pending;
+
+            var result = manager.RequestParticipantResync(room.Id, "u2", () => "server-1", DateTimeOffset.UtcNow);
+
+            Assert.Equal("busy", result.Status);
+            Assert.Equal("synchronization_in_progress", result.Reason);
+            Assert.Same(barrier, runtime.Barrier);
+            Assert.Same(pending, runtime.Pending["u1"]);
+
+            runtime.Barrier = null;
+            runtime.State = RoomState.Waiting;
+            var pendingOnly = manager.RequestParticipantResync(
+                room.Id, "u2", () => "server-1", DateTimeOffset.UtcNow);
+            Assert.Equal("busy", pendingOnly.Status);
+            Assert.Same(pending, runtime.Pending["u1"]);
+        }
+
+        [Fact]
+        public void ParticipantResync_ServerMismatchAndCooldownAreUnavailableOrBusy()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var first = DateTimeOffset.UtcNow;
+
+            var unavailable = manager.RequestParticipantResync(room.Id, "u1", () => "server-2", first);
+            Assert.Equal("unavailable", unavailable.Status);
+            Assert.Equal("server_unavailable", unavailable.Reason);
+
+            var accepted = manager.RequestParticipantResync(room.Id, "u1", () => "server-1", first);
+            var busy = manager.RequestParticipantResync(room.Id, "u2", () => "server-1", first.AddSeconds(1));
+            Assert.Equal("accepted", accepted.Status);
+            Assert.Equal("busy", busy.Status);
+            Assert.Equal("resync_cooldown", busy.Reason);
+        }
+
+        [Fact]
+        public void ParticipantResync_RejectsNonMemberAndParticipantWhoLeft()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                manager.RequestParticipantResync(room.Id, "u3", () => "server-1", DateTimeOffset.UtcNow));
+
+            manager.SetParticipantJoined(room.Id, "u2", false);
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                manager.RequestParticipantResync(room.Id, "u2", () => "server-1", DateTimeOffset.UtcNow));
+        }
+
+        [Fact]
         public void Action_Pause_IssuesToOnlineParticipantsOnly()
         {
             var manager = new RoomManager();

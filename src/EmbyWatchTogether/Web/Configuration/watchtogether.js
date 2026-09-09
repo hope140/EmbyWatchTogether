@@ -18,8 +18,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     var actionLabels = {
         pause: '暂停播放',
         resume: '继续播放',
-        resync: '重新同步'
+        resync: '重新同步',
+        participantResync: '请求重新同步'
     };
+
+    var maxDiagnosticEvents = 50;
 
     function apiUrl(path) {
         return ApiClient.getUrl(path);
@@ -51,6 +54,467 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return '网络连接失败，请稍后重试。';
         }
         return '操作未完成，请稍后重试。';
+    }
+
+    var diagnosticStateLabels = {
+        Waiting: '等待参与者',
+        Barrier: '正在对齐',
+        Watching: '同步中',
+        Unavailable: '暂不可用'
+    };
+    var diagnosticReasonLabels = {
+        server_unavailable: '服务器暂时不可用',
+        snapshot_unavailable: '播放会话暂时不可读',
+        snapshot_stale: '播放会话数据已过期',
+        different_video: '两位参与者打开了不同视频',
+        playback_stopped: '播放已停止，等待重新打开视频',
+        action_conflict: '检测到手动操作冲突',
+        barrier_retry_exhausted: '对齐重试次数已用尽',
+        waiting_pause_retry_limit: '等待暂停重试次数已用尽',
+        command_failed: '播放控制未完成',
+        aligning: '正在对齐播放位置',
+        watching: '两位参与者已连接',
+        remote_control_unavailable: '当前客户端不支持远程控制',
+        unsupported_playback_rate: '播放速度不是 1 倍',
+        waiting_for_playback: '等待双方打开同一视频并开始播放'
+    };
+    var diagnosticHealthLabels = {
+        fresh: '新鲜',
+        stale: '过期',
+        unavailable: '不可用',
+        unknown: '未知'
+    };
+    var diagnosticResultLabels = {
+        success: '成功',
+        failed: '失败',
+        retry_scheduled: '已安排重试',
+        pending: '等待确认',
+        stopped: '已停止',
+        entered: '已进入',
+        recovered: '已恢复',
+        changed: '已变化',
+        observed: '已记录'
+    };
+    var diagnosticBarrierStageLabels = {
+        Pause: '暂停阶段',
+        Seek: '定位阶段',
+        Restore: '恢复播放阶段'
+    };
+    var diagnosticCommandLabels = {
+        Pause: '暂停',
+        Unpause: '继续',
+        PlayPause: '播放/暂停',
+        Seek: '定位',
+        Stop: '停止',
+        DisplayMessage: '提示'
+    };
+    var diagnosticEventLabels = {
+        barrier_started: '开始对齐',
+        barrier_stage_changed: '对齐阶段变化',
+        entered_watching: '进入同步中',
+        command_issued: '发送控制',
+        command_acknowledged: '控制已确认',
+        command_failed: '控制失败',
+        retry_scheduled: '安排重试',
+        stop_confirmed: '确认停止',
+        snapshot_protection_entered: '进入保护状态',
+        snapshot_protection_recovered: '保护状态恢复',
+        eligibility_changed: '同步条件变化',
+        manual_action: '手动操作',
+        resync: '重新同步',
+        observed: '观察事件'
+    };
+
+    function diagnosticFiniteNumber(value) {
+        return typeof value === 'number' && isFinite(value) ? value : null;
+    }
+
+    function diagnosticAlias(value) {
+        return value === 'userA' || value === 'userB' ? value : 'unknown';
+    }
+
+    function diagnosticCommand(value) {
+        var names = Object.keys(diagnosticCommandLabels);
+        for (var i = 0; i < names.length; i++) {
+            if (String(value || '').toLowerCase() === names[i].toLowerCase()) {
+                return names[i];
+            }
+        }
+        return null;
+    }
+
+    function diagnosticResult(value) {
+        return diagnosticResultLabels[value] ? value : null;
+    }
+
+    function diagnosticBarrierStage(value) {
+        return diagnosticBarrierStageLabels[value] ? value : null;
+    }
+
+    function diagnosticSecondsFromTicks(value) {
+        var ticks = diagnosticFiniteNumber(value);
+        return ticks === null ? null : Math.max(0, ticks / 10000000);
+    }
+
+    function sanitizeDiagnosticSession(session) {
+        session = session || {};
+        return {
+            alias: diagnosticAlias(session.Alias),
+            positionSeconds: diagnosticFiniteNumber(session.PositionSeconds),
+            online: session.Online === true,
+            paused: session.Paused === true,
+            playbackRate: diagnosticFiniteNumber(session.PlaybackRate),
+            runtimeSeconds: diagnosticFiniteNumber(session.RuntimeSeconds),
+            lastActivityAgeSeconds: diagnosticFiniteNumber(session.LastActivityAgeSeconds),
+            ackLatencySeconds: diagnosticFiniteNumber(session.AckLatencySeconds),
+            reportedRemoteControl: session.ReportedSupportsRemoteControl === true,
+            effectiveRemoteControl: session.EffectiveSupportsRemoteControl === true,
+            canPause: session.CanPause === true,
+            canUnpause: session.CanUnpause === true,
+            canSeek: session.CanSeek === true,
+            canDisplayMessage: session.CanDisplayMessage === true,
+            supportedCommands: (Array.isArray(session.SupportedCommandNames) ? session.SupportedCommandNames : [])
+                .map(diagnosticCommand).filter(function (command, index, commands) {
+                    return command && commands.indexOf(command) === index;
+                })
+        };
+    }
+
+    function sanitizeDiagnosticEvent(event) {
+        event = event || {};
+        return {
+            type: diagnosticEventLabels[event.Type] ? event.Type : 'observed',
+            command: diagnosticCommand(event.Command),
+            alias: diagnosticAlias(event.Alias),
+            result: diagnosticResult(event.Result),
+            positionSeconds: event.PositionTicks === null || event.PositionTicks === undefined
+                ? null : diagnosticSecondsFromTicks(event.PositionTicks),
+            latencySeconds: diagnosticFiniteNumber(event.LatencySeconds),
+            atUtc: typeof event.AtUtc === 'string' ? event.AtUtc : null
+        };
+    }
+
+    function sanitizeDiagnostic(raw) {
+        if (!raw || typeof raw !== 'object') {
+            return null;
+        }
+        var participants = Array.isArray(raw.Participants) ? raw.Participants.slice(0, 2).map(function (participant) {
+            participant = participant || {};
+            return {
+                alias: diagnosticAlias(participant.Alias),
+                primary: participant.IsPrimary === true,
+                joined: participant.Joined === true
+            };
+        }) : [];
+        var sessions = Array.isArray(raw.Sessions) ? raw.Sessions.slice(0, 2).map(sanitizeDiagnosticSession) : [];
+        var pending = Array.isArray(raw.Pending) ? raw.Pending.slice(0, 2).map(function (item) {
+            item = item || {};
+            return {
+                alias: diagnosticAlias(item.Alias),
+                command: diagnosticCommand(item.Command),
+                positionSeconds: item.PositionTicks === null || item.PositionTicks === undefined
+                    ? null : diagnosticSecondsFromTicks(item.PositionTicks),
+                ageSeconds: diagnosticFiniteNumber(item.AgeSeconds),
+                retries: diagnosticFiniteNumber(item.Retries)
+            };
+        }) : [];
+        var barrier = raw.Barrier && typeof raw.Barrier === 'object' ? {
+            stage: diagnosticBarrierStage(raw.Barrier.Stage),
+            anchorAlias: diagnosticAlias(raw.Barrier.AnchorAlias),
+            targetPositionSeconds: diagnosticFiniteNumber(raw.Barrier.TargetPositionSeconds),
+            ageSeconds: diagnosticFiniteNumber(raw.Barrier.AgeSeconds),
+            pauseSent: raw.Barrier.PauseSent === true,
+            seekSent: raw.Barrier.SeekSent === true,
+            restoreSent: raw.Barrier.RestoreSent === true,
+            seekRetryPending: raw.Barrier.SeekRetryPending === true
+        } : null;
+        var recovery = raw.RecoveryWindow && typeof raw.RecoveryWindow === 'object' ? {
+            active: raw.RecoveryWindow.Active === true,
+            ageSeconds: diagnosticFiniteNumber(raw.RecoveryWindow.AgeSeconds),
+            affectedAliases: (Array.isArray(raw.RecoveryWindow.AffectedAliases) ? raw.RecoveryWindow.AffectedAliases : [])
+                .slice(0, 2).map(diagnosticAlias)
+        } : { active: false, ageSeconds: null, affectedAliases: [] };
+        return {
+            schemaVersion: typeof raw.SchemaVersion === 'string' ? raw.SchemaVersion : null,
+            pluginVersion: typeof raw.PluginVersion === 'string' ? raw.PluginVersion : null,
+            roomState: diagnosticStateLabels[raw.RoomState] ? raw.RoomState : 'Unavailable',
+            statusReason: diagnosticReasonLabels[raw.StatusReason] ? raw.StatusReason : null,
+            snapshotHealth: diagnosticHealthLabels[raw.SnapshotHealth] ? raw.SnapshotHealth : 'unknown',
+            participants: participants,
+            sessions: sessions,
+            pending: pending,
+            barrier: barrier,
+            recovery: recovery,
+            lastAction: raw.LastAction && typeof raw.LastAction === 'object' ? sanitizeDiagnosticEvent(raw.LastAction) : null,
+            lastError: diagnosticReasonLabels[raw.LastError] ? raw.LastError : null,
+            events: (Array.isArray(raw.Events) ? raw.Events : [])
+                .slice(-maxDiagnosticEvents)
+                .reverse()
+                .map(sanitizeDiagnosticEvent),
+            generatedAtUtc: typeof raw.GeneratedAtUtc === 'string' ? raw.GeneratedAtUtc : null
+        };
+    }
+
+    function diagnosticLabel(map, value, fallback) {
+        return map[value] || fallback || '未知';
+    }
+
+    function diagnosticFormatNumber(value, suffix) {
+        var number = diagnosticFiniteNumber(value);
+        return number === null ? '—' : number.toFixed(1) + (suffix || '');
+    }
+
+    function diagnosticFormatPosition(value) {
+        var seconds = diagnosticFiniteNumber(value);
+        if (seconds === null) return '—';
+        var total = Math.max(0, Math.floor(seconds));
+        var minutes = Math.floor(total / 60);
+        var remainingNumber = total % 60;
+        var remaining = remainingNumber < 10 ? '0' + remainingNumber : String(remainingNumber);
+        return minutes + ':' + remaining;
+    }
+
+    function diagnosticFormatTime(value) {
+        if (!value) return '时间未知';
+        var date = new Date(value);
+        return isNaN(date.getTime()) ? '时间未知' : date.toLocaleString();
+    }
+
+    function diagnosticField(parent, label, value) {
+        var field = document.createElement('div');
+        var labelEl = document.createElement('span');
+        labelEl.className = 'wt-diagnosticLabel';
+        labelEl.textContent = label + '：';
+        var valueEl = document.createElement('span');
+        valueEl.className = 'wt-diagnosticValue';
+        valueEl.textContent = value;
+        field.appendChild(labelEl);
+        field.appendChild(valueEl);
+        parent.appendChild(field);
+    }
+
+    function diagnosticGroup(parent, title) {
+        var group = document.createElement('section');
+        group.className = 'wt-diagnosticGroup';
+        var heading = document.createElement('h4');
+        heading.textContent = title;
+        group.appendChild(heading);
+        parent.appendChild(group);
+        return group;
+    }
+
+    function renderDiagnosticDetails(page, roomId, diagnostic, body) {
+        clearChildren(body);
+        var toolbar = document.createElement('div');
+        toolbar.className = 'wt-diagnosticToolbar';
+        var exportButton = document.createElement('button');
+        exportButton.type = 'button';
+        exportButton.textContent = '导出诊断 JSON';
+        exportButton.addEventListener('click', function () {
+            exportDiagnostic(page, roomId);
+        });
+        toolbar.appendChild(exportButton);
+        var timestamp = document.createElement('span');
+        timestamp.className = 'fieldDescription';
+        timestamp.textContent = '读取时间：' + diagnosticFormatTime(diagnostic.generatedAtUtc);
+        toolbar.appendChild(timestamp);
+        body.appendChild(toolbar);
+
+        var summary = document.createElement('div');
+        summary.className = 'wt-diagnosticSummary';
+        diagnosticField(summary, '状态', diagnosticLabel(diagnosticStateLabels, diagnostic.roomState, '暂不可用'));
+        diagnosticField(summary, '状态原因', diagnosticLabel(diagnosticReasonLabels, diagnostic.statusReason, '当前状态需要检查'));
+        diagnosticField(summary, '快照健康', diagnosticLabel(diagnosticHealthLabels, diagnostic.snapshotHealth, '未知'));
+        diagnosticField(summary, '事件数量', String(diagnostic.events.length));
+        body.appendChild(summary);
+
+        var sessions = diagnosticGroup(body, '参与者会话');
+        if (diagnostic.sessions.length === 0) {
+            var noSessions = document.createElement('p');
+            noSessions.className = 'fieldDescription';
+            noSessions.textContent = '暂无可用会话。';
+            sessions.appendChild(noSessions);
+        } else {
+            diagnostic.sessions.forEach(function (session) {
+                var sessionSummary = document.createElement('div');
+                sessionSummary.className = 'wt-diagnosticSummary';
+                diagnosticField(sessionSummary, session.alias, (session.online ? '在线' : '离线') + '，位置 ' + diagnosticFormatPosition(session.positionSeconds));
+                diagnosticField(sessionSummary, '播放状态', session.online ? (session.paused ? '已暂停' : '播放中') : '状态未知');
+                diagnosticField(sessionSummary, '能力', '上报远控 ' + (session.reportedRemoteControl ? '支持' : '不支持') + '；有效远控 ' + (session.effectiveRemoteControl ? '支持' : '不支持'));
+                diagnosticField(sessionSummary, '确认延迟', diagnosticFormatNumber(session.ackLatencySeconds, ' 秒'));
+                diagnosticField(sessionSummary, '播放速率', diagnosticFormatNumber(session.playbackRate, ' 倍'));
+                diagnosticField(sessionSummary, '可用控制', session.supportedCommands.length > 0 ? session.supportedCommands.map(function (command) {
+                    return diagnosticCommandLabels[command];
+                }).join('、') : '无');
+                sessions.appendChild(sessionSummary);
+            });
+        }
+
+        var pending = diagnosticGroup(body, '等待中的控制');
+        if (diagnostic.pending.length === 0) {
+            var noPending = document.createElement('p');
+            noPending.className = 'fieldDescription';
+            noPending.textContent = '当前没有等待确认的控制。';
+            pending.appendChild(noPending);
+        } else {
+            var pendingList = document.createElement('ul');
+            pendingList.className = 'wt-diagnosticList';
+            diagnostic.pending.forEach(function (item) {
+                var pendingItem = document.createElement('li');
+                pendingItem.textContent = item.alias + '：' + (diagnosticCommandLabels[item.command] || '未知控制') +
+                    '，位置 ' + diagnosticFormatPosition(item.positionSeconds) +
+                    '，等待 ' + diagnosticFormatNumber(item.ageSeconds, ' 秒') +
+                    '，重试 ' + (item.retries === null ? '—' : String(Math.max(0, Math.floor(item.retries))) + ' 次');
+                pendingList.appendChild(pendingItem);
+            });
+            pending.appendChild(pendingList);
+        }
+
+        var barrier = diagnosticGroup(body, '对齐与恢复');
+        var barrierSummary = document.createElement('div');
+        barrierSummary.className = 'wt-diagnosticSummary';
+        diagnosticField(barrierSummary, '对齐阶段', diagnostic.barrier ? diagnosticLabel(diagnosticBarrierStageLabels, diagnostic.barrier.stage, '未知') : '未进行对齐');
+        diagnosticField(barrierSummary, '目标位置', diagnostic.barrier ? diagnosticFormatPosition(diagnostic.barrier.targetPositionSeconds) : '—');
+        diagnosticField(barrierSummary, '命令进度', diagnostic.barrier ?
+            ['暂停 ' + (diagnostic.barrier.pauseSent ? '已发送' : '未发送'),
+                '定位 ' + (diagnostic.barrier.seekSent ? '已发送' : '未发送'),
+                '恢复 ' + (diagnostic.barrier.restoreSent ? '已发送' : '未发送')].join('、') : '—');
+        diagnosticField(barrierSummary, '恢复窗口', diagnostic.recovery.active ? '活动中' : '未活动');
+        diagnosticField(barrierSummary, '恢复窗口时长', diagnosticFormatNumber(diagnostic.recovery.ageSeconds, ' 秒'));
+        diagnosticField(barrierSummary, '受影响参与者', diagnostic.recovery.affectedAliases.length > 0 ? diagnostic.recovery.affectedAliases.join('、') : '—');
+        barrier.appendChild(barrierSummary);
+
+        var last = diagnosticGroup(body, '最近结果');
+        var lastSummary = document.createElement('div');
+        lastSummary.className = 'wt-diagnosticSummary';
+        diagnosticField(lastSummary, '最近动作', diagnostic.lastAction ? diagnosticLabel(diagnosticEventLabels, diagnostic.lastAction.type, '观察事件') : '—');
+        diagnosticField(lastSummary, '动作目标', diagnostic.lastAction && diagnostic.lastAction.alias !== 'unknown' ? diagnostic.lastAction.alias : '—');
+        diagnosticField(lastSummary, '动作控制', diagnostic.lastAction && diagnostic.lastAction.command ? (diagnosticCommandLabels[diagnostic.lastAction.command] || '未知控制') : '—');
+        diagnosticField(lastSummary, '动作结果', diagnostic.lastAction && diagnostic.lastAction.result ? diagnosticLabel(diagnosticResultLabels, diagnostic.lastAction.result, '已记录') : '—');
+        diagnosticField(lastSummary, '最近错误', diagnostic.lastError ? diagnosticLabel(diagnosticReasonLabels, diagnostic.lastError, '播放控制未完成') : '无');
+        last.appendChild(lastSummary);
+
+        var events = diagnosticGroup(body, '事件记录');
+        var eventList = document.createElement('ul');
+        eventList.className = 'wt-diagnosticList';
+        if (diagnostic.events.length === 0) {
+            var noEvents = document.createElement('li');
+            noEvents.textContent = '暂无事件记录。';
+            eventList.appendChild(noEvents);
+        } else {
+            diagnostic.events.forEach(function (event) {
+                var eventItem = document.createElement('li');
+                var detail = diagnosticLabel(diagnosticEventLabels, event.type, '观察事件');
+                if (event.alias !== 'unknown') detail += '（' + event.alias + '）';
+                if (event.command) detail += '：' + (diagnosticCommandLabels[event.command] || '未知控制');
+                if (event.result) detail += '，' + diagnosticLabel(diagnosticResultLabels, event.result, '已记录');
+                eventItem.textContent = diagnosticFormatTime(event.atUtc) + ' · ' + detail;
+                eventList.appendChild(eventItem);
+            });
+        }
+        events.appendChild(eventList);
+    }
+
+    function diagnosticErrorMessage(error) {
+        var status = error && (error.status || error.statusCode);
+        if (status === 401 || status === 403) return '没有权限查看此房间的诊断。';
+        if (status >= 500) return '服务器暂时不可用，请稍后重试。';
+        if (error && error.name === 'TypeError') return '网络连接失败，请稍后重试。';
+        return '诊断读取失败，请稍后重试。';
+    }
+
+    function createDiagnosticPanel(page, room) {
+        page._wtDiagnosticPanels = page._wtDiagnosticPanels || {};
+        page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
+        var details = document.createElement('details');
+        details.className = 'wt-diagnostics';
+        var summary = document.createElement('summary');
+        summary.textContent = '诊断详情';
+        details.appendChild(summary);
+        var body = document.createElement('div');
+        body.className = 'wt-diagnosticBody';
+        details.appendChild(body);
+        details.addEventListener('toggle', function () {
+            page._wtDiagnosticOpen[room.RoomId] = details.open;
+        });
+        page._wtDiagnosticPanels[room.RoomId] = { details: details, body: body };
+        var diagnostic = page._wtDiagnostics && page._wtDiagnostics[room.RoomId];
+        if (diagnostic) {
+            renderDiagnosticDetails(page, room.RoomId, diagnostic, body);
+        }
+        details.open = page._wtDiagnosticOpen[room.RoomId] === true;
+        return details;
+    }
+
+    function loadRoomDiagnostics(page, roomId, button) {
+        var panel = page._wtDiagnosticPanels && page._wtDiagnosticPanels[roomId];
+        if (!panel || (page._wtDiagnosticBusy && page._wtDiagnosticBusy[roomId])) return;
+        page._wtDiagnosticBusy = page._wtDiagnosticBusy || {};
+        page._wtDiagnosticRequests = page._wtDiagnosticRequests || {};
+        var requestToken = String(Date.now()) + ':' + String(Math.random());
+        page._wtDiagnosticRequests[roomId] = requestToken;
+        page._wtDiagnosticBusy[roomId] = true;
+        panel.details.open = true;
+        clearChildren(panel.body);
+        var loadingText = document.createElement('p');
+        loadingText.className = 'fieldDescription';
+        loadingText.textContent = '正在读取诊断…';
+        panel.body.appendChild(loadingText);
+        setButtonBusy(button, true, '读取中…');
+        return apiGet('WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Diagnostics').then(function (raw) {
+            var diagnostic = sanitizeDiagnostic(raw);
+            if (!diagnostic) {
+                throw { name: 'InvalidDiagnostic' };
+            }
+            if (page._wtDiagnosticRequests[roomId] !== requestToken ||
+                !page._wtDiagnosticPanels[roomId]) {
+                return;
+            }
+            page._wtDiagnostics = page._wtDiagnostics || {};
+            page._wtDiagnostics[roomId] = diagnostic;
+            page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
+            page._wtDiagnosticOpen[roomId] = true;
+            var currentPanel = page._wtDiagnosticPanels[roomId];
+            renderDiagnosticDetails(page, roomId, diagnostic, currentPanel.body);
+            currentPanel.details.open = true;
+        }).catch(function (error) {
+            if (page._wtDiagnosticRequests[roomId] !== requestToken ||
+                !page._wtDiagnosticPanels[roomId]) {
+                return;
+            }
+            var currentPanel = page._wtDiagnosticPanels[roomId];
+            clearChildren(currentPanel.body);
+            var errorText = document.createElement('p');
+            errorText.className = 'wt-diagnosticError';
+            errorText.setAttribute('role', 'alert');
+            errorText.textContent = diagnosticErrorMessage(error);
+            currentPanel.body.appendChild(errorText);
+            currentPanel.details.open = true;
+        }).finally(function () {
+            if (page._wtDiagnosticRequests[roomId] === requestToken) {
+                delete page._wtDiagnosticBusy[roomId];
+                setButtonBusy(button, false);
+            }
+        });
+    }
+
+    function exportDiagnostic(page, roomId) {
+        var diagnostic = page._wtDiagnostics && page._wtDiagnostics[roomId];
+        if (!diagnostic || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+            setTransientStatus(page, '当前浏览器不支持导出诊断 JSON。', true);
+            return;
+        }
+        var blob = new Blob([JSON.stringify(diagnostic, null, 2)], { type: 'application/json' });
+        var url = window.URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = 'watch-together-diagnostics-' + new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14) + '.json';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.setTimeout(function () {
+            window.URL.revokeObjectURL(url);
+        }, 1000);
     }
 
     function setStatus(page, text, isError) {
@@ -89,12 +553,35 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function setAdminVisibility(page, isAdmin) {
         var adminSection = page.querySelector('#wtAdminSection');
         var settingsSection = page.querySelector('#wtSettingsSection');
+        var roomsHeading = page.querySelector('#wtRoomsHeading');
+        var helpSteps = [
+            page.querySelector('#wtHelpStep1'),
+            page.querySelector('#wtHelpStep2'),
+            page.querySelector('#wtHelpStep3')
+        ];
         if (adminSection) {
             adminSection.style.display = isAdmin ? '' : 'none';
         }
         if (settingsSection) {
             settingsSection.style.display = isAdmin ? '' : 'none';
         }
+        if (roomsHeading) {
+            roomsHeading.textContent = isAdmin ? '2. 房间' : '我的房间';
+        }
+        var helpText = isAdmin ? [
+            '创建房间并选择两名参与者。',
+            '两人分别登录 Emby，打开同一视频。',
+            '看到“同步中”后即可一起观看。'
+        ] : [
+            '加入房间后，与另一位参与者打开同一视频。',
+            '播放、暂停和进度会自动同步。',
+            '需要重新对齐时，点击“请求重新同步”。'
+        ];
+        helpSteps.forEach(function (step, index) {
+            if (step) {
+                step.textContent = helpText[index];
+            }
+        });
     }
 
     function clearChildren(element) {
@@ -529,33 +1016,56 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             ? 'wt-action--primary'
             : action === 'leave' || action === 'delete'
                 ? 'wt-action--danger'
-                : action === 'resync'
+                : action === 'resync' || action === 'participantResync'
                     ? 'wt-action--accent'
                     : '';
         button.className = 'button-flat wt-action' + (toneClass ? ' ' + toneClass : '');
         button.dataset.act = action;
         button.dataset.action = action;
-        button.textContent = action === 'delete' ? '删除房间' : action === 'leave' ? '退出房间' : action === 'join' ? '加入房间' : actionLabels[action];
+        button.textContent = action === 'delete' ? '删除房间' : action === 'leave' ? '退出房间' : action === 'join' ? '加入房间' : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
         button.title = action === 'delete'
             ? '删除这个房间；只删除同步关系，不删除媒体'
             : action === 'leave'
                 ? '退出后将尝试暂停仍在房间的一方'
                 : action === 'join'
                     ? '加入后需要与另一位参与者打开同一视频'
-            : actionLabels[action] + '：' + (getStateInfo(room.State).description || '');
+                    : action === 'diagnostics'
+                        ? '读取当前房间的脱敏同步诊断'
+                        : action === 'participantResync'
+                            ? '请求服务端重新对齐双方播放位置'
+                            : actionLabels[action] + '：' + (getStateInfo(room.State).description || '');
         button.addEventListener('click', function () {
             if (action === 'delete') {
                 deleteRoom(page, room, button);
             } else if (action === 'join' || action === 'leave') {
                 membership(page, room, action, button);
+            } else if (action === 'diagnostics') {
+                loadRoomDiagnostics(page, room.RoomId, button);
+            } else if (action === 'participantResync') {
+                participantResync(page, room.RoomId, button);
             } else {
                 control(page, room.RoomId, action, button);
             }
         });
+        if (action === 'diagnostics' && page._wtDiagnosticBusy && page._wtDiagnosticBusy[room.RoomId]) {
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            button.textContent = '读取中…';
+        }
         if (page._wtRoomBusy && page._wtRoomBusy[room.RoomId]) {
             button.disabled = true;
         }
         return button;
+    }
+
+    function rememberDiagnosticPanelState(page) {
+        page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
+        var panels = page._wtDiagnosticPanels || {};
+        Object.keys(panels).forEach(function (roomId) {
+            if (panels[roomId] && panels[roomId].details) {
+                page._wtDiagnosticOpen[roomId] = panels[roomId].details.open;
+            }
+        });
     }
 
     function renderRooms(page, rooms) {
@@ -564,7 +1074,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
+        rememberDiagnosticPanelState(page);
         clearChildren(container);
+        page._wtDiagnosticPanels = {};
+        page._wtDiagnosticBusy = page._wtDiagnosticBusy || {};
+        page._wtDiagnosticRequests = page._wtDiagnosticRequests || {};
+        page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
         container.setAttribute('aria-busy', 'false');
         if (page._wtIsAdmin !== undefined) {
             setAdminVisibility(page, page._wtIsAdmin);
@@ -573,10 +1088,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var empty = document.createElement('div');
             empty.className = 'wt-emptyState';
             var emptyTitle = document.createElement('strong');
-            emptyTitle.textContent = '还没有房间';
+            emptyTitle.textContent = page._wtIsAdmin === true ? '还没有房间' : '暂无参与的房间';
             var emptyText = document.createElement('p');
             emptyText.className = 'fieldDescription';
-            emptyText.textContent = '先在上方创建一个房间，再让两位参与者打开同一视频。';
+            emptyText.textContent = page._wtIsAdmin === true
+                ? '先在上方创建一个房间，再让两位参与者打开同一视频。'
+                : '请让管理员把你的账号加入房间。';
             empty.appendChild(emptyTitle);
             empty.appendChild(emptyText);
             container.appendChild(empty);
@@ -644,12 +1161,17 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var actions = document.createElement('div');
             actions.className = 'wt-roomActions';
             actions.appendChild(createActionButton(page, room, room.CurrentUserJoined ? 'leave' : 'join'));
+            actions.appendChild(createActionButton(page, room, 'diagnostics'));
+            if (room.CurrentUserJoined && !room.IsAdmin) {
+                actions.appendChild(createActionButton(page, room, 'participantResync'));
+            }
             if (room.IsAdmin) {
                 ['pause', 'resume', 'resync', 'delete'].forEach(function (action) {
                     actions.appendChild(createActionButton(page, room, action));
                 });
             }
             card.appendChild(actions);
+            card.appendChild(createDiagnosticPanel(page, room));
             container.appendChild(card);
         });
     }
@@ -671,10 +1193,23 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return apiGet('WatchTogether/Rooms').then(function (rooms) {
             var list = Array.isArray(rooms) ? rooms : [];
             page._wtRooms = list;
+            page._wtDiagnostics = page._wtDiagnostics || {};
+            Object.keys(page._wtDiagnostics).forEach(function (roomId) {
+                if (!list.some(function (room) { return room && room.RoomId === roomId; })) {
+                    delete page._wtDiagnostics[roomId];
+                }
+            });
+            Object.keys(page._wtDiagnosticOpen || {}).forEach(function (roomId) {
+                if (!list.some(function (room) { return room && room.RoomId === roomId; })) {
+                    delete page._wtDiagnosticOpen[roomId];
+                }
+            });
             renderRooms(page, list);
             syncForm(page);
             if (announce) {
-                setStatus(page, list.length > 0 ? '已更新 ' + list.length + ' 个房间' : '暂无房间，可以创建一个。');
+                setStatus(page, list.length > 0
+                    ? '已更新 ' + list.length + ' 个房间'
+                    : page._wtIsAdmin === true ? '暂无房间，可以创建一个。' : '暂无参与的房间。');
             }
             return list;
         }).catch(function (err) {
@@ -733,6 +1268,38 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             })
             .catch(function (err) {
                 roomFeedback(page, roomId, label + '失败：' + errorMessage(err), true, true);
+            })
+            .then(function () {
+                setRoomBusy(page, roomId, false);
+                renderRooms(page, page._wtRooms || []);
+            });
+    }
+
+    function participantResync(page, roomId, button) {
+        setRoomBusy(page, roomId, true);
+        clearRoomFeedback(page, roomId);
+        roomFeedback(page, roomId, '重新同步请求处理中…', false, true);
+        renderRooms(page, page._wtRooms || []);
+        apiSend('WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync', 'POST')
+            .then(function (result) {
+                var status = result && result.Status;
+                if (status === 'accepted') {
+                    roomFeedback(page, roomId, '重新同步请求已受理，双方将暂时暂停并重新对齐。', false, false);
+                } else if (status === 'busy') {
+                    roomFeedback(page, roomId, result.Reason === 'resync_cooldown'
+                        ? '刚刚已请求重新同步，请稍后再试。'
+                        : '同步正在进行，请等待当前同步完成。', true, true);
+                } else if (status === 'unavailable') {
+                    roomFeedback(page, roomId, result.Reason === 'snapshot_unavailable'
+                        ? '当前播放会话暂时不可读，请稍后再试。'
+                        : '当前房间暂时不可用，请稍后再试。', true, true);
+                } else {
+                    roomFeedback(page, roomId, '重新同步请求未完成，请稍后再试。', true, true);
+                }
+                return loadRooms(page, false);
+            })
+            .catch(function (err) {
+                roomFeedback(page, roomId, '重新同步请求失败：' + errorMessage(err), true, true);
             })
             .then(function () {
                 setRoomBusy(page, roomId, false);

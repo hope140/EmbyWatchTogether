@@ -120,10 +120,13 @@ namespace Emby.Plugins.WatchTogether
             {
                 new PluginPageInfo
                 {
-                    Name = "WatchTogether",
+                    // Change the page key together with the controller key so
+                    // Emby Web refreshes the embedded HTML cache as well.
+                    Name = "WatchTogetherDiagnostics",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = true,
+                    EnableInUserMenu = true,
                     MenuSection = "server",
                     MenuIcon = "sync",
                 },
@@ -132,7 +135,9 @@ namespace Emby.Plugins.WatchTogether
                 // as its own page entry (same convention as ChapterApi pages).
                 new PluginPageInfo
                 {
-                    Name = "WatchTogether.js",
+                    // Use a new controller name so Emby Web does not reuse a
+                    // cached copy of the previous embedded module.
+                    Name = "WatchTogetherDiagnostics.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };
