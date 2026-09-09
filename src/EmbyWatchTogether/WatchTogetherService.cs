@@ -204,9 +204,9 @@ namespace Emby.Plugins.WatchTogether
                     ExpiresAtUtc = invitation.ExpiresAtUtc,
                 };
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException)
             {
-                throw new ServiceUnavailableException(ex.Message);
+                throw new ServiceUnavailableException("invitation_unavailable");
             }
         }
 

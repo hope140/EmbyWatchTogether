@@ -116,6 +116,48 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void CreateInvitation_WhenLimitReached_ReturnsStableErrorWithoutInternalDetails()
+        {
+            var userId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            SetPluginProperty(plugin, "Invitations", new RoomInvitationManager(() => DateTimeOffset.UtcNow, () => Guid.NewGuid().ToString("N")));
+            var service = NewService(userId);
+
+            WithPlugin(plugin, () =>
+            {
+                service.Post(new CreateInvitationRequest { Name = "one" });
+                service.Post(new CreateInvitationRequest { Name = "two" });
+                service.Post(new CreateInvitationRequest { Name = "three" });
+                var exception = Assert.Throws<ServiceUnavailableException>(() =>
+                    service.Post(new CreateInvitationRequest { Name = "four" }));
+                Assert.Equal("invitation_unavailable", exception.Message);
+                Assert.DoesNotContain("limit", exception.Message, StringComparison.OrdinalIgnoreCase);
+                return null;
+            });
+        }
+
+        [Fact]
+        public void DeleteSelfServiceRoom_AllowsCreatorAndRejectsOtherMember()
+        {
+            var creator = Guid.NewGuid().ToString("N");
+            var member = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateSelfServiceRoom("server-1", "", "room", creator, member);
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+
+            var otherService = NewService(member);
+            Assert.Throws<UnauthorizedAccessException>(() =>
+                WithPlugin(plugin, () => otherService.Delete(new DeleteRoomRequest { Id = room.Id })));
+
+            var creatorService = NewService(creator);
+            var response = WithPlugin(plugin, () => creatorService.Delete(new DeleteRoomRequest { Id = room.Id }));
+            Assert.True(GetBoolean(response, "Deleted"));
+        }
+
+        [Fact]
         public void Leave_FromWatching_PausesTheOtherOnlineParticipant()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
