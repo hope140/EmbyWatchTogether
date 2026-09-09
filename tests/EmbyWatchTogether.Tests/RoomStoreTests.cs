@@ -166,6 +166,33 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void LegacyRoomData_MissingSelfServiceFields_FallsBackToAdminAndFalse()
+        {
+            string legacyPayload = "[{\"Id\":\"r1\",\"ServerId\":\"server-1\",\"ServerUrl\":\"\",\"Name\":\"legacy\",\"AdminUserId\":\"admin-1\",\"PrimaryUserId\":\"u1\",\"ParticipantUserIds\":[\"u1\",\"u2\"],\"JoinedParticipantUserIds\":[\"u1\",\"u2\"],\"CreatedAtUtc\":\"2026-09-09T00:00:00.0000000+00:00\"}]";
+            File.WriteAllText(_filePath, legacyPayload);
+
+            var room = new RoomStore(_filePath, NewSerializer()).GetRoom("r1");
+
+            Assert.Equal("admin-1", room.CreatorUserId);
+            Assert.False(room.IsSelfService);
+        }
+
+        [Fact]
+        public void SelfServiceRoom_Reload_PreservesCreatorAndFlag()
+        {
+            var store = new RoomStore(_filePath, NewSerializer());
+            var manager = new RoomManager(store);
+            var room = manager.CreateSelfServiceRoom(
+                "server-1", "", "self-service", "creator-1", "member-1",
+                new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero));
+
+            var reloaded = new RoomStore(_filePath, NewSerializer()).GetRoom(room.Id);
+
+            Assert.Equal("creator-1", reloaded.CreatorUserId);
+            Assert.True(reloaded.IsSelfService);
+        }
+
+        [Fact]
         public void MissingFile_StartsEmpty()
         {
             var store = new RoomStore(_filePath, NewSerializer());

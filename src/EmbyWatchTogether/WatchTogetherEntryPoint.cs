@@ -24,6 +24,7 @@ namespace Emby.Plugins.WatchTogether
         private Plugin _plugin;
         private RoomStore _store;
         private RoomManager _rooms;
+        private RoomInvitationManager _invitations;
         private SessionBridge _bridge;
         private ICommandIssuer _issuer;
         private SyncEngine _syncEngine;
@@ -60,6 +61,7 @@ namespace Emby.Plugins.WatchTogether
                 var previousServerId = plugin.ServerId;
                 SessionBridge bridge = null;
                 SyncEngine syncEngine = null;
+                RoomInvitationManager invitations = null;
                 bool configurationSubscribed = false;
                 bool sessionEventsSubscribed = false;
 
@@ -68,6 +70,7 @@ namespace Emby.Plugins.WatchTogether
                     bridge = new SessionBridge(_sessionManager);
                     var store = new RoomStore(Path.Combine(plugin.DataFolderPath, "rooms.json"), _jsonSerializer);
                     var rooms = new RoomManager(store);
+                    invitations = new RoomInvitationManager(creatorInRoom: rooms.IsUserInAnyRoom);
                     var provider = new SessionBridgeSnapshotProvider(bridge);
                     var issuer = new SessionBridgeCommandIssuer(bridge, _logManager);
                     var options = SyncEngineOptions.From(plugin.Configuration);
@@ -90,6 +93,7 @@ namespace Emby.Plugins.WatchTogether
                     _plugin = plugin;
                     _store = store;
                     _rooms = rooms;
+                    _invitations = invitations;
                     _bridge = bridge;
                     _issuer = issuer;
                     _syncEngine = syncEngine;
@@ -115,6 +119,7 @@ namespace Emby.Plugins.WatchTogether
                     // constructed and the background engine has started.
                     plugin.Store = store;
                     plugin.Rooms = rooms;
+                    plugin.Invitations = invitations;
                     plugin.Bridge = bridge;
                     plugin.Issuer = issuer;
                 }
@@ -155,7 +160,17 @@ namespace Emby.Plugins.WatchTogether
                     _plugin = null;
                     _store = null;
                     _rooms = null;
+                    _invitations = null;
                     _issuer = null;
+
+                    try
+                    {
+                        invitations?.Dispose();
+                    }
+                    catch (Exception disposeException)
+                    {
+                        LogStartupException("Watch Together 启动失败后的邀请清理失败。", disposeException);
+                    }
 
                     try
                     {
@@ -193,6 +208,7 @@ namespace Emby.Plugins.WatchTogether
                 var plugin = _plugin;
                 var bridge = _bridge;
                 var syncEngine = _syncEngine;
+                var invitations = _invitations;
 
                 UnsubscribeFromConfigurationChanges(plugin);
                 UnsubscribeFromSessionChanges(bridge);
@@ -201,9 +217,19 @@ namespace Emby.Plugins.WatchTogether
                 _plugin = null;
                 _store = null;
                 _rooms = null;
+                _invitations = null;
                 _issuer = null;
                 _syncEngine = null;
                 _bridge = null;
+
+                try
+                {
+                    invitations?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    LogStartupException("Watch Together 停止邀请管理器失败。", ex);
+                }
 
                 try
                 {
@@ -240,6 +266,11 @@ namespace Emby.Plugins.WatchTogether
             if (ReferenceEquals(plugin.Rooms, _rooms))
             {
                 plugin.Rooms = null;
+            }
+
+            if (ReferenceEquals(plugin.Invitations, _invitations))
+            {
+                plugin.Invitations = null;
             }
 
             if (ReferenceEquals(plugin.Bridge, _bridge))

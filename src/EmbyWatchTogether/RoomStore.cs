@@ -262,6 +262,13 @@ namespace Emby.Plugins.WatchTogether
                 throw new RoomStoreException($"room {dto.Id} primary user must be a participant");
             }
 
+            if (dto.IsSelfService &&
+                (string.IsNullOrWhiteSpace(dto.CreatorUserId) ||
+                 !dto.ParticipantUserIds.Contains(dto.CreatorUserId, StringComparer.OrdinalIgnoreCase)))
+            {
+                throw new RoomStoreException($"room {dto.Id} self-service creator must be a participant");
+            }
+
             if (dto.JoinedParticipantUserIds != null &&
                 (dto.JoinedParticipantUserIds.Any(string.IsNullOrWhiteSpace) ||
                  dto.JoinedParticipantUserIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
@@ -299,6 +306,11 @@ namespace Emby.Plugins.WatchTogether
             if (!room.ParticipantUserIds.Contains(room.PrimaryUserId, StringComparer.OrdinalIgnoreCase))
             {
                 throw new RoomStoreException($"room {room.Id} primary user must be a participant");
+            }
+
+            if (room.IsSelfService && !room.ParticipantUserIds.Contains(room.CreatorUserId, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new RoomStoreException($"room {room.Id} self-service creator must be a participant");
             }
 
             if (room.JoinedParticipantUserIds == null ||
@@ -341,6 +353,10 @@ namespace Emby.Plugins.WatchTogether
 
         public string AdminUserId { get; set; }
 
+        public string CreatorUserId { get; set; }
+
+        public bool IsSelfService { get; set; }
+
         public string PrimaryUserId { get; set; }
 
         public List<string> ParticipantUserIds { get; set; }
@@ -358,6 +374,8 @@ namespace Emby.Plugins.WatchTogether
                 ServerUrl = room.ServerUrl,
                 Name = room.Name,
                 AdminUserId = room.AdminUserId,
+                CreatorUserId = room.CreatorUserId,
+                IsSelfService = room.IsSelfService,
                 PrimaryUserId = room.PrimaryUserId,
                 ParticipantUserIds = room.ParticipantUserIds.ToList(),
                 JoinedParticipantUserIds = room.JoinedParticipantUserIds.ToList(),
@@ -376,7 +394,9 @@ namespace Emby.Plugins.WatchTogether
                 PrimaryUserId,
                 ParticipantUserIds ?? new List<string>(),
                 JoinedParticipantUserIds ?? ParticipantUserIds,
-                DateTimeOffset.Parse(CreatedAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+                DateTimeOffset.Parse(CreatedAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                string.IsNullOrWhiteSpace(CreatorUserId) ? AdminUserId : CreatorUserId,
+                IsSelfService);
         }
     }
 }

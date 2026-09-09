@@ -140,8 +140,59 @@ namespace Emby.Plugins.WatchTogether
                     primaryUserId: primaryUserId,
                     participantUserIds: members,
                     joinedParticipantUserIds: members,
-                    createdAtUtc: now ?? DateTimeOffset.UtcNow);
+                    createdAtUtc: now ?? DateTimeOffset.UtcNow,
+                    creatorUserId: adminUserId,
+                    isSelfService: false);
 
+                _store?.Create(room);
+                _rooms[room.Id] = room;
+                _runtimes[room.Id] = new RoomRuntime();
+                _roomGates[room.Id] = new object();
+                return room;
+            }
+        }
+
+        /// <summary>
+        /// Atomically creates a two-member room for an invitation accept. The
+        /// member occupancy check and persistence happen while the manager lock
+        /// is held, so concurrent accepts cannot reserve the same user.
+        /// </summary>
+        public Room CreateSelfServiceRoom(
+            string serverId,
+            string serverUrl,
+            string name,
+            string creatorUserId,
+            string accepterUserId,
+            DateTimeOffset? now = null)
+        {
+            if (string.IsNullOrWhiteSpace(serverId)) throw new ArgumentException("serverId is required", nameof(serverId));
+            if (string.IsNullOrWhiteSpace(creatorUserId)) throw new ArgumentException("creatorUserId is required", nameof(creatorUserId));
+            if (string.IsNullOrWhiteSpace(accepterUserId)) throw new ArgumentException("accepterUserId is required", nameof(accepterUserId));
+            if (string.Equals(creatorUserId, accepterUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("creator and accepter must be different users", nameof(accepterUserId));
+            }
+
+            var members = new[] { creatorUserId.Trim(), accepterUserId.Trim() };
+            lock (_lock)
+            {
+                if (_rooms.Values.Any(r => members.Any(r.HasParticipant)))
+                {
+                    throw new InvalidOperationException("one or more users are already members of another room");
+                }
+
+                var room = new Room(
+                    id: Guid.NewGuid().ToString("N"),
+                    serverId: serverId,
+                    serverUrl: serverUrl ?? string.Empty,
+                    name: name ?? string.Empty,
+                    adminUserId: creatorUserId,
+                    primaryUserId: creatorUserId,
+                    participantUserIds: members,
+                    joinedParticipantUserIds: members,
+                    createdAtUtc: now ?? DateTimeOffset.UtcNow,
+                    creatorUserId: creatorUserId,
+                    isSelfService: true);
                 _store?.Create(room);
                 _rooms[room.Id] = room;
                 _runtimes[room.Id] = new RoomRuntime();
@@ -209,6 +260,15 @@ namespace Emby.Plugins.WatchTogether
             lock (_lock)
             {
                 return _rooms.Values.ToList();
+            }
+        }
+
+        public bool IsUserInAnyRoom(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId)) return false;
+            lock (_lock)
+            {
+                return _rooms.Values.Any(room => room.HasParticipant(userId));
             }
         }
 
@@ -420,7 +480,9 @@ namespace Emby.Plugins.WatchTogether
                             room.PrimaryUserId,
                             room.ParticipantUserIds,
                             joinedUsers,
-                            room.CreatedAtUtc);
+                            room.CreatedAtUtc,
+                            room.CreatorUserId,
+                            room.IsSelfService);
                         _store.Update(candidate);
                     }
 
