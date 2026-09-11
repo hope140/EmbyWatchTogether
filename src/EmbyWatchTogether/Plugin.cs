@@ -42,6 +42,8 @@ namespace Emby.Plugins.WatchTogether
 
         public RoomManager Rooms { get; internal set; }
 
+        public RoomInvitationManager Invitations { get; internal set; }
+
         public SessionBridge Bridge { get; internal set; }
 
         public ICommandIssuer Issuer { get; internal set; }

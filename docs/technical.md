@@ -18,6 +18,7 @@
 - `SessionInfo` 是服务器轮询快照，不是播放器内部时钟。明显位置跳变的阈值会根据已观测的命令确认延迟提高（普通情况下约 4 秒起），不保证每一帧一致，也不主动消除长期小幅漂移。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 是只读诊断接口，普通参与者和管理员可读取当前房间。接口在 room gate 内重新检查房间、成员和当前 `ServerId`，初始化未完成、房间不存在或服务器身份不匹配时沿用现有稳定错误语义；读取不会调用 `ICommandIssuer` 或消息发送器。返回字段采用白名单 DTO，`RoomRuntime` 保存最多 500 条连续去重事件、最近选中快照和最近动作，均为内存状态，删除房间或重启后清空；页面和导出只取最近 50 条，并按最新在前显示。快照位置、能力和命令确认延迟均表示服务端观察值，不代表客户端已实际执行。
 - 已加入的普通参与者可以通过 `POST /WatchTogether/Rooms/{Id}/Resync` 请求重新同步。请求在 room gate 内再次核验成员、加入状态、当前 `ServerId`、快照保护状态和运行中操作；`Barrier` 或任意 Pending 存在时返回稳定的 busy 结果，不清理当前同步。受理后仅将 runtime 复位为 `Waiting`，由现有轮询在资格满足时进入原有 `Barrier`；房间级短冷却会合并重复请求。响应的 `Status` 只使用 `accepted`、`busy`、`unavailable`，`Reason` 使用稳定原因码。
+- 阶段 C 的自助邀请只驻留 `RoomInvitationManager` 内存。`POST /WatchTogether/Invitations` 创建 15 分钟有效的一次性邀请码，服务端只保存 SHA-256 校验值；`GET` 只返回当前用户的有效邀请元数据，`DELETE` 可撤销，`POST /WatchTogether/Invitations/{Code}/Accept` 在同一串行边界内检查接受者、成员占用和房间持久化后消费邀请码。每位创建者最多 3 个有效邀请，全局最多 100 个，接受尝试按用户每分钟 5 次、全局每分钟 100 次限制。重启后邀请失效，现有 `rooms.json` 房间不受影响。
 
 ## 配置与运行时参数
 
@@ -32,7 +33,7 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.4.5.0`，对应 stable 正式 tag `v1.4.5.0`；本版本纳入 S1—S4，beta 预发布的实机验收结果已完成转正。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.5.0.0`，当前测试版为 `1.4.5.2`，对应 beta 预发布 tag `v1.4.5.2`；本正式版纳入阶段 C 自助邀请与房间生命周期能力。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
@@ -106,10 +107,10 @@ docs/                          当前实现说明、排错和协作流程
 | --- | --- | --- |
 | `GET` | `/WatchTogether/Users` | 管理员读取用户列表 |
 | `GET` / `POST` | `/WatchTogether/Rooms` | 列出或创建房间 |
-| `DELETE` | `/WatchTogether/Rooms/{id}` | 删除房间 |
 | `GET` | `/WatchTogether/Rooms/{id}/State` | 查看状态、资格和会话快照 |
 | `POST` | `/WatchTogether/Rooms/{id}/Join` | 参与者加入房间 |
-| `POST` | `/WatchTogether/Rooms/{id}/Leave` | 参与者退出房间 |
+| `POST` | `/WatchTogether/Rooms/{id}/Leave` | 参与者暂离同步状态，成员关系保留 |
+| `DELETE` | `/WatchTogether/Rooms/{id}` | 管理员或任一参与者结束房间并解除成员关系 |
 | `POST` | `/WatchTogether/Rooms/{id}/Action` | 管理员执行 `pause`、`resume` 或 `resync` |
 | `POST` | `/WatchTogether/Rooms/{id}/Resync` | 已加入参与者请求重新同步 |
 | `POST` | `/WatchTogether/Rooms/{id}/Message` | 管理员向在线参与者发送提示 |

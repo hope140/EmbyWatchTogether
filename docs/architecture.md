@@ -17,14 +17,16 @@ SessionBridge ──> SessionBridgeSnapshotProvider ──> SessionSelector
         └──── SessionBridgeCommandIssuer <──────── SyncEngine
 
 Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (rooms.json)
+                                  ├──> RoomInvitationManager (memory)
                                   └──> WatchTogetherService + embedded Web UI
 ```
 
 - `SessionBridge` 将 Emby 会话和事件适配为快照、命令和立即轮询唤醒；内置命令发送器只向调用方返回稳定错误码，完整异常仅写入服务器私有日志。
 - `SessionSelector` 为参与者选择有效会话并绑定 session identity，避免旧会话确认新设备命令。
-- `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份；`RoomStore` 只持久化房间元数据。
+- `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份；`RoomStore` 只持久化房间元数据。房间保留 `CreatorUserId` 和 `IsSelfService`，旧 JSON 缺失字段时回退到旧管理员创建语义。
+- `RoomInvitationManager` 保存运行时邀请码的校验值、创建者、名称和有效期，不保存明文邀请码或独立持久化文件。接受操作在其串行边界内调用 `RoomManager` 原子创建完整双人房间，创建成功后才消费邀请码；重启会丢弃未接受邀请。
 - `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Barrier`、`Watching`、`Unavailable`。
-- `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。
+- `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后创建者或管理员可按房间权限结束自助房间。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 在当前房间 gate 内重新校验房间、成员和服务器身份，返回只读、有界、脱敏的同步诊断 DTO。诊断事件环、当前选中快照、Pending 和 Barrier 状态仅驻留 `RoomRuntime` 内存，房间删除或运行时重建时丢弃，不写入 `rooms.json`；导出使用 `userA`/`userB` 别名、短 hash 和稳定错误分类，不包含用户名、GUID、Token、路径或异常文本。
 
 ## 状态与持久化

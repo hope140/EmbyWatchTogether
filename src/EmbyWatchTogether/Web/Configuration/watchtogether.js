@@ -537,6 +537,223 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function setInvitationStatus(page, text, isError) {
+        page._wtInvitationFeedback = { text: text || '', isError: !!isError };
+        var el = page.querySelector('#wtInvitationStatus');
+        if (el) {
+            el.textContent = text || '';
+            el.classList.toggle('error', !!isError);
+        }
+    }
+
+    function invitationDate(value) {
+        var date = value ? new Date(value) : null;
+        if (!date || isNaN(date.getTime())) {
+            return '有效期暂时无法显示';
+        }
+        try {
+            return '有效期至：' + date.toLocaleString();
+        } catch (error) {
+            return '有效期至：' + date.toISOString();
+        }
+    }
+
+    function renderInvitationCode(page) {
+        var panel = page.querySelector('#wtInvitationCodePanel');
+        var code = page.querySelector('#wtInvitationCode');
+        var expires = page.querySelector('#wtInvitationExpires');
+        var copy = page.querySelector('#wtCopyInvitationCode');
+        var value = page._wtInvitationCode;
+        if (!panel || !code || !expires) {
+            return;
+        }
+        panel.hidden = !value;
+        if (!value) {
+            code.textContent = '';
+            expires.textContent = '';
+            return;
+        }
+        code.textContent = value.code;
+        expires.textContent = invitationDate(value.expiresAtUtc);
+        if (copy) {
+            copy.disabled = false;
+            copy.textContent = page._wtInvitationCopied ? '已复制' : '复制邀请码';
+        }
+    }
+
+    function renderInvitations(page, invitations) {
+        var container = page.querySelector('#wtInvitations');
+        if (!container) {
+            return;
+        }
+        clearChildren(container);
+        var list = Array.isArray(invitations) ? invitations : [];
+        if (list.length === 0) {
+            var empty = document.createElement('p');
+            empty.className = 'fieldDescription';
+            empty.textContent = '当前没有有效的邀请码。';
+            container.appendChild(empty);
+            renderInvitationCode(page);
+            return;
+        }
+        var title = document.createElement('h3');
+        title.className = 'wt-subHeading';
+        title.textContent = '我创建的邀请码';
+        container.appendChild(title);
+        list.forEach(function (invitation) {
+            var item = document.createElement('div');
+            item.className = 'wt-roomMeta';
+            var name = document.createElement('div');
+            name.textContent = invitation.Name || '未命名房间';
+            var expiry = document.createElement('div');
+            expiry.textContent = invitationDate(invitation.ExpiresAtUtc);
+            var revoke = document.createElement('button', { is: 'emby-button' });
+            revoke.type = 'button';
+            revoke.className = 'button-flat wt-action wt-action--danger';
+            revoke.textContent = '撤销邀请码';
+            revoke.addEventListener('click', function () {
+                revokeInvitation(page, invitation, revoke);
+            });
+            item.appendChild(name);
+            item.appendChild(expiry);
+            item.appendChild(revoke);
+            container.appendChild(item);
+        });
+        renderInvitationCode(page);
+    }
+
+    function loadInvitations(page) {
+        return apiGet('WatchTogether/Invitations').then(function (list) {
+            page._wtInvitations = Array.isArray(list) ? list : [];
+            page._wtInvitationsLoaded = true;
+            renderInvitations(page, page._wtInvitations);
+            return page._wtInvitations;
+        }).catch(function (error) {
+            page._wtInvitations = [];
+            renderInvitations(page, []);
+            if (!page._wtInvitationsLoaded) {
+                setInvitationStatus(page, '邀请码列表暂时无法加载，请稍后重试。', true);
+            }
+            return [];
+        });
+    }
+
+    function createInvitation(page) {
+        var input = page.querySelector('#wtInvitationName');
+        var button = page.querySelector('#wtCreateInvitation');
+        var name = input ? input.value.trim() : '';
+        setButtonBusy(button, true, '创建中…');
+        setInvitationStatus(page, '正在创建邀请码…', false);
+        apiSend('WatchTogether/Invitations', 'POST', { Name: name || null }).then(function (result) {
+            result = result || {};
+            if (result.Status === 'creator_already_in_room') {
+                setInvitationStatus(page, '你已属于一个房间，请先结束当前房间后再创建邀请码。', true);
+                return null;
+            }
+            if (result.Status === 'invitation_unavailable') {
+                setInvitationStatus(page, '当前邀请码数量已达上限，请稍后再试。', true);
+                return null;
+            }
+            if (result.Created !== true || !result.Code || result.Status !== 'created') {
+                throw new Error('invitation_unavailable');
+            }
+            page._wtInvitationCode = {
+                code: String(result.Code),
+                expiresAtUtc: result.ExpiresAtUtc
+            };
+            page._wtInvitationCopied = false;
+            if (input) {
+                input.value = '';
+            }
+            renderInvitationCode(page);
+            setInvitationStatus(page, '邀请码已创建，请立即复制并发送给对方。', false);
+            return loadInvitations(page);
+        }).catch(function (error) {
+            setInvitationStatus(page, error && error.message === 'invitation_unavailable'
+                ? '当前邀请码数量已达上限，请稍后再试。'
+                : '邀请码创建失败，请稍后重试。', true);
+        }).then(function () {
+            setButtonBusy(button, false);
+        });
+    }
+
+    function copyInvitationCode(page, button) {
+        var value = page._wtInvitationCode && page._wtInvitationCode.code;
+        if (!value) {
+            setInvitationStatus(page, '当前没有可复制的邀请码。', true);
+            return;
+        }
+        var copied = window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText
+            ? window.navigator.clipboard.writeText(value)
+            : Promise.reject(new Error('clipboard_unavailable'));
+        copied.then(function () {
+            page._wtInvitationCopied = true;
+            renderInvitationCode(page);
+            setInvitationStatus(page, '邀请码已复制。', false);
+        }).catch(function () {
+            page._wtInvitationCopied = false;
+            if (button) {
+                button.textContent = '复制邀请码';
+            }
+            setInvitationStatus(page, '复制失败，请手动选择并复制邀请码。', true);
+        });
+    }
+
+    function revokeInvitation(page, invitation, button) {
+        if (!invitation || !invitation.InvitationId) {
+            return;
+        }
+        setButtonBusy(button, true, '撤销中…');
+        apiSend('WatchTogether/Invitations/' + encodeURIComponent(invitation.InvitationId), 'DELETE').then(function () {
+            setInvitationStatus(page, '邀请码已撤销。', false);
+            return loadInvitations(page);
+        }).catch(function (error) {
+            setInvitationStatus(page, '邀请码撤销失败：' + errorMessage(error), true);
+        }).then(function () {
+            setButtonBusy(button, false);
+        });
+    }
+
+    function invitationAcceptMessage(status) {
+        return {
+            accepted: '邀请已接受，房间已创建，请与对方打开同一视频。',
+            invalid_or_expired: '邀请码无效或已过期，请向对方索取新邀请码。',
+            creator_cannot_accept: '不能接受自己创建的邀请码。',
+            rate_limited: '尝试次数过多，请稍后再试。',
+            room_unavailable: '暂时无法创建房间，请稍后重试。'
+        }[status] || '邀请码未能接受，请稍后重试。';
+    }
+
+    function acceptInvitation(page) {
+        var input = page.querySelector('#wtInvitationAcceptCode');
+        var button = page.querySelector('#wtAcceptInvitation');
+        var code = input ? input.value.trim() : '';
+        if (!code) {
+            setInvitationStatus(page, '请输入邀请码。', true);
+            if (input) {
+                input.focus();
+            }
+            return;
+        }
+        setButtonBusy(button, true, '接受中…');
+        setInvitationStatus(page, '正在接受邀请…', false);
+        apiSend('WatchTogether/Invitations/' + encodeURIComponent(code) + '/Accept', 'POST').then(function (result) {
+            result = result || {};
+            setInvitationStatus(page, invitationAcceptMessage(result.Status), result.Status !== 'accepted');
+            if (result.Status === 'accepted') {
+                if (input) {
+                    input.value = '';
+                }
+                return Promise.all([loadRooms(page, false), loadInvitations(page)]);
+            }
+            return null;
+        }).catch(function (error) {
+            setInvitationStatus(page, '邀请接受失败：' + errorMessage(error), true);
+        }).then(function () {
+            setButtonBusy(button, false);
+        });
+    }
+
     function setConfigStatus(page, text, isError) {
         var el = page.querySelector('#wtConfigStatus');
         if (el) {
@@ -566,7 +783,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             settingsSection.style.display = isAdmin ? '' : 'none';
         }
         if (roomsHeading) {
-            roomsHeading.textContent = isAdmin ? '2. 房间' : '我的房间';
+            roomsHeading.textContent = isAdmin ? '房间' : '我的房间';
         }
         var helpText = isAdmin ? [
             '创建房间并选择两名参与者。',
@@ -1022,11 +1239,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         button.className = 'button-flat wt-action' + (toneClass ? ' ' + toneClass : '');
         button.dataset.act = action;
         button.dataset.action = action;
-        button.textContent = action === 'delete' ? '删除房间' : action === 'leave' ? '退出房间' : action === 'join' ? '加入房间' : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
+        button.textContent = action === 'delete' ? (room.CanEnd ? '结束房间' : '删除房间') : action === 'leave' ? '暂离房间' : action === 'join' ? '加入房间' : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
         button.title = action === 'delete'
-            ? '删除这个房间；只删除同步关系，不删除媒体'
+            ? (room.CanEnd ? '结束房间会解除双方成员关系；只删除同步关系，不删除媒体' : '删除这个房间；只删除同步关系，不删除媒体')
             : action === 'leave'
-                ? '退出后将尝试暂停仍在房间的一方'
+                ? '暂离只退出同步状态，不解除成员关系；将尝试暂停仍在房间的一方'
                 : action === 'join'
                     ? '加入后需要与另一位参与者打开同一视频'
                     : action === 'diagnostics'
@@ -1146,7 +1363,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
             var membershipLine = document.createElement('div');
             membershipLine.className = 'fieldDescription wt-roomMeta wt-roomMembership';
-            membershipLine.textContent = '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已退出');
+            membershipLine.textContent = '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
+                '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。';
             card.appendChild(membershipLine);
 
             var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
@@ -1169,6 +1387,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 ['pause', 'resume', 'resync', 'delete'].forEach(function (action) {
                     actions.appendChild(createActionButton(page, room, action));
                 });
+            } else if (room.CanEnd) {
+                actions.appendChild(createActionButton(page, room, 'delete'));
             }
             card.appendChild(actions);
             card.appendChild(createDiagnosticPanel(page, room));
@@ -1309,7 +1529,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function deleteRoom(page, room, button) {
         var roomName = room.Name || '未命名房间';
-        if (!window.confirm('确认删除“' + roomName + '”吗？这只删除同步关系，不删除媒体。')) {
+        var ending = room.CanEnd === true;
+        if (!window.confirm((ending ? '确认结束“' : '确认删除“') + roomName + '”吗？' +
+            (ending ? '结束房间会解除双方成员关系，只删除同步关系，不删除媒体。' : '这只删除同步关系，不删除媒体。'))) {
             return;
         }
 
@@ -1322,7 +1544,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     throw new Error('房间不存在或已删除');
                 }
                 clearRoomFeedback(page, room.RoomId);
-                setTransientStatus(page, '房间“' + roomName + '”已删除；只移除同步关系，媒体未删除。', false);
+                setTransientStatus(page, ending
+                    ? '房间“' + roomName + '”已结束；双方成员关系已解除，媒体未删除。'
+                    : '房间“' + roomName + '”已删除；只移除同步关系，媒体未删除。', false);
                 return loadRooms(page, false);
             })
             .catch(function (err) {
@@ -1335,12 +1559,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function membership(page, room, action, button) {
-        if (action === 'leave' && !window.confirm('退出“' + (room.Name || '未命名房间') + '”吗？将尝试暂停仍在房间的一方。')) {
+        if (action === 'leave' && !window.confirm('暂离“' + (room.Name || '未命名房间') + '”吗？暂离不会解除成员关系，并将尝试暂停仍在房间的一方。')) {
             return;
         }
         setRoomBusy(page, room.RoomId, true);
         clearRoomFeedback(page, room.RoomId);
-        roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '退出中…', false, true);
+        roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '暂离中…', false, true);
         renderRooms(page, page._wtRooms || []);
         apiSend('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/' + (action === 'join' ? 'Join' : 'Leave'), 'POST')
             .then(function (result) {
@@ -1352,7 +1576,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 return loadRooms(page, false);
             })
             .catch(function (err) {
-                roomFeedback(page, room.RoomId, (action === 'join' ? '加入' : '退出') + '失败：' + errorMessage(err), true, true);
+                roomFeedback(page, room.RoomId, (action === 'join' ? '加入' : '暂离') + '失败：' + errorMessage(err), true, true);
             })
             .then(function () {
                 setRoomBusy(page, room.RoomId, false);
@@ -1365,12 +1589,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var succeeded = Number(result && result.PauseSucceeded) || 0;
         var failed = Number(result && result.PauseFailed) || 0;
         if (failed > 0) {
-            return '已退出房间，但仍在房间的一方暂停失败，请检查客户端。';
+            return '已暂离房间，但仍在房间的一方暂停失败，请检查客户端；成员关系仍保留。';
         }
         if (attempted > 0 && succeeded === attempted) {
-            return '已退出房间，仍在房间的一方已暂停。';
+            return '已暂离房间，仍在房间的一方已暂停；成员关系仍保留。';
         }
-        return '已退出房间，自动同步已停止。';
+        return '已暂离房间，自动同步已停止；成员关系仍保留。';
     }
 
     function createRoom(page) {
@@ -1451,6 +1675,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         dom.addEventListener(page.querySelector('#wtCreate'), 'click', function () {
             createRoom(page);
         });
+        dom.addEventListener(page.querySelector('#wtCreateInvitation'), 'click', function () {
+            createInvitation(page);
+        });
+        dom.addEventListener(page.querySelector('#wtAcceptInvitation'), 'click', function () {
+            acceptInvitation(page);
+        });
+        dom.addEventListener(page.querySelector('#wtCopyInvitationCode'), 'click', function (event) {
+            copyInvitationCode(page, event.currentTarget);
+        });
         dom.addEventListener(page.querySelector('#wtRefresh'), 'click', function () {
             clearAllRoomFeedback(page);
             loadRooms(page, true);
@@ -1490,6 +1723,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }).then(function () {
             return loadRooms(page, true);
         }).then(function () {
+            return loadInvitations(page);
+        }).then(function () {
             return loadPluginInfo(page);
         }).then(function () {
             loading.hide();
@@ -1500,6 +1735,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         clearInterval(page._wtTimer);
         page._wtTimer = setInterval(function () {
             loadRooms(page, false);
+            loadInvitations(page);
         }, 5000);
     };
 
