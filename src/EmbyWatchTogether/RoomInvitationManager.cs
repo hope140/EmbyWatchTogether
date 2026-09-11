@@ -21,6 +21,8 @@ namespace Emby.Plugins.WatchTogether
         public const string RateLimitedStatus = "rate_limited";
         public const string CreatorCannotAcceptStatus = "creator_cannot_accept";
         public const string RoomUnavailableStatus = "room_unavailable";
+        public const string CreatorAlreadyInRoomStatus = "creator_already_in_room";
+        public const string InvitationUnavailableStatus = "invitation_unavailable";
 
         private readonly object _lock = new object();
         private readonly Dictionary<string, RoomInvitation> _invitations =

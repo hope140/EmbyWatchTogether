@@ -133,7 +133,7 @@ namespace Emby.Plugins.WatchTogether
                     CurrentUserJoined = r.IsJoined(currentUserId),
                     IsAdmin = admin,
                     IsSelfService = r.IsSelfService,
-                    CanEnd = admin || (r.IsSelfService && string.Equals(r.CreatorUserId, currentUserId, StringComparison.OrdinalIgnoreCase)),
+                    CanEnd = admin || r.HasParticipant(currentUserId),
                     CreatedAtUtc = r.CreatedAtUtc,
                 };
             }).Where(x => x != null).ToList();
@@ -173,10 +173,9 @@ namespace Emby.Plugins.WatchTogether
         {
             var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
             var room = plugin.Rooms.GetRoom(request.Id);
-            if (!IsAdmin() && (room == null || !room.IsSelfService ||
-                !string.Equals(room.CreatorUserId, CurrentUserId(), StringComparison.OrdinalIgnoreCase)))
+            if (!IsAdmin() && (room == null || !room.HasParticipant(CurrentUserId())))
             {
-                throw new UnauthorizedAccessException("room owner required");
+                throw new UnauthorizedAccessException("room participant required");
             }
             return new { Deleted = plugin.Rooms.DeleteRoom(request.Id) };
         }
@@ -190,7 +189,12 @@ namespace Emby.Plugins.WatchTogether
             }
             if (plugin.Rooms.IsUserInAnyRoom(CurrentUserId()))
             {
-                throw new InvalidOperationException("creator already belongs to a room");
+                return new
+                {
+                    Created = false,
+                    Status = RoomInvitationManager.CreatorAlreadyInRoomStatus,
+                    Reason = RoomInvitationManager.CreatorAlreadyInRoomStatus,
+                };
             }
             try
             {
@@ -202,11 +206,18 @@ namespace Emby.Plugins.WatchTogether
                     Name = invitation.Name,
                     CreatedAtUtc = invitation.CreatedAtUtc,
                     ExpiresAtUtc = invitation.ExpiresAtUtc,
+                    Created = true,
+                    Status = "created",
                 };
             }
             catch (InvalidOperationException)
             {
-                throw new ServiceUnavailableException("invitation_unavailable");
+                return new
+                {
+                    Created = false,
+                    Status = RoomInvitationManager.InvitationUnavailableStatus,
+                    Reason = RoomInvitationManager.InvitationUnavailableStatus,
+                };
             }
         }
 
@@ -337,7 +348,7 @@ namespace Emby.Plugins.WatchTogether
                 ParticipantUserIds = room.ParticipantUserIds,
                 JoinedParticipantUserIds = room.JoinedParticipantUserIds,
                 IsSelfService = room.IsSelfService,
-                CanEnd = admin || (room.IsSelfService && string.Equals(room.CreatorUserId, CurrentUserId(), StringComparison.OrdinalIgnoreCase)),
+                CanEnd = admin || room.HasParticipant(CurrentUserId()),
                 Participants = BuildParticipantSummaries(room),
                 CurrentUserJoined = room.IsJoined(CurrentUserId()),
                 Sessions = snapshots.Values.Select(s => new

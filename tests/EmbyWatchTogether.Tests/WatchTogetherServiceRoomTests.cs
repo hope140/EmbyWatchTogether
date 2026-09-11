@@ -127,19 +127,41 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             WithPlugin(plugin, () =>
             {
-                service.Post(new CreateInvitationRequest { Name = "one" });
+                var created = service.Post(new CreateInvitationRequest { Name = "one" });
+                Assert.True(GetBoolean(created, "Created"));
+                Assert.Equal("created", GetString(created, "Status"));
                 service.Post(new CreateInvitationRequest { Name = "two" });
                 service.Post(new CreateInvitationRequest { Name = "three" });
-                var exception = Assert.Throws<ServiceUnavailableException>(() =>
-                    service.Post(new CreateInvitationRequest { Name = "four" }));
-                Assert.Equal("invitation_unavailable", exception.Message);
-                Assert.DoesNotContain("limit", exception.Message, StringComparison.OrdinalIgnoreCase);
+                var response = service.Post(new CreateInvitationRequest { Name = "four" });
+                Assert.False(GetBoolean(response, "Created"));
+                Assert.Equal(RoomInvitationManager.InvitationUnavailableStatus, GetString(response, "Status"));
+                Assert.Equal(RoomInvitationManager.InvitationUnavailableStatus, GetString(response, "Reason"));
+                Assert.DoesNotContain("limit", GetString(response, "Reason"), StringComparison.OrdinalIgnoreCase);
                 return null;
             });
         }
 
         [Fact]
-        public void DeleteSelfServiceRoom_AllowsCreatorAndRejectsOtherMember()
+        public void CreateInvitation_WhenCreatorAlreadyInRoom_ReturnsStableResult()
+        {
+            var creator = Guid.NewGuid().ToString("N");
+            var member = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            manager.CreateSelfServiceRoom("server-1", "", "room", creator, member);
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            SetPluginProperty(plugin, "Invitations", new RoomInvitationManager(() => DateTimeOffset.UtcNow, () => Guid.NewGuid().ToString("N")));
+            var service = NewService(creator);
+
+            var response = WithPlugin(plugin, () => service.Post(new CreateInvitationRequest { Name = "new room" }));
+
+            Assert.False(GetBoolean(response, "Created"));
+            Assert.Equal(RoomInvitationManager.CreatorAlreadyInRoomStatus, GetString(response, "Status"));
+            Assert.Equal(RoomInvitationManager.CreatorAlreadyInRoomStatus, GetString(response, "Reason"));
+        }
+
+        [Fact]
+        public void DeleteRoom_AllowsAnyParticipantAndExposesCanEnd()
         {
             var creator = Guid.NewGuid().ToString("N");
             var member = Guid.NewGuid().ToString("N");
@@ -149,11 +171,26 @@ namespace Emby.Plugins.WatchTogether.Tests
             var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
 
             var otherService = NewService(member);
-            Assert.Throws<UnauthorizedAccessException>(() =>
-                WithPlugin(plugin, () => otherService.Delete(new DeleteRoomRequest { Id = room.Id })));
+            var selfServiceSummary = GetRoomResponse(
+                WithPlugin(plugin, () => otherService.Get(new GetRoomsRequest())),
+                room.Id);
+            Assert.True(GetBoolean(selfServiceSummary, "CanEnd"));
+            Assert.True(GetBoolean(
+                WithPlugin(plugin, () => otherService.Get(new GetRoomStateRequest { Id = room.Id })),
+                "CanEnd"));
+            var response = WithPlugin(plugin, () => otherService.Delete(new DeleteRoomRequest { Id = room.Id }));
+            Assert.True(GetBoolean(response, "Deleted"));
 
-            var creatorService = NewService(creator);
-            var response = WithPlugin(plugin, () => creatorService.Delete(new DeleteRoomRequest { Id = room.Id }));
+            var legacyRoom = manager.CreateRoom("server-1", "", "legacy", creator,
+                new[] { creator, member }, creator);
+            var legacySummary = GetRoomResponse(
+                WithPlugin(plugin, () => otherService.Get(new GetRoomsRequest())),
+                legacyRoom.Id);
+            Assert.True(GetBoolean(legacySummary, "CanEnd"));
+            Assert.True(GetBoolean(
+                WithPlugin(plugin, () => otherService.Get(new GetRoomStateRequest { Id = legacyRoom.Id })),
+                "CanEnd"));
+            response = WithPlugin(plugin, () => otherService.Delete(new DeleteRoomRequest { Id = legacyRoom.Id }));
             Assert.True(GetBoolean(response, "Deleted"));
         }
 
