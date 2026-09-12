@@ -66,10 +66,10 @@ namespace Emby.Plugins.WatchTogether
         // failure to loop forever.
         public const double BarrierSeekRetryBudgetSeconds = 15.0;
 
-        // Waiting-state Pause failures are retried at a bounded cadence. The
-        // attempt count includes the initial issue, so a continuously failing
-        // session receives at most three Pause calls for one identity/ability
-        // condition.
+        // Waiting-state Pause attempts are retried at a bounded cadence. The
+        // count includes the initial issue and later re-pauses after a client
+        // resumes, so one identity/ability condition receives at most three
+        // Pause calls.
         public const double WaitingPauseRetryDelaySeconds = 3.0;
 
         public const int MaxWaitingPauseAttempts = 3;

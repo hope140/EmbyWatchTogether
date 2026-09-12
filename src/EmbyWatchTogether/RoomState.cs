@@ -96,9 +96,9 @@ namespace Emby.Plugins.WatchTogether
     }
 
     /// <summary>
-    /// Bounded retry state for a Pause issued while a room is Waiting. The
-    /// identity and capability key prevent a failed client from suppressing a
-    /// later session or a changed command-capability condition.
+    /// Bounded attempt state for Pauses issued while a room is Waiting. The
+    /// identity and capability key keep a later session or changed
+    /// command-capability condition from inheriting the previous limit.
     /// </summary>
     public sealed class WaitingPauseRetryState
     {

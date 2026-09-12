@@ -1468,6 +1468,132 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void DifferentItems_WaitingPauseAcknowledgementUsesEachParticipantIdentity()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1"),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2"));
+
+            engine.PollOnce(_clock.Now);
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(2, _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.Equal(2, runtime.Pending.Count);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 0, itemId: "i1"),
+                Snapshot("s2", "u2", paused: true, position: 0, itemId: "i2"));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Empty(runtime.Pending);
+            Assert.Equal(1, runtime.WaitingPauseRetries["u1"].Attempts);
+            Assert.Equal(1, runtime.WaitingPauseRetries["u2"].Attempts);
+            Assert.DoesNotContain(_issuer.Issued, i => i.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void DifferentItems_WaitingPauseAfterAcknowledgement_IsBoundedAcrossUnpauses()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1"),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2"));
+
+            engine.PollOnce(_clock.Now);
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            for (var attempt = 1; attempt < SyncConstants.MaxWaitingPauseAttempts; attempt++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: true, position: 0, itemId: "i1"),
+                    Snapshot("s2", "u2", paused: true, position: 0, itemId: "i2"));
+                _clock.Advance(1);
+                engine.PollOnce(_clock.Now);
+
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1"),
+                    Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2"));
+                _clock.Advance(SyncConstants.WaitingPauseRetryDelaySeconds);
+                engine.PollOnce(_clock.Now);
+            }
+
+            Assert.Equal(
+                2 * SyncConstants.MaxWaitingPauseAttempts,
+                _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.All(runtime.WaitingPauseRetries.Values, retry =>
+                Assert.True(retry.Exhausted));
+            Assert.Equal("waiting pause retry limit reached", runtime.Error);
+
+            _clock.Advance(100);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(
+                2 * SyncConstants.MaxWaitingPauseAttempts,
+                _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+
+            SetCandidates(
+                Snapshot("s1-reconnected", "u1", paused: false, position: 0, itemId: "i1",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)));
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(
+                2 * SyncConstants.MaxWaitingPauseAttempts + 1,
+                _issuer.Issued.Count(i => i.command == RemoteCommands.Pause));
+            Assert.False(runtime.WaitingPauseRetries["u1"].Exhausted);
+            Assert.True(runtime.WaitingPauseRetries["u2"].Exhausted);
+            Assert.Equal(1, runtime.WaitingPauseRetries["u1"].Attempts);
+        }
+
+        [Fact]
+        public void WaitingPauseRetryLimit_SameItemRecoveryStartsNewBarrier()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            _issuer.FailuresRemaining = 1000;
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1"),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i2"));
+
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.WaitingPauseRetryDelaySeconds);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.WaitingPauseRetryDelaySeconds);
+            engine.PollOnce(_clock.Now);
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal("waiting pause retry limit reached", runtime.Error);
+            Assert.All(runtime.WaitingPauseRetries.Values, retry =>
+                Assert.True(retry.Exhausted));
+
+            _issuer.FailuresRemaining = 0;
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 0, itemId: "i1",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "i1",
+                    lastActivityDateUtc: _clock.Now.AddSeconds(-1)));
+            _clock.Advance(0.1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Null(result.Error);
+            Assert.NotNull(runtime.Barrier);
+            Assert.Equal("i1", runtime.Barrier.ItemId);
+            Assert.Empty(runtime.WaitingPauseRetries);
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
         public void ParticipantLeavingBeforePlaybackStarts_DoesNotStickStoppedError()
         {
             var room = CreateRoom();
