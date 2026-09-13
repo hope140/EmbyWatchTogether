@@ -127,7 +127,7 @@ namespace Emby.Plugins.WatchTogether
                     Name = "WatchTogetherDiagnostics",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
-                    EnableInMainMenu = true,
+                    EnableInMainMenu = false,
                     EnableInUserMenu = true,
                     MenuSection = "server",
                     MenuIcon = "sync",
