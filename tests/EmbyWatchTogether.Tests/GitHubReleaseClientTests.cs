@@ -59,7 +59,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public async Task BetaCheck_SelectsHighestNonDraftPrereleaseAndUsesCanonicalAssets()
+        public async Task BetaCheck_SelectsHighestNonDraftReleaseAndUsesCanonicalAssets()
         {
             using (var fixture = SignedReleaseFixture.Create())
             {
@@ -67,9 +67,9 @@ namespace Emby.Plugins.WatchTogether.Tests
                 var currentTag = fixture.CurrentTag;
                 var releases = new List<GitHubReleaseApiDto>
                 {
-                    CreateApiRelease("v9.0.0", prerelease: false, draft: false),
+                    CreateApiRelease("v1.5.0.1", prerelease: false, draft: false),
                     CreateApiRelease("v8.0.0", prerelease: true, draft: true),
-                    CreateApiRelease(currentTag, prerelease: true, draft: false),
+                    CreateApiRelease(currentTag, prerelease: false, draft: false),
                     CreateApiRelease("v0.0.0", prerelease: true, draft: false),
                 };
                 var client = CreateBetaClient(fixture, releases, out var requestedApiUrls);
@@ -77,7 +77,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 var verified = await client.CheckForLatestAsync(CancellationToken.None);
 
                 Assert.Equal(currentTag, verified.Release.TagName);
-                Assert.True(verified.Release.Prerelease);
+                Assert.False(verified.Release.Prerelease);
                 Assert.Equal(new[] { GitHubReleaseClient.ReleasesApiUrl }, requestedApiUrls);
                 Assert.Equal(
                     new[]

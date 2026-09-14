@@ -56,7 +56,7 @@ namespace Emby.Plugins.WatchTogether
         public string Key => TaskKey;
 
         public string Description =>
-            "按设置的 stable/beta 更新通道检查 GitHub；beta 为预发布版，发现新版本时自动安装，重启 Emby 后生效。Emby 计划任务开关和计划仍是控制入口。";
+            "按设置的 stable/beta 更新通道检查 GitHub；beta 可接收 stable 与 prerelease 中的更高版本，发现新版本时自动安装，重启 Emby 后生效。Emby 计划任务开关和计划仍是控制入口。";
 
         public string Category => "Watch Together";
 
