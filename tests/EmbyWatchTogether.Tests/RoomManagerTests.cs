@@ -498,19 +498,30 @@ namespace Emby.Plugins.WatchTogether.Tests
                 ["u2"] = TestSnapshots.Offline("u2"),
             };
 
-            var actionTask = Task.Run(() => manager.Action(
-                room.Id,
-                "pause",
-                snapshots,
-                issuer,
-                DateTimeOffset.UtcNow));
+            var actionTask = Task.Factory.StartNew(
+                () => manager.Action(
+                    room.Id,
+                    "pause",
+                    snapshots,
+                    issuer,
+                    DateTimeOffset.UtcNow),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
 
             try
             {
-                await issuer.EnteredTask.WaitAsync(TimeSpan.FromSeconds(2));
+                // Use a dedicated worker so a busy CI thread pool cannot make
+                // reaching the issuer look like a lock failure. The signal is
+                // still emitted from inside Command I/O, before it blocks.
+                await issuer.EnteredTask.WaitAsync(TimeSpan.FromSeconds(10));
 
-                var getRoomTask = Task.Run(() => manager.GetRoom(room.Id));
-                Assert.Same(room, await getRoomTask.WaitAsync(TimeSpan.FromSeconds(2)));
+                var getRoomTask = Task.Factory.StartNew(
+                    () => manager.GetRoom(room.Id),
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
+                Assert.Same(room, await getRoomTask.WaitAsync(TimeSpan.FromSeconds(10)));
             }
             finally
             {
