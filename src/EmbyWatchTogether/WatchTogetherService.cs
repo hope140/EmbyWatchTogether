@@ -108,6 +108,8 @@ namespace Emby.Plugins.WatchTogether
     [Authenticated]
     public class WatchTogetherService : BaseApiService, IService
     {
+        internal Plugin RuntimePlugin { get; set; }
+
         public object Get(GetRoomsRequest request)
         {
             var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
@@ -300,7 +302,10 @@ namespace Emby.Plugins.WatchTogether
             }
             else if ((request.Action ?? string.Empty).Equals("resync", StringComparison.OrdinalIgnoreCase))
             {
-                NotifyAdminResync(plugin, request.Id);
+                if (result.Error == null)
+                {
+                    NotifyAdminResync(plugin, request.Id);
+                }
             }
             return new
             {
@@ -573,7 +578,8 @@ namespace Emby.Plugins.WatchTogether
             int sent = 0;
             int failed = 0;
             int skipped = 0;
-            Room room;
+            var messages = new List<DisplayMessageTarget>();
+            string roomId;
             using (var access = plugin.Rooms.TryEnterRoom(request.Id))
             {
                 if (access == null)
@@ -581,7 +587,8 @@ namespace Emby.Plugins.WatchTogether
                     throw new KeyNotFoundException("room not found");
                 }
 
-                room = access.Room;
+                var room = access.Room;
+                roomId = room.Id;
                 if (plugin.Bridge == null)
                 {
                     throw new InvalidOperationException("session bridge is not initialized");
@@ -620,28 +627,32 @@ namespace Emby.Plugins.WatchTogether
                         break;
                     }
 
-                    try
-                    {
-                        plugin.Bridge.SendDisplayMessageAsync(
-                                room.AdminUserId,
-                                snapshot.SessionId,
-                                "Watch Together",
-                                request.Text ?? string.Empty,
-                                timeoutMs: 3000,
-                                cancellationToken: CancellationToken.None)
-                            .GetAwaiter().GetResult();
-                        sent++;
-                    }
-                    catch
-                    {
-                        // A single display-message failure must not prevent the
-                        // remaining current targets from receiving the message.
-                        failed++;
-                    }
+                    messages.Add(new DisplayMessageTarget(
+                        room.Id,
+                        room.AdminUserId,
+                        userId,
+                        snapshot,
+                        "Watch Together",
+                        request.Text ?? string.Empty,
+                        3000));
                 }
             }
 
-            return new { RoomId = room.Id, Sent = sent, Failed = failed, Skipped = skipped };
+            foreach (var message in messages)
+            {
+                if (TrySendDisplayMessage(plugin, message))
+                {
+                    sent++;
+                }
+                else
+                {
+                    // A single display-message failure must not prevent the
+                    // remaining current targets from receiving the message.
+                    failed++;
+                }
+            }
+
+            return new { RoomId = roomId, Sent = sent, Failed = failed, Skipped = skipped };
         }
 
         public object Get(GetUsersRequest request)
@@ -688,6 +699,7 @@ namespace Emby.Plugins.WatchTogether
                 return;
             }
 
+            var messages = new List<DisplayMessageTarget>();
             using (var access = plugin.Rooms.TryEnterRoom(roomId))
             {
                 if (access == null)
@@ -716,22 +728,27 @@ namespace Emby.Plugins.WatchTogether
                     {
                         continue;
                     }
-                    try
-                    {
-                        plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "一起观看", text, 3000, CancellationToken.None)
-                            .GetAwaiter().GetResult();
-                    }
-                    catch
-                    {
-                        // Advisory notification failures must not affect membership state.
-                    }
+                    messages.Add(new DisplayMessageTarget(
+                        room.Id,
+                        room.AdminUserId,
+                        userId,
+                        snapshot,
+                        "一起观看",
+                        text,
+                        3000));
                 }
+            }
+
+            foreach (var message in messages)
+            {
+                TrySendDisplayMessage(plugin, message);
             }
         }
 
         private static void NotifyAdminPlaybackAction(Plugin plugin, RoomActionResult result, string action, IReadOnlyDictionary<string, SessionSnapshot> actionSnapshots)
         {
             if (!IsSyncNotificationsEnabled(plugin) || plugin.Bridge == null || result?.Users == null) return;
+            var messages = new List<DisplayMessageTarget>();
             using (var access = plugin.Rooms.TryEnterRoom(result.RoomId))
             {
                 if (access == null) return;
@@ -755,15 +772,58 @@ namespace Emby.Plugins.WatchTogether
                     {
                         continue;
                     }
-                    try
-                    {
-                        plugin.Bridge.SendDisplayMessageAsync(room.AdminUserId, snapshot.SessionId, "一起观看", text, 3000, CancellationToken.None).GetAwaiter().GetResult();
-                    }
-                    catch
-                    {
-                        // Advisory notification failures must not affect action state.
-                    }
+                    messages.Add(new DisplayMessageTarget(
+                        room.Id,
+                        room.AdminUserId,
+                        userId,
+                        snapshot,
+                        "一起观看",
+                        text,
+                        3000));
                 }
+            }
+
+            foreach (var message in messages)
+            {
+                TrySendDisplayMessage(plugin, message);
+            }
+        }
+
+        private static bool TrySendDisplayMessage(Plugin plugin, DisplayMessageTarget message)
+        {
+            try
+            {
+                var messageIssuer = plugin.Issuer as IMessageIssuer;
+                if (messageIssuer != null)
+                {
+                    return messageIssuer.TryIssueMessage(
+                        message.RoomId,
+                        message.ControllingUserId,
+                        message.UserId,
+                        message.Snapshot,
+                        message.Header,
+                        message.Text,
+                        message.TimeoutMs,
+                        DateTimeOffset.UtcNow,
+                        out _);
+                }
+
+                using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                {
+                    plugin.Bridge.SendDisplayMessageAsync(
+                            message.ControllingUserId,
+                            message.Snapshot.SessionId,
+                            message.Header,
+                            message.Text,
+                            message.TimeoutMs,
+                            timeout.Token)
+                        .GetAwaiter().GetResult();
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -775,6 +835,41 @@ namespace Emby.Plugins.WatchTogether
         private static void NotifyParticipantResync(Plugin plugin, string roomId, string requesterUserId)
         {
             NotifyMembershipChange(plugin, roomId, requesterUserId, "参与者已请求重新同步，请稍候");
+        }
+
+        private sealed class DisplayMessageTarget
+        {
+            public DisplayMessageTarget(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string header,
+                string text,
+                int timeoutMs)
+            {
+                RoomId = roomId;
+                ControllingUserId = controllingUserId;
+                UserId = userId;
+                Snapshot = snapshot;
+                Header = header;
+                Text = text;
+                TimeoutMs = timeoutMs;
+            }
+
+            public string RoomId { get; }
+
+            public string ControllingUserId { get; }
+
+            public string UserId { get; }
+
+            public SessionSnapshot Snapshot { get; }
+
+            public string Header { get; }
+
+            public string Text { get; }
+
+            public int TimeoutMs { get; }
         }
 
         private static bool IsSyncNotificationsEnabled(Plugin plugin)
@@ -826,7 +921,7 @@ namespace Emby.Plugins.WatchTogether
                 string.Equals(roomServerId, currentServerId, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static Plugin RequireRuntime(bool requireBridge, bool requireIssuer, bool requireInvitations = false)
+        private Plugin RequireRuntime(bool requireBridge, bool requireIssuer, bool requireInvitations = false)
         {
             var plugin = RequirePlugin();
             if (plugin.Rooms == null || (requireInvitations && plugin.Invitations == null) ||
@@ -840,9 +935,9 @@ namespace Emby.Plugins.WatchTogether
             return plugin;
         }
 
-        private static Plugin RequirePlugin()
+        private Plugin RequirePlugin()
         {
-            return Plugin.Instance ?? throw new ServiceUnavailableException(
+            return RuntimePlugin ?? Plugin.Instance ?? throw new ServiceUnavailableException(
                 "Watch Together is still initializing. Please retry shortly.");
         }
 

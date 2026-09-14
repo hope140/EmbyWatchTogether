@@ -13,8 +13,8 @@ MAJOR.MINOR.PATCH.REVISION
 项目文件中的版本号不带 `v`，Git 发布 tag 在前面加 `v`：
 
 ```text
-项目版本：1.5.0.0
-Git tag：v1.5.0.0
+项目版本：1.5.0.3
+Git tag：v1.5.0.3
 ```
 
 发布时必须同时满足以下条件：
@@ -48,7 +48,7 @@ Git tag：v1.5.0.0
 
 ## 当前版本和后续示例
 
-当前项目版本为 `1.5.0.0`，对应 stable 正式 tag `v1.5.0.0`；它以 stable `v1.4.5.0` 为兼容基线，纳入阶段 C 自助邀请与房间生命周期能力，前置 beta 版本为 `v1.4.5.1` 和 `v1.4.5.2`。一个完整的 beta 到 stable 示例是 `1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）；正式版必须至少改变 MAJOR、MINOR、PATCH 之一。`1.3.0.6` 及更早的 `1.3.0.x` 保留为历史版本，不因本次修正而覆盖或重命名；历史版本整理不移动、重命名或重建已有 tag。插件默认选择 `stable`，管理员可在插件配置页选择 `beta`，更新任务按所选通道获取并自动安装；`stable` 仍只读取 `releases/latest`。
+当前项目版本为 `1.5.0.3`，对应当前 beta 候选 tag `v1.5.0.3`；它以 stable `v1.5.0.0` 为兼容基线，延续阶段 C 自助邀请与房间生命周期能力。已发布的 beta 历史版本为 `v1.5.0.1` 和 `v1.5.0.2`。一个完整的 beta 到 stable 示例是 `1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）；正式版必须至少改变 MAJOR、MINOR、PATCH 之一。`1.3.0.6` 及更早的 `1.3.0.x` 保留为历史版本，不因本次修正而覆盖或重命名；历史版本整理不移动、重命名或重建已有 tag。插件默认选择 `stable`，管理员可在插件配置页选择 `beta`，更新任务按所选通道获取并自动安装；`stable` 仍只读取 `releases/latest`。
 
 ## 发布通道
 
@@ -56,7 +56,7 @@ Git tag：v1.5.0.0
 - `beta` 只用于 `beta` 测试发布；`beta` workflow 创建 GitHub prerelease。
 - 手动运行 workflow 时必须选择 `channel` 并提供规范数字 tag。workflow 会拒绝未知 channel，以及 `stable` 从非 `main` 或 `beta` 从非 `beta` 触发的请求。
 - channel 只改变 Release 通道标记，不改变 tag、manifest 的 `tag`/`version` 约束或四个固定签名资产名称；不得使用 `-beta` 等版本后缀。
-- GitHub prerelease 不会成为 `releases/latest`。`stable` 更新器继续只读取 `releases/latest`；管理员选择 `beta` 后，更新任务通过 Releases API 获取并自动安装对应的预发布版本。beta 不能据此声称已完成真实客户端验收，任务开关和计划仍由 Emby 控制。
+- GitHub prerelease 不会成为 `releases/latest`。`stable` 更新器继续只读取 `releases/latest`；管理员选择 `beta` 后，更新任务通过 Releases API 在非 draft stable 与 prerelease 中选择最高规范版本并自动安装。beta 不能据此声称已完成真实客户端验收，任务开关和计划仍由 Emby 控制。
 
 以当前版本为基准：
 
@@ -78,6 +78,9 @@ Git tag：v1.5.0.0
 - 上一阶段 C 测试版：`1.4.5.1` / `v1.4.5.1`；
 - 上一阶段 C 修订版：`1.4.5.2` / `v1.4.5.2`；
 - 当前阶段 C 稳定版：`1.5.0.0` / `v1.5.0.0`；
+- 已发布 beta：`1.5.0.1` / `v1.5.0.1`；
+- 已发布 beta：`1.5.0.2` / `v1.5.0.2`；
+- 当前 beta 候选：`1.5.0.3` / `v1.5.0.3`；
 - 不兼容变更：`2.0.0.0` / `v2.0.0.0`。
 
 ## 发布检查

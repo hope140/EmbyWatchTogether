@@ -398,8 +398,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             engine.PollOnce(_clock.Now);
             Assert.Contains(warnings, warning => warning.Contains("multiple-session selection"));
-            Assert.Contains(warnings, warning => warning.Contains("eligibilityReason=RemoteControlUnsupportedOrMismatch"));
-            Assert.Contains(warnings, warning => warning.Contains("eligibility failure reason="));
+            Assert.Contains(warnings, warning => warning.Contains("selected=[u1=sessio...er-XYZ/i1"));
+            Assert.Contains(warnings, warning => warning.Contains("eligibilityReason=None"));
             Assert.Contains(warnings, warning => warning.Contains("reportedSupportsRemoteControl=False"));
             Assert.Contains(warnings, warning => warning.Contains("effectiveSupportsRemoteControl=True"));
             Assert.Contains(warnings, warning => warning.Contains("supportedCommandCount=3"));
@@ -2182,6 +2182,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
                     supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s1-newer", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond,
+                    lastActivityDateUtc: _clock.Now),
                 Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
@@ -2190,6 +2192,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 57 * SessionSnapshot.TicksPerSecond,
                     supportsRemoteControl: false, capabilities: effectiveCapabilities),
+                Snapshot("s1-newer", "u1", paused: false, position: 57 * SessionSnapshot.TicksPerSecond,
+                    lastActivityDateUtc: _clock.Now),
                 Snapshot("s2", "u2", paused: false, position: 57 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(6);
             Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
@@ -3246,6 +3250,30 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(room.Id).State);
             Assert.True(_issuer.Issued.Count > issuedBefore);
+        }
+
+        [Fact]
+        public void ManualActionFailure_DoesNotBlockNextEligibleBarrier()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = Snapshot("s1", "u1", paused: false, position: 0),
+                ["u2"] = Snapshot("s2", "u2", paused: false, position: 0),
+            };
+            _issuer.FailuresRemaining = 2;
+
+            var manual = _rooms.Action(room.Id, "pause", snapshots, _issuer, _clock.Now);
+
+            Assert.Contains("Pause command failed", manual.Error);
+            Assert.Null(_rooms.GetRuntime(room.Id).Error);
+
+            _issuer.FailuresRemaining = 0;
+            SetCandidates(snapshots["u1"], snapshots["u2"]);
+            var poll = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, poll.State);
         }
 
         [Fact]

@@ -460,9 +460,97 @@ namespace Emby.Plugins.WatchTogether.Tests
             using var bridge = new SessionBridge(sm.Object);
             var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
             var service = NewService(u1, true);
-            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" }));
+            SetRuntimePlugin(service, plugin);
+            var response = service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" });
+            Assert.Null(GetString(response, "Error"));
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Header == "一起观看" && m.Text == "管理员已发起重新同步，请稍候" && m.TimeoutMs == 3000), It.IsAny<CancellationToken>()), Times.Once);
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Theory]
+        [InlineData("barrier")]
+        [InlineData("pending")]
+        public void Control_Resync_ConflictDoesNotNotify(string conflict)
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var runtime = manager.GetRuntime(room.Id);
+            var originalState = conflict == "barrier" ? RoomState.Barrier : RoomState.Waiting;
+            runtime.State = originalState;
+            BarrierState originalBarrier = null;
+            PendingCommand originalPending = null;
+            if (conflict == "barrier")
+            {
+                originalBarrier = new BarrierState { Stage = BarrierStage.Seek, AnchorUserId = u1 };
+                runtime.Barrier = originalBarrier;
+            }
+            else
+            {
+                originalPending = new PendingCommand { UserId = u1, Command = RemoteCommands.Pause };
+                runtime.Pending[u1] = originalPending;
+            }
+
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[]
+            {
+                NewSession(sm, "s1", u1, new[] { "DisplayMessage" }),
+                NewSession(sm, "s2", u2, new[] { "DisplayMessage" }),
+            });
+            sm.Setup(s => s.SendMessageCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u1, true);
+            SetRuntimePlugin(service, plugin);
+
+            var response = service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" });
+
+            Assert.Equal("manual action conflicts with active synchronization", GetString(response, "Error"));
+            Assert.Equal(originalState, runtime.State);
+            if (originalBarrier != null)
+            {
+                Assert.Same(originalBarrier, runtime.Barrier);
+            }
+            else
+            {
+                Assert.Same(originalPending, runtime.Pending[u1]);
+            }
+            sm.Verify(s => s.SendMessageCommand(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public void Control_Resync_ServerUnavailableDoesNotNotify()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Watching;
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[]
+            {
+                NewSession(sm, "s1", u1, new[] { "DisplayMessage" }),
+                NewSession(sm, "s2", u2, new[] { "DisplayMessage" }),
+            });
+            sm.Setup(s => s.SendMessageCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-2");
+            var service = NewService(u1, true);
+            SetRuntimePlugin(service, plugin);
+
+            var response = service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" });
+
+            Assert.Equal("room server is unavailable", GetString(response, "Error"));
+            Assert.Equal(RoomState.Watching, runtime.State);
+            sm.Verify(s => s.SendMessageCommand(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [Fact]
@@ -1033,6 +1121,118 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Message_BridgeFallback_UsesCancellableToken()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var otherUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, otherUserId }, primaryUserId);
+
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new[]
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+                NewSession(sessionManager, "session-other", otherUserId),
+            });
+            var capturedToken = CancellationToken.None;
+            sessionManager.Setup(s => s.SendMessageCommand(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((string _, string __, MessageCommand ___, CancellationToken token) =>
+                {
+                    capturedToken = token;
+                    return Task.CompletedTask;
+                });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(primaryUserId, administrator: true);
+            SetRuntimePlugin(service, plugin);
+
+            var response = service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "hello" });
+
+            Assert.Equal(2, GetInt(response, "Sent"));
+            Assert.True(capturedToken.CanBeCanceled);
+        }
+
+        [Fact]
+        public async Task Message_BlockingIssuerDoesNotHoldRoomGate()
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var otherUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, otherUserId }, primaryUserId);
+
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new[]
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+                NewSession(sessionManager, "session-other", otherUserId),
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var issuer = new BlockingMessageIssuer();
+            var plugin = NewPlugin(manager, bridge, issuer, "server-1");
+            var service = NewService(primaryUserId, administrator: true);
+            SetRuntimePlugin(service, plugin);
+
+            var messageTask = Task.Run(() =>
+                service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "hello" }));
+
+            await issuer.EnteredTask.WaitAsync(TimeSpan.FromSeconds(2));
+            var membershipTask = Task.Run(() => manager.SetParticipantJoined(room.Id, otherUserId, false));
+            Assert.True(await membershipTask.WaitAsync(TimeSpan.FromSeconds(2)));
+
+            issuer.Release.Set();
+            var response = await messageTask.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(2, GetInt(response, "Sent"));
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void Message_IssuerFailureDoesNotMutateRuntime(bool throwOnIssue)
+        {
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var otherUserId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "http://emby", "room", "admin-1",
+                new[] { primaryUserId, otherUserId }, primaryUserId);
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Watching;
+            runtime.Error = "existing runtime error";
+            var barrier = new BarrierState { Stage = BarrierStage.Seek, AnchorUserId = primaryUserId };
+            runtime.Barrier = barrier;
+            var pending = new PendingCommand { UserId = primaryUserId, Command = RemoteCommands.Pause };
+            runtime.Pending[primaryUserId] = pending;
+
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new[]
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+                NewSession(sessionManager, "session-other", otherUserId),
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, new FailingMessageIssuer { ThrowOnIssue = throwOnIssue }, "server-1");
+            var service = NewService(primaryUserId, administrator: true);
+            SetRuntimePlugin(service, plugin);
+
+            var response = service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "hello" });
+
+            Assert.Equal(0, GetInt(response, "Sent"));
+            Assert.Equal(2, GetInt(response, "Failed"));
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Equal("existing runtime error", runtime.Error);
+            Assert.Same(barrier, runtime.Barrier);
+            Assert.Same(pending, runtime.Pending[primaryUserId]);
+        }
+
+        [Fact]
         public void Message_FirstTargetFailureDoesNotBlockLaterTargets()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
@@ -1352,7 +1552,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         private static Plugin NewPlugin(
             RoomManager manager,
             SessionBridge bridge,
-            RecordingIssuer issuer,
+            ICommandIssuer issuer,
             string serverId)
         {
 #pragma warning disable SYSLIB0050
@@ -1413,6 +1613,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             typeof(Plugin).GetProperty(
                 name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .SetValue(plugin, value);
+        }
+
+        private static void SetRuntimePlugin(WatchTogetherService service, Plugin plugin)
+        {
+            var property = typeof(WatchTogetherService).GetProperty(
+                "RuntimePlugin", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(property);
+            property.SetValue(service, plugin);
         }
 
         private static void SetPluginConfiguration(Plugin plugin, PluginConfiguration configuration)
@@ -1502,6 +1710,96 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
                 error = Succeed ? null : Error;
                 return Succeed;
+            }
+        }
+
+        private sealed class BlockingMessageIssuer : ICommandIssuer, IMessageIssuer
+        {
+            private readonly TaskCompletionSource<bool> _entered =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            private int _calls;
+
+            public Task EnteredTask => _entered.Task;
+
+            public ManualResetEventSlim Release { get; } = new ManualResetEventSlim(false);
+
+            public bool TryIssue(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string command,
+                long? positionTicks,
+                DateTimeOffset now,
+                out string error)
+            {
+                error = null;
+                return true;
+            }
+
+            public bool TryIssueMessage(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string header,
+                string text,
+                int? timeoutMs,
+                DateTimeOffset now,
+                out string error)
+            {
+                if (Interlocked.Increment(ref _calls) == 1)
+                {
+                    _entered.TrySetResult(true);
+                    if (!Release.Wait(TimeSpan.FromSeconds(5)))
+                    {
+                        error = "message release timed out";
+                        return false;
+                    }
+                }
+
+                error = null;
+                return true;
+            }
+        }
+
+        private sealed class FailingMessageIssuer : ICommandIssuer, IMessageIssuer
+        {
+            public bool ThrowOnIssue { get; set; }
+
+            public bool TryIssue(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string command,
+                long? positionTicks,
+                DateTimeOffset now,
+                out string error)
+            {
+                error = null;
+                return true;
+            }
+
+            public bool TryIssueMessage(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string header,
+                string text,
+                int? timeoutMs,
+                DateTimeOffset now,
+                out string error)
+            {
+                if (ThrowOnIssue)
+                {
+                    throw new InvalidOperationException("private transport detail");
+                }
+
+                error = "message_failed";
+                return false;
             }
         }
     }

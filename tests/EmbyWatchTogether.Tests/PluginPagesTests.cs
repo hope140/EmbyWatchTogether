@@ -78,7 +78,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("wtUpdateChannel", html);
             Assert.Contains("value=\"stable\"", html);
             Assert.Contains("value=\"beta\"", html);
-            Assert.Contains("beta 是预发布版", html);
+            Assert.Contains("beta 可接收 stable 与 prerelease 中的更高版本", html);
             Assert.Contains("aria-live=\"polite\"", html);
             Assert.Contains("wtSaveConfig", html);
             Assert.Contains("wtPluginVersion", html);

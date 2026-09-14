@@ -151,7 +151,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     var room = createRoom?.Invoke(invitation);
                     if (room == null) return Failure(RoomUnavailableStatus, RoomUnavailableStatus);
-                    _invitations.Remove(invitation.Id);
+                    RemoveCreatorInvitations(invitation.CreatorUserId);
                     return new RoomInvitationAcceptResult { Status = "accepted", Room = room };
                 }
                 catch (InvalidOperationException)
@@ -210,6 +210,17 @@ namespace Emby.Plugins.WatchTogether
         private void RemoveExpired(DateTimeOffset now)
         {
             foreach (var id in _invitations.Values.Where(i => i.IsExpired(now)).Select(i => i.Id).ToList())
+            {
+                _invitations.Remove(id);
+            }
+        }
+
+        private void RemoveCreatorInvitations(string creatorUserId)
+        {
+            foreach (var id in _invitations.Values
+                         .Where(i => string.Equals(i.CreatorUserId, creatorUserId, StringComparison.OrdinalIgnoreCase))
+                         .Select(i => i.Id)
+                         .ToList())
             {
                 _invitations.Remove(id);
             }

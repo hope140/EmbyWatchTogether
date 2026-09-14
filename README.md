@@ -1,6 +1,6 @@
 # Emby Watch Together 插件
 
-Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，当前 beta 版本为 `1.4.5.2`，稳定版为 `1.5.0.0`。它读取同一台服务器上的会话状态，并通过 Emby 远程控制协调起播、暂停/继续、手动拖动进度、切换视频和停止播放。
+Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，当前 beta 版本为 `1.5.0.3`，稳定版为 `1.5.0.0`。它读取同一台服务器上的会话状态，并通过 Emby 远程控制协调起播、暂停/继续、手动拖动进度、切换视频和停止播放。
 
 本文面向 Emby Server 管理员和插件使用者。维护者或开发者需要构建、测试、签名发布、接口和运行时细节时，请阅读[开发者与维护者技术文档](docs/technical.md)。
 
@@ -40,13 +40,13 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 3. 将 DLL 直接复制到 Emby Server 数据目录的 `plugins` 目录，不要再套一层 `EmbyWatchTogether` 子目录。若不确定数据目录位置，可在 Emby 管理后台的服务器路径页面查看。
 4. 启动或重启 Emby Server。进入 **Dashboard → Plugins → Watch Together**，确认设置页能够打开。
 
-插件是单 DLL 交付，不需要复制源码、NuGet 包或其他旁车进程。升级时停止 Emby、替换 DLL 后再启动；回滚时恢复备份的旧 DLL。插件默认使用 `stable`，管理员可在插件配置页选择 `beta`；`stable` 只读取 `releases/latest`，`beta` 按 GitHub Releases API 获取预发布版本。两种通道都由“Watch Together 更新检查”任务按所选通道自动安装，Emby 的任务开关和计划仍是控制入口。beta 仍是预发布版，自动安装不等于真实客户端验收。
+插件是单 DLL 交付，不需要复制源码、NuGet 包或其他旁车进程。升级时停止 Emby、替换 DLL 后再启动；回滚时恢复备份的旧 DLL。插件默认使用 `stable`，管理员可在插件配置页选择 `beta`；`stable` 只读取 `releases/latest`，`beta` 按 GitHub Releases API 获取 stable 与 prerelease 中的最高规范版本。两种通道都由“Watch Together 更新检查”任务按所选通道自动安装，Emby 的任务开关和计划仍是控制入口。beta 通道包含未经真实客户端验收的预发布版本，自动安装不等于真实客户端验收。
 
 ## 插件更新
 
 插件更新由 Emby 计划任务处理，插件配置页提供更新通道选择，但不提供独立的检查或安装按钮。服务器启动后，**Dashboard → 计划任务** 中会出现名为“Watch Together 更新检查”的任务，默认每 24 小时运行一次；管理员可以在那里调整检测时间、禁用任务或手动执行。任务会按插件配置中的 `stable`/`beta` 通道检查并自动安装。
 
-`stable` 使用固定的官方 `releases/latest` 资产；`beta` 使用 GitHub Releases API 选择 prerelease 后构造对应 tag 的官方资产。两种通道都会在安装前校验发布签名、文件大小、哈希、程序集名称和版本；校验失败时不会安装。安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示；如果检查后已是最新版本，当前管理员会话也会收到同样的短横条提示；重启前同一版本不会重复安装。
+`stable` 使用固定的官方 `releases/latest` 资产；`beta` 使用 GitHub Releases API 在非 draft stable 与 prerelease 中选择最高规范版本，再构造对应 tag 的官方资产。两种通道都会在安装前校验发布签名、文件大小、哈希、程序集名称和版本；校验失败时不会安装。安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示；如果检查后已是最新版本，当前管理员会话也会收到同样的短横条提示；重启前同一版本不会重复安装。
 
 首次信任引导版本 `1.2.0.9` 必须由运营人工部署；完成后版本方可使用签名自动更新。如果服务器尚未完成首次信任引导，请先按人工安装方式部署该版本。正式版更新的发布资产、签名格式和信任根约束见[技术文档中的更新实现说明](docs/technical.md#正式版更新实现约束)。
 

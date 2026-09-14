@@ -29,6 +29,54 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void AcceptSuccess_ClearsAllCreatorInvitationsAndKeepsOtherCreators()
+        {
+            var codes = new[] { "invite-1", "invite-2", "other" };
+            var index = 0;
+            var invitations = new RoomInvitationManager(
+                () => DateTimeOffset.UtcNow,
+                () => codes[index++]);
+
+            var first = invitations.Create("u1", "movie");
+            invitations.Create("u1", "show");
+            invitations.Create("u2", "other");
+            var rooms = new RoomManager();
+
+            var accepted = invitations.Accept(
+                first.Code,
+                "u3",
+                invitation => rooms.CreateSelfServiceRoom(
+                    "server-1",
+                    "",
+                    invitation.Name,
+                    invitation.CreatorUserId,
+                    "u3",
+                    DateTimeOffset.UtcNow));
+
+            Assert.True(accepted.Succeeded);
+            Assert.Empty(invitations.List("u1"));
+            Assert.Single(invitations.List("u2"));
+        }
+
+        [Fact]
+        public void AcceptFailure_KeepsAllCreatorInvitations()
+        {
+            var codes = new[] { "invite-1", "invite-2" };
+            var index = 0;
+            var invitations = new RoomInvitationManager(
+                () => DateTimeOffset.UtcNow,
+                () => codes[index++]);
+
+            var first = invitations.Create("u1", "movie");
+            invitations.Create("u1", "show");
+
+            var failed = invitations.Accept(first.Code, "u2", _ => null);
+
+            Assert.Equal(RoomInvitationManager.RoomUnavailableStatus, failed.Status);
+            Assert.Equal(2, invitations.List("u1").Count);
+        }
+
+        [Fact]
         public void Accept_ExpiredAndCreatorAreStableFailures()
         {
             var now = new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero);

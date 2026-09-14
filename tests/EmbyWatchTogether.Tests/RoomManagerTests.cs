@@ -1,6 +1,8 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
@@ -101,7 +103,6 @@ namespace Emby.Plugins.WatchTogether.Tests
             var runtime = manager.GetRuntime(room.Id);
             runtime.State = RoomState.Watching;
             runtime.Error = "boom";
-            runtime.Pending["u1"] = new PendingCommand { UserId = "u1", Command = "Pause", IssuedAtUtc = DateTimeOffset.UtcNow };
 
             var result = manager.Action(room.Id, "resync", new Dictionary<string, SessionSnapshot>(), null, DateTimeOffset.UtcNow);
 
@@ -109,6 +110,56 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Null(runtime.Error);
             Assert.Empty(runtime.Pending);
             Assert.Null(runtime.Barrier);
+        }
+
+        [Fact]
+        public void Action_Resync_PendingConflictDoesNotClearRuntime()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Waiting;
+            runtime.Error = "playback command was not acknowledged";
+            var pending = new PendingCommand
+            {
+                UserId = "u1",
+                SessionId = "session-u1",
+                ItemId = "i1",
+                Command = RemoteCommands.Pause,
+            };
+            runtime.Pending["u1"] = pending;
+
+            var result = manager.Action(room.Id, "resync", new Dictionary<string, SessionSnapshot>(), null, DateTimeOffset.UtcNow);
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Equal("manual action conflicts with active synchronization", result.Error);
+            Assert.Same(pending, runtime.Pending["u1"]);
+            Assert.Equal("playback command was not acknowledged", runtime.Error);
+        }
+
+        [Fact]
+        public void Action_Resync_BarrierConflictDoesNotClearRuntime()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Barrier;
+            runtime.Error = "barrier seek retry budget exhausted";
+            var barrier = new BarrierState
+            {
+                Stage = BarrierStage.Seek,
+                AnchorUserId = "u1",
+                ItemId = "i1",
+                PrimaryPositionTicks = 42,
+            };
+            runtime.Barrier = barrier;
+
+            var result = manager.Action(room.Id, "resync", new Dictionary<string, SessionSnapshot>(), null, DateTimeOffset.UtcNow);
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Equal("manual action conflicts with active synchronization", result.Error);
+            Assert.Same(barrier, runtime.Barrier);
+            Assert.Equal("barrier seek retry budget exhausted", runtime.Error);
         }
 
         [Fact]
@@ -366,6 +417,28 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Contains("Pause command failed", result.Error);
             Assert.Empty(result.Users);
+            Assert.Null(manager.GetRuntime(room.Id).Error);
+            Assert.True(HasDiagnosticEvent(manager.GetRuntime(room.Id), "manual_action", "failed"));
+        }
+
+        [Fact]
+        public void Action_FailedIssue_DoesNotOverwriteBlockingRuntimeError()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.Error = "waiting pause retry limit reached";
+            var issuer = new FakeIssuer { AcceptAll = false };
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = TestSnapshots.Online("u1"),
+            };
+
+            var result = manager.Action(room.Id, "pause", snapshots, issuer, DateTimeOffset.UtcNow);
+
+            Assert.Contains("Pause command failed", result.Error);
+            Assert.Equal("waiting pause retry limit reached", runtime.Error);
+            Assert.True(HasDiagnosticEvent(runtime, "manual_action", "failed"));
         }
 
         [Fact]
@@ -500,6 +573,24 @@ namespace Emby.Plugins.WatchTogether.Tests
                 error = null;
                 return true;
             }
+        }
+
+        private static bool HasDiagnosticEvent(RoomRuntime runtime, string type, string result)
+        {
+            var capture = typeof(RoomRuntime).GetMethod(
+                "CaptureDiagnostics", BindingFlags.Instance | BindingFlags.NonPublic);
+            var diagnostics = capture.Invoke(runtime, null);
+            var events = (IEnumerable)diagnostics.GetType().GetProperty("Events").GetValue(diagnostics, null);
+            foreach (var entry in events)
+            {
+                if (string.Equals(type, (string)entry.GetType().GetProperty("Type").GetValue(entry, null), StringComparison.Ordinal) &&
+                    string.Equals(result, (string)entry.GetType().GetProperty("Result").GetValue(entry, null), StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private sealed class BlockingIssuer : ICommandIssuer

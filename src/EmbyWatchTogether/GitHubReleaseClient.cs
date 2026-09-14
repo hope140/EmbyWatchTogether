@@ -407,7 +407,7 @@ namespace Emby.Plugins.WatchTogether
                     foreach (var apiRelease in apiReleases)
                     {
                         var release = apiRelease?.ToReleaseInfo();
-                        if (release == null || release.Draft || !release.Prerelease)
+                        if (release == null || release.Draft)
                         {
                             continue;
                         }

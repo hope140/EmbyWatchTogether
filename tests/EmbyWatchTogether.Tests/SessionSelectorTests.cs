@@ -60,6 +60,54 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void SelectWithDiagnostics_PrefersRawRemoteControlOverNewerEffectiveOnlySession()
+        {
+            var effectiveOnly = SnapshotAt(
+                "s1", "u1", "i1", TestNow.AddTicks(2000), capable: true,
+                rawSupportsRemoteControl: false);
+            var rawCapable = SnapshotAt(
+                "s2", "u1", "i1", TestNow.AddTicks(1000), capable: true,
+                rawSupportsRemoteControl: true);
+
+            var diagnostics = InvokeSelectWithDiagnostics(
+                new[] { effectiveOnly, rawCapable },
+                new[] { "u1" });
+            var selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Equal("s2", selected["u1"].SessionId);
+            Assert.Equal("lower-ranked", GetDisposition(diagnostics, "s1"));
+            Assert.Equal("selected", GetDisposition(diagnostics, "s2"));
+            Assert.False(effectiveOnly.SupportsRemoteControl);
+            Assert.True(effectiveOnly.Capabilities.SupportsRemoteControl);
+        }
+
+        [Fact]
+        public void SelectWithPreviousDiagnostics_PreservesPreviousIdentityDuringRawCapabilityRecovery()
+        {
+            var previous = SnapshotAt(
+                "s1", "u1", "i1", TestNow.AddTicks(1000), capable: true,
+                rawSupportsRemoteControl: true);
+            var recovering = SnapshotAt(
+                "s1", "u1", "i1", TestNow.AddTicks(2000), capable: true,
+                rawSupportsRemoteControl: false);
+            var newerRawCapable = SnapshotAt(
+                "s2", "u1", "i1", TestNow.AddTicks(1500), capable: true,
+                rawSupportsRemoteControl: true);
+
+            var diagnostics = InvokeSelectWithPreviousDiagnostics(
+                new[] { recovering, newerRawCapable },
+                new[] { "u1" },
+                new Dictionary<string, SessionSnapshot> { ["u1"] = previous },
+                preservePreviousRecovery: true);
+            var selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Equal("s1", selected["u1"].SessionId);
+            Assert.Equal("selected", GetDisposition(diagnostics, "s1"));
+        }
+
+        [Fact]
         public void Select_AmbiguousTie_SkipsUser()
         {
             var candidates = new List<SessionSnapshot>
@@ -262,6 +310,110 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void SelectWithPreviousDiagnostics_GlobalItemTieReusesUniquePreviousBindings()
+        {
+            var previousU1 = Snapshot("s1b", "u1", "itemB", activity: 1000);
+            var previousU2 = Snapshot("s2b", "u2", "itemB", activity: 1000);
+            var candidates = new[]
+            {
+                Snapshot("s1a", "u1", "itemA", activity: 1000),
+                previousU1,
+                Snapshot("s2a", "u2", "itemA", activity: 1000),
+                previousU2,
+            };
+
+            var diagnostics = InvokeSelectWithPreviousDiagnostics(
+                candidates,
+                new[] { "u1", "u2" },
+                new Dictionary<string, SessionSnapshot>
+                {
+                    ["u1"] = previousU1,
+                    ["u2"] = previousU2,
+                });
+            var selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Equal("s1b", selected["u1"].SessionId);
+            Assert.Equal("s2b", selected["u2"].SessionId);
+            Assert.All(selected.Values, snapshot => Assert.Equal("itemB", snapshot.ItemId));
+        }
+
+        [Fact]
+        public void SelectWithPreviousDiagnostics_GlobalItemTieWithoutCompletePreviousBindingsFailsClosed()
+        {
+            var previousU1 = Snapshot("s1a", "u1", "itemA", activity: 1000);
+            var diagnostics = InvokeSelectWithPreviousDiagnostics(
+                new[]
+                {
+                    previousU1,
+                    Snapshot("s1b", "u1", "itemB", activity: 1000),
+                    Snapshot("s2a", "u2", "itemA", activity: 1000),
+                    Snapshot("s2b", "u2", "itemB", activity: 1000),
+                },
+                new[] { "u1", "u2" },
+                new Dictionary<string, SessionSnapshot> { ["u1"] = previousU1 });
+            var selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Empty(selected);
+            Assert.All(GetDispositions(diagnostics, "itemA"), disposition => Assert.Equal("ambiguous", disposition));
+            Assert.All(GetDispositions(diagnostics, "itemB"), disposition => Assert.Equal("ambiguous", disposition));
+        }
+
+        [Fact]
+        public void SelectWithPreviousDiagnostics_GlobalItemTieWithDuplicatePreviousIdentityFailsClosed()
+        {
+            var previousU1 = Snapshot("s1a", "u1", "itemA", activity: 1000);
+            var previousU2 = Snapshot("s2a", "u2", "itemA", activity: 1000);
+            var diagnostics = InvokeSelectWithPreviousDiagnostics(
+                new[]
+                {
+                    previousU1,
+                    Snapshot("s1a", "u1", "itemA", activity: 1000),
+                    Snapshot("s1b", "u1", "itemB", activity: 1000),
+                    previousU2,
+                    Snapshot("s2b", "u2", "itemB", activity: 1000),
+                },
+                new[] { "u1", "u2" },
+                new Dictionary<string, SessionSnapshot>
+                {
+                    ["u1"] = previousU1,
+                    ["u2"] = previousU2,
+                });
+            var selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Empty(selected);
+        }
+
+        [Fact]
+        public void SelectWithPreviousDiagnostics_GlobalItemTieWithExpiredPreviousIdentityFailsClosed()
+        {
+            var previousU1 = Snapshot("s1a-old", "u1", "itemA", activity: 1000);
+            var previousU2 = Snapshot("s2a", "u2", "itemA", activity: 1000);
+            var diagnostics = InvokeSelectWithPreviousDiagnostics(
+                new[]
+                {
+                    SnapshotAt("s1a-old", "u1", "itemA", TestNow.AddSeconds(-61)),
+                    Snapshot("s1a-new", "u1", "itemA", activity: 1000),
+                    Snapshot("s1b", "u1", "itemB", activity: 1000),
+                    previousU2,
+                    Snapshot("s2b", "u2", "itemB", activity: 1000),
+                },
+                new[] { "u1", "u2" },
+                new Dictionary<string, SessionSnapshot>
+                {
+                    ["u1"] = previousU1,
+                    ["u2"] = previousU2,
+                });
+            var selected = (IReadOnlyDictionary<string, SessionSnapshot>)
+                diagnostics.GetType().GetProperty("Selected").GetValue(diagnostics);
+
+            Assert.Empty(selected);
+            Assert.Equal("expired", GetDisposition(diagnostics, "s1a-old"));
+        }
+
+        [Fact]
         public void SelectWithPreviousDiagnostics_EqualTieReusesUniquePreviousIdentity()
         {
             var previous = Snapshot("s1", "u1", "itemA", activity: 1000);
@@ -412,7 +564,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         private static object InvokeSelectWithPreviousDiagnostics(
             IEnumerable<SessionSnapshot> candidates,
             IReadOnlyList<string> userIds,
-            IReadOnlyDictionary<string, SessionSnapshot> previous)
+            IReadOnlyDictionary<string, SessionSnapshot> previous,
+            bool preservePreviousRecovery = false)
         {
             var method = typeof(SessionSelector).GetMethod(
                 "SelectWithPreviousDiagnostics",
@@ -427,6 +580,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                     TestNow,
                     SessionSelector.StaleSessionTimeoutSeconds,
                     previous,
+                    preservePreviousRecovery,
                 });
         }
 
@@ -484,13 +638,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             string itemId,
             DateTimeOffset activity,
             bool capable = true,
-            string[] commands = null)
+            string[] commands = null,
+            bool? rawSupportsRemoteControl = null)
         {
             var capabilities = new SessionCapabilityReport(capable, commands ?? new[] { "Pause", "Unpause", "Seek" });
             return new SessionSnapshot(
                 sessionId, userId, itemId, "m1",
                 0, 100 * SessionSnapshot.TicksPerSecond, false, 1.0, stopped: false,
-                capable, capabilities,
+                rawSupportsRemoteControl ?? capable, capabilities,
                 activity);
         }
     }
