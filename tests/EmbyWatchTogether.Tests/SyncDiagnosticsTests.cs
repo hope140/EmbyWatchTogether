@@ -122,6 +122,64 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void ExportIncludesHandoffStateWithHashesAliasesAndStableError()
+        {
+            string userA = "11111111111111111111111111111111";
+            string userB = "22222222222222222222222222222222";
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", userA,
+                new[] { userA, userB }, userA);
+            var runtime = manager.GetRuntime(room.Id);
+            var handoff = (MediaHandoffState)typeof(RoomRuntime).GetMethod(
+                "BeginMediaHandoff", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(runtime, new object[] {
+                    "target-item", "source-item", DateTimeOffset.UtcNow.AddSeconds(-2),
+                    userA, "primary-session", userB, "participant-session" });
+            handoff.PlayItemPending = true;
+            handoff.RetryCount = 1;
+            handoff.Generation = 7;
+            handoff.LastError = "play item acknowledgement timed out";
+            handoff.IsParticipantResync = true;
+            runtime.State = RoomState.Handoff;
+
+            var now = DateTimeOffset.UtcNow;
+            var exported = SyncDiagnostics.Build(room, runtime, "server-1", "1.5.0.3", "media_handoff", now);
+
+            Assert.NotNull(exported.Handoff);
+            Assert.Equal(SyncDiagnostics.Hash("target-item"), exported.Handoff.TargetItemHash);
+            Assert.Equal(SyncDiagnostics.Hash("source-item"), exported.Handoff.SourceItemHash);
+            Assert.Equal("userA", exported.Handoff.PrimaryAlias);
+            Assert.Equal("userB", exported.Handoff.ParticipantAlias);
+            Assert.True(exported.Handoff.PlayItemPending);
+            Assert.Equal(1, exported.Handoff.RetryCount);
+            Assert.Equal(7, exported.Handoff.Generation);
+            Assert.True(exported.Handoff.IsParticipantResync);
+            Assert.Equal("play_item_timeout", exported.Handoff.LastError);
+            Assert.DoesNotContain("target-item", exported.Handoff.TargetItemHash);
+        }
+
+        [Fact]
+        public void ExportAllowsPlayItemAndHandoffEventResults()
+        {
+            string userA = "11111111111111111111111111111111";
+            string userB = "22222222222222222222222222222222";
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", userA,
+                new[] { userA, userB }, userA);
+            var runtime = manager.GetRuntime(room.Id);
+            var now = DateTimeOffset.UtcNow;
+            Record(runtime, "handoff_started", null, RemoteCommands.PlayItem, "started", null, null, now);
+            Record(runtime, "handoff_target_confirmed", null, RemoteCommands.PlayItem, "confirmed", null, null, now.AddSeconds(1));
+            Record(runtime, "handoff_superseded", null, RemoteCommands.PlayItem, "superseded", null, null, now.AddSeconds(2));
+
+            var exported = SyncDiagnostics.Build(room, runtime, "server-1", "1.5.0.3", "waiting_for_playback", now.AddSeconds(2));
+
+            Assert.Contains(exported.Events, e => e.Type == "handoff_started" && e.Command == RemoteCommands.PlayItem && e.Result == "entered");
+            Assert.Contains(exported.Events, e => e.Type == "handoff_target_confirmed" && e.Result == "success");
+            Assert.Contains(exported.Events, e => e.Type == "handoff_superseded" && e.Result == "changed");
+        }
+
+        [Fact]
         public void DiagnosticsEndpointAllowsMemberAndRejectsOutsiderWithoutIssuer()
         {
             string userA = "11111111111111111111111111111111";

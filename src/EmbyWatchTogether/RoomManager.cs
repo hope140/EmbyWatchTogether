@@ -400,7 +400,9 @@ namespace Emby.Plugins.WatchTogether
                 // Check every pending command, including a command left by a
                 // participant whose membership is changing. This keeps a
                 // participant request from clearing an in-flight operation.
-                if (runtime.Barrier != null || runtime.Pending.Count > 0)
+                if (runtime.Barrier != null ||
+                    runtime.Handoff != null ||
+                    runtime.Pending.Count > 0)
                 {
                     result.Status = "busy";
                     result.Reason = ParticipantResyncBusyReason;
@@ -418,6 +420,7 @@ namespace Emby.Plugins.WatchTogether
 
                 runtime.ParticipantResyncRequestedAtUtc = now;
                 runtime.ResetToWaiting();
+                runtime.ParticipantResyncRequestedUserId = userId;
                 runtime.RecordDiagnosticEvent(
                     "resync", userId, null, "accepted", null, null, now);
                 result.Status = "accepted";
@@ -500,7 +503,8 @@ namespace Emby.Plugins.WatchTogether
         /// <summary>
         /// Manual room action: pause, resume or resync (ported from Python action()).
         /// Pause/resume issue the matching command to every online joined participant;
-        /// resync resets the runtime to waiting, allowing a new barrier.
+        /// resync resets the runtime to waiting, allowing a new barrier or
+        /// an explicit media handoff to the primary item.
         /// </summary>
         public RoomActionResult Action(
             string roomId,
@@ -570,7 +574,9 @@ namespace Emby.Plugins.WatchTogether
                 {
                     lock (_lock)
                     {
-                        if (runtime.Barrier != null || runtime.Pending.Count > 0)
+                        if (runtime.Barrier != null ||
+                            runtime.Handoff != null ||
+                            runtime.Pending.Count > 0)
                         {
                             return new RoomActionResult
                             {

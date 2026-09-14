@@ -184,6 +184,11 @@ namespace Emby.Plugins.WatchTogether.Tests
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
                 .GetValue(runtime);
             Assert.Equal(now, requestedAt);
+            var requestedUser = (string)typeof(RoomRuntime).GetProperty(
+                "ParticipantResyncRequestedUserId",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .GetValue(runtime);
+            Assert.Equal("u2", requestedUser);
         }
 
         [Fact]
@@ -229,6 +234,27 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal("accepted", accepted.Status);
             Assert.Equal("busy", busy.Status);
             Assert.Equal("resync_cooldown", busy.Reason);
+        }
+
+        [Fact]
+        public void ParticipantResync_HandoffConflictDoesNotClearRuntime()
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            var handoff = (MediaHandoffState)typeof(RoomRuntime).GetMethod(
+                "BeginMediaHandoff",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(runtime, new object[] { "item-b", "item-a", DateTimeOffset.UtcNow, "u1", "s1", "u2", "s2" });
+            runtime.State = RoomState.Handoff;
+
+            var result = manager.RequestParticipantResync(
+                room.Id, "u2", () => "server-1", DateTimeOffset.UtcNow);
+
+            Assert.Equal("busy", result.Status);
+            Assert.Equal("synchronization_in_progress", result.Reason);
+            Assert.Same(handoff, runtime.Handoff);
+            Assert.Equal(RoomState.Handoff, runtime.State);
         }
 
         [Fact]

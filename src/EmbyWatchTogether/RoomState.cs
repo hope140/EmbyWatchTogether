@@ -114,6 +114,8 @@ namespace Emby.Plugins.WatchTogether
 
         public string LastError { get; set; }
 
+        public bool IsParticipantResync { get; set; }
+
         public ISet<string> SupersededTargetItemIds { get; } =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }

@@ -838,12 +838,22 @@ namespace Emby.Plugins.WatchTogether.Tests
             runtime.State = RoomState.Barrier;
             result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
             Assert.Equal("aligning", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.State = RoomState.Handoff;
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("media_handoff", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
             runtime.State = RoomState.Watching;
             result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
             Assert.Equal("watching", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
             runtime.State = RoomState.Waiting;
             result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
             Assert.Equal("waiting_for_playback", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.Error = "media handoff timed out";
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("handoff_failed", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.Error = "participant resync timed out";
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("participant_resync_failed", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.Error = null;
 
             runtime.Error = "command failed";
             SetSnapshotUnavailable(runtime, true);

@@ -3786,6 +3786,136 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal("s1-new", _rooms.GetRuntime(room.Id).Handoff.PrimarySessionId);
         }
 
+        [Fact]
+        public void ParticipantResync_DifferentItem_HandsOffOnlyParticipantThenStartsBarrier()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+
+            var accepted = _rooms.RequestParticipantResync(
+                room.Id, "u2", () => "server-1", _clock.Now);
+            Assert.Equal("accepted", accepted.Status);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 10 * SessionSnapshot.TicksPerSecond, itemId: "item-c"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            var play = Assert.Single(issuer.PlayItems);
+            Assert.Equal("u2", play.userId);
+            Assert.Equal("item-b", play.itemId);
+            Assert.DoesNotContain(issuer.PlayItems, item => item.userId == "u1");
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void ParticipantResync_AlreadyAtPrimaryItem_SkipsPlayItem()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            Assert.Equal("accepted", _rooms.RequestParticipantResync(
+                room.Id, "u2", () => "server-1", _clock.Now).Status);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void ParticipantResync_RequestedByPrimary_StillTargetsOnlyNonPrimary()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            Assert.Equal("accepted", _rooms.RequestParticipantResync(
+                room.Id, "u1", () => "server-1", _clock.Now).Status);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 10 * SessionSnapshot.TicksPerSecond, itemId: "item-c"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Single(issuer.PlayItems);
+            Assert.Equal("u2", issuer.PlayItems[0].userId);
+            Assert.DoesNotContain(issuer.PlayItems, item => item.userId == "u1");
+        }
+
+        [Fact]
+        public void ParticipantResync_FailureClearsRequestAndSecondRequestCanRecover()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer { FailPlayItem = true };
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            Assert.Equal("accepted", _rooms.RequestParticipantResync(
+                room.Id, "u2", () => "server-1", _clock.Now).Status);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 10 * SessionSnapshot.TicksPerSecond, itemId: "item-c"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.PendingRetryGraceSeconds);
+            var failed = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, failed.State);
+            Assert.Null(_rooms.GetRuntime(room.Id).Handoff);
+            Assert.Null(GetInternalProperty(_rooms.GetRuntime(room.Id), "ParticipantResyncRequestedUserId"));
+
+            issuer.FailPlayItem = false;
+            _clock.Advance(SyncConstants.ParticipantResyncCooldownSeconds + 0.1);
+            Assert.Equal("accepted", _rooms.RequestParticipantResync(
+                room.Id, "u2", () => "server-1", _clock.Now).Status);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 10 * SessionSnapshot.TicksPerSecond, itemId: "item-c"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Equal(3, issuer.PlayItems.Count);
+        }
+
+        [Fact]
+        public void ParticipantResync_IsBusyDuringMediaHandoffAndDoesNotClearIt()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 10 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            var handoff = _rooms.GetRuntime(room.Id).Handoff;
+
+            var result = _rooms.RequestParticipantResync(
+                room.Id, "u2", () => "server-1", _clock.Now.AddSeconds(1));
+            Assert.Equal("busy", result.Status);
+            Assert.Same(handoff, _rooms.GetRuntime(room.Id).Handoff);
+        }
+
+        private static object GetInternalProperty(RoomRuntime runtime, string name)
+        {
+            return typeof(RoomRuntime).GetProperty(
+                name,
+                BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(runtime);
+        }
+
         private SyncEngine CreateHandoffEngine(HandoffIssuer issuer)
         {
             return new SyncEngine(

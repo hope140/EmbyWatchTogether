@@ -7,12 +7,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         Waiting: '等待参与者',
         Barrier: '正在对齐',
         Watching: '同步中',
+        Handoff: '正在同步下一集',
         Unavailable: '暂不可用'
     };
     var stateDescriptions = {
         Waiting: '等待两位参与者打开同一视频',
         Barrier: '正在对齐两位参与者的播放位置',
         Watching: '两位参与者已连接，播放会自动同步',
+        Handoff: '正在让另一位参与者打开主用户当前视频',
         Unavailable: '当前房间暂时无法使用，请刷新后重试'
     };
     var actionLabels = {
@@ -60,6 +62,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         Waiting: '等待参与者',
         Barrier: '正在对齐',
         Watching: '同步中',
+        Handoff: '正在同步下一集',
         Unavailable: '暂不可用'
     };
     var diagnosticReasonLabels = {
@@ -71,6 +74,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         action_conflict: '检测到手动操作冲突',
         barrier_retry_exhausted: '对齐重试次数已用尽',
         waiting_pause_retry_limit: '等待暂停重试次数已用尽',
+        media_handoff: '正在让参与者打开主用户当前视频',
+        handoff_failed: '媒体切换同步未完成',
+        participant_resync_failed: '参与者重新同步未完成',
+        play_item_timeout: '打开视频确认超时',
+        command_timeout: '远程控制超时',
+        session_offline: '目标会话已离线',
+        invalid_argument: '媒体切换参数无效',
         command_failed: '播放控制未完成',
         aligning: '正在对齐播放位置',
         watching: '两位参与者已连接',
@@ -106,6 +116,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         PlayPause: '播放/暂停',
         Seek: '定位',
         Stop: '停止',
+        PlayItem: '打开视频',
         DisplayMessage: '提示'
     };
     var diagnosticEventLabels = {
@@ -122,7 +133,26 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         eligibility_changed: '同步条件变化',
         manual_action: '手动操作',
         resync: '重新同步',
+        resync_barrier_started: '重新同步开始对齐',
+        handoff_started: '开始媒体切换',
+        handoff_play_requested: '请求打开视频',
+        handoff_target_confirmed: '目标视频已确认',
+        handoff_barrier_started: '媒体切换开始对齐',
+        handoff_completed: '媒体切换完成',
+        handoff_failed: '媒体切换失败',
+        handoff_superseded: '媒体切换目标变化',
+        primary_item_changed: '主用户视频变化',
         observed: '观察事件'
+    };
+
+    var diagnosticHandoffErrorLabels = {
+        command_timeout: '远程控制超时',
+        command_failed: '远程控制失败',
+        remote_control_unsupported: '当前客户端不支持远程控制',
+        session_offline: '目标会话已离线',
+        invalid_argument: '媒体切换参数无效',
+        play_item_timeout: '打开视频确认超时',
+        handoff_failed: '媒体切换失败'
     };
 
     function diagnosticFiniteNumber(value) {
@@ -228,6 +258,18 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             restoreSent: raw.Barrier.RestoreSent === true,
             seekRetryPending: raw.Barrier.SeekRetryPending === true
         } : null;
+        var handoff = raw.Handoff && typeof raw.Handoff === 'object' ? {
+            targetItemHash: typeof raw.Handoff.TargetItemHash === 'string' ? raw.Handoff.TargetItemHash : null,
+            sourceItemHash: typeof raw.Handoff.SourceItemHash === 'string' ? raw.Handoff.SourceItemHash : null,
+            primaryAlias: diagnosticAlias(raw.Handoff.PrimaryAlias),
+            participantAlias: diagnosticAlias(raw.Handoff.ParticipantAlias),
+            playItemPending: raw.Handoff.PlayItemPending === true,
+            retryCount: diagnosticFiniteNumber(raw.Handoff.RetryCount),
+            generation: diagnosticFiniteNumber(raw.Handoff.Generation),
+            ageSeconds: diagnosticFiniteNumber(raw.Handoff.AgeSeconds),
+            lastError: diagnosticHandoffErrorLabels[raw.Handoff.LastError] ? raw.Handoff.LastError : null,
+            participantResync: raw.Handoff.IsParticipantResync === true
+        } : null;
         var recovery = raw.RecoveryWindow && typeof raw.RecoveryWindow === 'object' ? {
             active: raw.RecoveryWindow.Active === true,
             ageSeconds: diagnosticFiniteNumber(raw.RecoveryWindow.AgeSeconds),
@@ -243,6 +285,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             participants: participants,
             sessions: sessions,
             pending: pending,
+            handoff: handoff,
             barrier: barrier,
             recovery: recovery,
             lastAction: raw.LastAction && typeof raw.LastAction === 'object' ? sanitizeDiagnosticEvent(raw.LastAction) : null,
@@ -368,6 +411,24 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 pendingList.appendChild(pendingItem);
             });
             pending.appendChild(pendingList);
+        }
+
+        if (diagnostic.handoff) {
+            var handoffGroup = diagnosticGroup(body, '媒体切换');
+            var handoffSummary = document.createElement('div');
+            handoffSummary.className = 'wt-diagnosticSummary';
+            diagnosticField(handoffSummary, '类型', diagnostic.handoff.participantResync ? '参与者重新同步' : '主用户切换媒体');
+            diagnosticField(handoffSummary, '目标视频标识', diagnostic.handoff.targetItemHash || '—');
+            diagnosticField(handoffSummary, '来源视频标识', diagnostic.handoff.sourceItemHash || '—');
+            diagnosticField(handoffSummary, '参与者', diagnostic.handoff.participantAlias);
+            diagnosticField(handoffSummary, '控制状态', diagnostic.handoff.playItemPending ? '等待打开视频确认' : '准备发送');
+            diagnosticField(handoffSummary, '重试次数', diagnostic.handoff.retryCount === null ? '—' : String(Math.max(0, Math.floor(diagnostic.handoff.retryCount))));
+            diagnosticField(handoffSummary, '操作代际', diagnostic.handoff.generation === null ? '—' : String(Math.max(0, Math.floor(diagnostic.handoff.generation))));
+            diagnosticField(handoffSummary, '持续时间', diagnosticFormatNumber(diagnostic.handoff.ageSeconds, ' 秒'));
+            if (diagnostic.handoff.lastError) {
+                diagnosticField(handoffSummary, '最近错误', diagnosticLabel(diagnosticHandoffErrorLabels, diagnostic.handoff.lastError, '媒体切换失败'));
+            }
+            handoffGroup.appendChild(handoffSummary);
         }
 
         var barrier = diagnosticGroup(body, '对齐与恢复');

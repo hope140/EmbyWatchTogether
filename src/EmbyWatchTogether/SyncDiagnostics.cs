@@ -26,6 +26,7 @@ namespace Emby.Plugins.WatchTogether
         public IReadOnlyList<RoomDiagnosticSession> Sessions { get; set; }
         public IReadOnlyList<RoomDiagnosticSession> Snapshots { get; set; }
         public IReadOnlyList<RoomDiagnosticPending> Pending { get; set; }
+        public RoomDiagnosticHandoff Handoff { get; set; }
         public RoomDiagnosticBarrier Barrier { get; set; }
         public RoomDiagnosticRecovery RecoveryWindow { get; set; }
         public RoomDiagnosticAction LastAction { get; set; }
@@ -60,6 +61,7 @@ namespace Emby.Plugins.WatchTogether
         public bool CanUnpause { get; set; }
         public bool CanSeek { get; set; }
         public bool CanDisplayMessage { get; set; }
+        public bool CanPlayItem { get; set; }
         public IReadOnlyList<string> SupportedCommandNames { get; set; }
     }
 
@@ -72,6 +74,20 @@ namespace Emby.Plugins.WatchTogether
         public int Retries { get; set; }
         public string SessionHash { get; set; }
         public string ItemHash { get; set; }
+    }
+
+    public sealed class RoomDiagnosticHandoff
+    {
+        public string TargetItemHash { get; set; }
+        public string SourceItemHash { get; set; }
+        public string PrimaryAlias { get; set; }
+        public string ParticipantAlias { get; set; }
+        public bool PlayItemPending { get; set; }
+        public int RetryCount { get; set; }
+        public long Generation { get; set; }
+        public double AgeSeconds { get; set; }
+        public string LastError { get; set; }
+        public bool IsParticipantResync { get; set; }
     }
 
     public sealed class RoomDiagnosticBarrier
@@ -160,14 +176,17 @@ namespace Emby.Plugins.WatchTogether
 
         private static readonly HashSet<string> AllowedCommands = new HashSet<string>(
             new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.PlayPause,
-                RemoteCommands.Seek, RemoteCommands.Stop, RemoteCommands.DisplayMessage },
+                RemoteCommands.Seek, RemoteCommands.Stop, RemoteCommands.DisplayMessage, RemoteCommands.PlayItem },
             StringComparer.OrdinalIgnoreCase);
 
         private static readonly HashSet<string> AllowedEventTypes = new HashSet<string>(
             new[] { "barrier_started", "barrier_stage_changed", "entered_watching", "command_issued",
                 "command_acknowledged", "command_failed", "retry_scheduled", "stop_confirmed",
                 "snapshot_protection_entered", "snapshot_protection_recovered", "eligibility_changed",
-                "manual_action", "resync" }, StringComparer.OrdinalIgnoreCase);
+                "manual_action", "resync", "resync_barrier_started", "handoff_started",
+                "handoff_play_requested", "handoff_target_confirmed", "handoff_barrier_started",
+                "handoff_completed", "handoff_failed", "handoff_superseded", "primary_item_changed" },
+            StringComparer.OrdinalIgnoreCase);
 
         public static string Hash(string value)
         {
@@ -218,6 +237,9 @@ namespace Emby.Plugins.WatchTogether
                 case "failed": case "failure": case "error": return "failed";
                 case "retry": case "retry_scheduled": return "retry_scheduled";
                 case "pending": return "pending";
+                case "started": return "entered";
+                case "confirmed": case "completed": return "success";
+                case "superseded": case "cancelled": return "changed";
                 case "stopped": return "stopped";
                 case "entered": return "entered";
                 case "recovered": return "recovered";
@@ -261,6 +283,7 @@ namespace Emby.Plugins.WatchTogether
                         : MissingSession(room, runtime, userId);
                 }).ToList();
             var pending = runtime.Pending.ToList().Take(2).Select(p => ToPending(room, p.Key, p.Value, now)).ToList();
+            var handoff = ToHandoff(room, runtime.Handoff, now);
             var barrier = ToBarrier(room, runtime.Barrier, now);
             var recovery = new RoomDiagnosticRecovery
             {
@@ -293,6 +316,7 @@ namespace Emby.Plugins.WatchTogether
                 Sessions = allSessions,
                 Snapshots = allSessions,
                 Pending = pending,
+                Handoff = handoff,
                 Barrier = barrier,
                 RecoveryWindow = recovery,
                 LastAction = ToAction(room, state.LastAction),
@@ -321,6 +345,7 @@ namespace Emby.Plugins.WatchTogether
                 EffectiveSupportsRemoteControl = caps?.SupportsRemoteControl == true,
                 CanPause = caps?.CanPause == true, CanUnpause = caps?.CanUnpause == true,
                 CanSeek = caps?.CanSeek == true, CanDisplayMessage = caps?.CanDisplayMessage == true,
+                CanPlayItem = caps?.CanPlayItem == true,
                 SupportedCommandNames = (caps?.SupportedCommands ?? Array.Empty<string>())
                     .Select(NormalizeCommand).Where(c => c != null).Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList(),
@@ -347,6 +372,39 @@ namespace Emby.Plugins.WatchTogether
                 PositionTicks = p.PositionTicks, AgeSeconds = Math.Max(0, (now - p.IssuedAtUtc).TotalSeconds),
                 Retries = Math.Max(0, p.Retries), SessionHash = Hash(p.SessionId), ItemHash = Hash(p.ItemId),
             };
+        }
+
+        private static RoomDiagnosticHandoff ToHandoff(Room room, MediaHandoffState h, DateTimeOffset now)
+        {
+            if (h == null) return null;
+            return new RoomDiagnosticHandoff
+            {
+                TargetItemHash = Hash(h.TargetItemId),
+                SourceItemHash = Hash(h.SourceItemId),
+                PrimaryAlias = AliasFor(room, h.PrimaryUserId),
+                ParticipantAlias = AliasFor(room, h.ParticipantUserId),
+                PlayItemPending = h.PlayItemPending,
+                RetryCount = Math.Max(0, h.RetryCount),
+                Generation = Math.Max(0, h.Generation),
+                AgeSeconds = Math.Max(0, (now - h.StartedAtUtc).TotalSeconds),
+                LastError = NormalizeHandoffError(h.LastError),
+                IsParticipantResync = h.IsParticipantResync,
+            };
+        }
+
+        private static string NormalizeHandoffError(string error)
+        {
+            if (string.IsNullOrWhiteSpace(error)) return null;
+            switch (error.Trim().ToLowerInvariant())
+            {
+                case "command_timeout": return "command_timeout";
+                case "command_failed": return "command_failed";
+                case "remote_control_unsupported": return "remote_control_unsupported";
+                case "session_offline": return "session_offline";
+                case "invalid_argument": return "invalid_argument";
+                case "play item acknowledgement timed out": return "play_item_timeout";
+                default: return "handoff_failed";
+            }
         }
 
         private static RoomDiagnosticBarrier ToBarrier(Room room, BarrierState b, DateTimeOffset now)
@@ -395,6 +453,12 @@ namespace Emby.Plugins.WatchTogether
                 case "播放已停止，等待双方重新打开同一视频": return "playback_stopped";
                 case "barrier seek retry budget exhausted": return "barrier_retry_exhausted";
                 case "waiting pause retry limit reached": return "waiting_pause_retry_limit";
+                case "media handoff play item issuer unavailable": return "handoff_failed";
+                case "media handoff play item failed": return "handoff_failed";
+                case "media handoff timed out": return "handoff_failed";
+                case "media handoff identity invalid": return "handoff_failed";
+                case "participant resync timed out": return "participant_resync_failed";
+                case "participant resync unavailable": return "participant_resync_failed";
                 default: return "command_failed";
             }
         }

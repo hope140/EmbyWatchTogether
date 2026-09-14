@@ -35,6 +35,8 @@ namespace Emby.Plugins.WatchTogether
         private const string MediaHandoffPlayItemFailedError = "media handoff play item failed";
         private const string MediaHandoffTimedOutError = "media handoff timed out";
         private const string MediaHandoffInvalidError = "media handoff identity invalid";
+        private const string ParticipantResyncTimedOutError = "participant resync timed out";
+        private const string ParticipantResyncUnavailableError = "participant resync unavailable";
         private const int NotificationTimeoutMs = 3000;
         private const double RoomPollErrorLogIntervalSeconds = 30.0;
         private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
@@ -307,7 +309,8 @@ namespace Emby.Plugins.WatchTogether
                             now,
                             SessionSelector.StaleSessionTimeoutSeconds,
                             runtime.Previous,
-                            runtime.State == RoomState.Watching);
+                            runtime.State == RoomState.Watching ||
+                            runtime.State == RoomState.Handoff);
                         var snapshots = selection.Selected;
                         runtime.RecordDiagnosticSnapshots(snapshots, now);
                         var eligibility = RoomEligibility.Evaluate(snapshots);
@@ -322,6 +325,20 @@ namespace Emby.Plugins.WatchTogether
                         bool sameItem = snapshots.Count == 2 &&
                             snapshots.Values.All(s => s != null) &&
                             snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
+
+                        if (runtime.State == RoomState.Waiting &&
+                            !string.IsNullOrEmpty(runtime.ParticipantResyncRequestedUserId) &&
+                            TryProcessParticipantResync(
+                                runtime,
+                                room,
+                                snapshots,
+                                eligibility,
+                                sameItem,
+                                now))
+                        {
+                            results.Add(Result(room, runtime, eligible));
+                            continue;
+                        }
 
                         bool primaryItemTransition = IsPrimaryItemTransition(runtime, room, snapshots, now);
                         if ((runtime.State == RoomState.Watching && primaryItemTransition) ||
@@ -963,6 +980,85 @@ namespace Emby.Plugins.WatchTogether
                 !string.Equals(previous.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase);
         }
 
+        private bool TryProcessParticipantResync(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            RoomEligibilityEvaluation eligibility,
+            bool sameItem,
+            DateTimeOffset now)
+        {
+            if (runtime == null || room == null || snapshots == null ||
+                string.IsNullOrEmpty(runtime.ParticipantResyncRequestedUserId))
+            {
+                return false;
+            }
+
+            if (!runtime.ParticipantResyncRequestedAtUtc.HasValue ||
+                (now - runtime.ParticipantResyncRequestedAtUtc.Value).TotalSeconds >=
+                    SyncConstants.MediaHandoffTimeoutSeconds)
+            {
+                FailParticipantResync(runtime, room, ParticipantResyncTimedOutError, now);
+                return true;
+            }
+
+            string participantUserId = room.JoinedParticipantUserIds?.FirstOrDefault(
+                userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(participantUserId))
+            {
+                FailParticipantResync(runtime, room, ParticipantResyncUnavailableError, now);
+                return true;
+            }
+
+            if (!snapshots.TryGetValue(room.PrimaryUserId, out var primary) ||
+                primary == null || !primary.Online ||
+                !string.Equals(primary.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrEmpty(primary.ItemId))
+            {
+                return true;
+            }
+
+            if (!snapshots.TryGetValue(participantUserId, out var participant) ||
+                participant == null || !participant.Online ||
+                !string.Equals(participant.UserId, participantUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(participant.ItemId, primary.ItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!sameItem || eligibility == null || !eligibility.IsEligible)
+                {
+                    return true;
+                }
+
+                runtime.ParticipantResyncRequestedUserId = null;
+                runtime.RecordDiagnosticEvent(
+                    "resync_barrier_started", participantUserId, RemoteCommands.PlayItem,
+                    "started", null, null, now);
+                StartBarrier(runtime, room, snapshots, now);
+                BarrierTick(runtime, room, snapshots, now);
+                return true;
+            }
+
+            runtime.ParticipantResyncRequestedUserId = null;
+            StartMediaHandoff(
+                runtime,
+                room,
+                primary,
+                participant,
+                now,
+                participant.ItemId,
+                isParticipantResync: true);
+            return TryProcessMediaHandoff(
+                runtime,
+                room,
+                snapshots,
+                eligibility,
+                primaryItemTransition: false,
+                now);
+        }
+
         private bool TryProcessMediaHandoff(
             RoomRuntime runtime,
             Room room,
@@ -989,7 +1085,17 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 snapshots.TryGetValue(participantUserId, out var participant);
-                StartMediaHandoff(runtime, room, primary, participant, now, participant?.ItemId);
+                runtime.RecordDiagnosticEvent(
+                    "primary_item_changed", room.PrimaryUserId, RemoteCommands.PlayItem,
+                    "observed", null, null, now);
+                StartMediaHandoff(
+                    runtime,
+                    room,
+                    primary,
+                    participant,
+                    now,
+                    participant?.ItemId,
+                    isParticipantResync: false);
             }
 
             var handoff = runtime.Handoff;
@@ -1025,7 +1131,8 @@ namespace Emby.Plugins.WatchTogether
                     currentPrimary,
                     currentParticipant,
                     now,
-                    currentParticipant?.ItemId);
+                    currentParticipant?.ItemId,
+                    handoff.IsParticipantResync);
                 handoff = runtime.Handoff;
             }
             else if (!string.Equals(currentPrimary.SessionId, handoff.PrimarySessionId, StringComparison.OrdinalIgnoreCase))
@@ -1055,24 +1162,6 @@ namespace Emby.Plugins.WatchTogether
             {
                 FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
                 return true;
-            }
-
-            if (!string.Equals(participantSnapshot.ItemId, handoff.TargetItemId, StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrEmpty(participantSnapshot.ItemId) &&
-                !string.Equals(participantSnapshot.ItemId, handoff.SourceItemId, StringComparison.OrdinalIgnoreCase))
-            {
-                if (handoff.SupersededTargetItemIds.Contains(participantSnapshot.ItemId))
-                {
-                    // A delayed acknowledgement of an invalidated target is
-                    // still a source snapshot for the current operation; it
-                    // must never turn that old target into a confirmation.
-                    handoff.SourceItemId = participantSnapshot.ItemId;
-                }
-                else
-                {
-                    FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
-                    return true;
-                }
             }
 
             if (!string.Equals(participantSnapshot.SessionId, handoff.ParticipantSessionId, StringComparison.OrdinalIgnoreCase))
@@ -1193,7 +1282,8 @@ namespace Emby.Plugins.WatchTogether
             SessionSnapshot primary,
             SessionSnapshot participant,
             DateTimeOffset now,
-            string sourceItemId)
+            string sourceItemId,
+            bool isParticipantResync = false)
         {
             var handoff = runtime.BeginMediaHandoff(
                 primary.ItemId,
@@ -1204,6 +1294,7 @@ namespace Emby.Plugins.WatchTogether
                 room.JoinedParticipantUserIds.First(
                     userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase)),
                 participant?.SessionId);
+            handoff.IsParticipantResync = isParticipantResync;
             runtime.State = RoomState.Handoff;
             runtime.Error = null;
             runtime.Barrier = null;
@@ -1234,6 +1325,20 @@ namespace Emby.Plugins.WatchTogether
             runtime.MissingSessionSinceUtc = null;
             runtime.SyncItemId = null;
             runtime.BarrierRetryAtUtc = null;
+            runtime.Error = error;
+        }
+
+        private static void FailParticipantResync(
+            RoomRuntime runtime,
+            Room room,
+            string error,
+            DateTimeOffset now)
+        {
+            runtime.RecordDiagnosticEvent(
+                "resync", null, RemoteCommands.PlayItem, "failed", null, null, now);
+            runtime.ParticipantResyncRequestedUserId = null;
+            runtime.MissingSessionSinceUtc = null;
+            runtime.ResetToWaiting();
             runtime.Error = error;
         }
 

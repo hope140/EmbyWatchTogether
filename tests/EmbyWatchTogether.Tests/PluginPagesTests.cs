@@ -114,6 +114,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("statusReasonMessages", javascript);
             Assert.Contains("server_unavailable", javascript);
             Assert.Contains("snapshot_unavailable", javascript);
+            Assert.Contains("正在同步下一集", javascript);
+            Assert.Contains("正在让另一位参与者打开主用户当前视频", javascript);
+            Assert.Contains("media_handoff", javascript);
+            Assert.Contains("PlayItem", javascript);
+            Assert.Contains("handoff_started", javascript);
+            Assert.Contains("raw.Handoff", javascript);
             Assert.Contains("暂时无法读取播放会话，自动同步已进入保护状态；恢复后会重新对齐。", javascript);
             Assert.Contains("different_video", javascript);
             Assert.Contains("remote_control_unavailable", javascript);

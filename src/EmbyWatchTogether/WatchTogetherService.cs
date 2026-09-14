@@ -891,8 +891,11 @@ namespace Emby.Plugins.WatchTogether
             if (room == null || runtime == null) return "waiting_for_playback";
             if (!IsSameServer(room.ServerId, plugin.ResolveServerId())) return "server_unavailable";
             if (runtime.SnapshotUnavailable) return "snapshot_unavailable";
+            if (runtime.State == RoomState.Handoff) return "media_handoff";
             if (string.Equals(runtime.Error, "两位参与者打开了不同视频，暂不发送同步指令", StringComparison.Ordinal)) return "different_video";
             if (string.Equals(runtime.Error, "播放已停止，等待双方重新打开同一视频", StringComparison.Ordinal)) return "playback_stopped";
+            if (runtime.Error != null && runtime.Error.StartsWith("media handoff ", StringComparison.Ordinal)) return "handoff_failed";
+            if (runtime.Error != null && runtime.Error.StartsWith("participant resync ", StringComparison.Ordinal)) return "participant_resync_failed";
             if (!string.IsNullOrEmpty(runtime.Error)) return "command_failed";
             if (room.JoinedParticipantUserIds.Count < room.ParticipantUserIds.Count) return "member_left";
             if (runtime.State == RoomState.Barrier) return "aligning";

@@ -28,6 +28,8 @@ namespace Emby.Plugins.WatchTogether
 
         internal DateTimeOffset? ParticipantResyncRequestedAtUtc { get; set; }
 
+        internal string ParticipantResyncRequestedUserId { get; set; }
+
         internal RoomEligibilityFailureReason? LastEligibilityFailureReason { get; set; }
 
         internal string LastMultipleSessionDiagnosticSignature { get; set; }
@@ -247,6 +249,7 @@ namespace Emby.Plugins.WatchTogether
             SyncItemId = null;
             BarrierRetryAtUtc = null;
             Handoff = null;
+            ParticipantResyncRequestedUserId = null;
             ClearRemoteControlRecovery();
         }
 
@@ -297,6 +300,7 @@ namespace Emby.Plugins.WatchTogether
             }
             BarrierRetryAtUtc = null;
             Handoff = null;
+            ParticipantResyncRequestedUserId = null;
             ClearRemoteControlRecovery();
         }
 
