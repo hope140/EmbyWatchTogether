@@ -64,6 +64,23 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task SendPlayItemAsync_IssuesPlayNowCommand()
+        {
+            var manager = NewManager();
+            using var bridge = new SessionBridge(manager.Object);
+
+            await bridge.SendPlayItemAsync("admin-1", "session-1", "42", CancellationToken.None);
+
+            manager.Verify(m => m.SendPlayCommand(
+                It.IsAny<string>(),
+                "session-1",
+                It.Is<PlayRequest>(r => r.PlayCommand == PlayCommand.PlayNow &&
+                    r.ItemIds.Length == 1 && r.ItemIds[0] == 42 &&
+                    r.ControllingUserId == "admin-1"),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public void FindSessionsForUsers_FiltersByUserId()
         {
             var manager = NewManager();
@@ -117,6 +134,12 @@ namespace Emby.Plugins.WatchTogether.Tests
                     It.IsAny<string>(),
                     It.IsAny<string>(),
                     It.IsAny<MessageCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            mock.Setup(m => m.SendPlayCommand(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<PlayRequest>(),
                     It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             return mock;

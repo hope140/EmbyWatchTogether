@@ -44,6 +44,16 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void Probe_PlayItemUsesExistingRemoteControlEvidence()
+        {
+            Assert.True(CapabilityProbe.Probe(true, new[] { RemoteCommands.PlayItem }, null).CanPlayItem);
+            Assert.True(CapabilityProbe.Probe(false, new[] { RemoteCommands.PlayItem }, null).CanPlayItem);
+            Assert.True(CapabilityProbe.Probe(true, new[] { RemoteCommands.Pause }, null).CanPlayItem);
+            Assert.True(CapabilityProbe.Probe(false, new[] { RemoteCommands.Pause }, null).CanPlayItem);
+            Assert.False(CapabilityProbe.Probe(false, null, null).CanPlayItem);
+        }
+
+        [Fact]
         public void Probe_MissingSeek_FailsPlaybackGate()
         {
             var report = CapabilityProbe.Probe(true, new[] { "Pause", "Unpause" }, null);

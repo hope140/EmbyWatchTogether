@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -95,6 +96,39 @@ namespace Emby.Plugins.WatchTogether
         public Task SendSeekAsync(string controllingUserId, string sessionId, long positionTicks, CancellationToken cancellationToken = default)
         {
             return SendPlaystateAsync(controllingUserId, sessionId, PlaystateRequestFactory.Seek(controllingUserId, positionTicks), cancellationToken);
+        }
+
+        public Task SendPlayItemAsync(
+            string controllingUserId,
+            string sessionId,
+            string itemId,
+            CancellationToken cancellationToken = default)
+        {
+            if (sessionId == null)
+            {
+                throw new ArgumentNullException(nameof(sessionId));
+            }
+
+            if (itemId == null)
+            {
+                throw new ArgumentNullException(nameof(itemId));
+            }
+
+            if (!long.TryParse(itemId, NumberStyles.None, CultureInfo.InvariantCulture, out var numericItemId))
+            {
+                throw new ArgumentException("Item ID must be numeric.", nameof(itemId));
+            }
+
+            return _sessionManager.SendPlayCommand(
+                controllingSessionId: string.Empty,
+                sessionId: sessionId,
+                command: new PlayRequest
+                {
+                    ItemIds = new[] { numericItemId },
+                    PlayCommand = PlayCommand.PlayNow,
+                    ControllingUserId = controllingUserId,
+                },
+                cancellationToken: cancellationToken);
         }
 
         public Task SendDisplayMessageAsync(

@@ -43,4 +43,21 @@ namespace Emby.Plugins.WatchTogether
             CancellationToken cancellationToken,
             out string error);
     }
+
+    /// <summary>
+    /// Additive cancellation-aware contract for issuing a PlayItem request.
+    /// Existing ICommandIssuer implementations are not required to implement it.
+    /// </summary>
+    public interface IPlayItemIssuer
+    {
+        bool TryIssuePlayItem(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string itemId,
+            DateTimeOffset now,
+            CancellationToken cancellationToken,
+            out string error);
+    }
 }

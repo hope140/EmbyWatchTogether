@@ -177,6 +177,83 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
+        [Fact]
+        public void TryIssuePlayItem_AllowsTargetDifferentFromCurrentSnapshotItem()
+        {
+            var manager = NewManager();
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge);
+                string error;
+                var result = issuer.TryIssuePlayItem(
+                    "room", "admin", "user", NewPlayItemSnapshot(), "43",
+                    DateTimeOffset.UtcNow, out error);
+
+                Assert.True(result);
+                Assert.Null(error);
+                manager.Verify(m => m.SendPlayCommand(
+                    It.IsAny<string>(), "session", It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+            }
+        }
+
+        [Theory]
+        [InlineData("", "user", "42", "invalid_argument")]
+        [InlineData("admin", "other", "42", "invalid_argument")]
+        [InlineData("admin", "user", "other", "invalid_argument")]
+        public void TryIssuePlayItem_InvalidIdentityOrItem_ReturnsStableError(
+            string controllingUserId, string userId, string itemId, string expectedError)
+        {
+            using (var bridge = new SessionBridge(NewManager().Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge);
+                string error;
+                var result = issuer.TryIssuePlayItem(
+                    "room", controllingUserId, userId, NewPlayItemSnapshot(), itemId,
+                    DateTimeOffset.UtcNow, out error);
+
+                Assert.False(result);
+                Assert.Equal(expectedError, error);
+            }
+        }
+
+        [Fact]
+        public void TryIssuePlayItem_OfflineOrUnsupported_IsRejected()
+        {
+            var manager = NewManager();
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge);
+                string error;
+                var offline = issuer.TryIssuePlayItem("room", "admin", "user", NewPlayItemSnapshot(stopped: true), "42", DateTimeOffset.UtcNow, out error);
+                Assert.False(offline);
+                Assert.Equal("session_offline", error);
+
+                var unsupported = issuer.TryIssuePlayItem("room", "admin", "user", NewUnsupportedPlayItemSnapshot(), "42", DateTimeOffset.UtcNow, out error);
+                Assert.False(unsupported);
+                Assert.Equal("remote_control_unsupported", error);
+            }
+        }
+
+        [Fact]
+        public void TryIssuePlayItem_CancelledTransport_ReturnsTimeoutWithoutDetails()
+        {
+            var manager = NewManager();
+            manager.Setup(m => m.SendPlayCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                .Throws(new OperationCanceledException("private play detail"));
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge);
+                string error;
+                var result = issuer.TryIssuePlayItem(
+                    "room", "admin", "user", NewPlayItemSnapshot(), "42", DateTimeOffset.UtcNow,
+                    new CancellationTokenSource().Token, out error);
+
+                Assert.False(result);
+                Assert.Equal("command_timeout", error);
+                Assert.DoesNotContain("private play detail", error);
+            }
+        }
+
         private static Mock<ISessionManager> NewManager()
         {
             var manager = new Mock<ISessionManager>();
@@ -185,6 +262,9 @@ namespace Emby.Plugins.WatchTogether.Tests
                 .Returns(Task.CompletedTask);
             manager.Setup(m => m.SendMessageCommand(
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            manager.Setup(m => m.SendPlayCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
             return manager;
         }
@@ -212,6 +292,20 @@ namespace Emby.Plugins.WatchTogether.Tests
             return new SessionSnapshot(
                 "session", "user", "item", "source", 0, 1, false, 1, false, true,
                 new SessionCapabilityReport(true, new[] { RemoteCommands.Pause, "DisplayMessage" }));
+        }
+
+        private static SessionSnapshot NewPlayItemSnapshot(bool stopped = false)
+        {
+            return new SessionSnapshot(
+                "session", "user", "42", "source", 0, 1, false, 1, stopped, true,
+                new SessionCapabilityReport(true, new[] { RemoteCommands.Pause }));
+        }
+
+        private static SessionSnapshot NewUnsupportedPlayItemSnapshot()
+        {
+            return new SessionSnapshot(
+                "session", "user", "42", "source", 0, 1, false, 1, false, true,
+                new SessionCapabilityReport(false, new string[0]));
         }
     }
 }

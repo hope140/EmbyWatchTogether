@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using MediaBrowser.Model.Logging;
 
@@ -13,7 +14,8 @@ namespace Emby.Plugins.WatchTogether
         ICommandIssuer,
         IMessageIssuer,
         ICancellableCommandIssuer,
-        ICancellableMessageIssuer
+        ICancellableMessageIssuer,
+        IPlayItemIssuer
     {
         private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
         private readonly SessionBridge _bridge;
@@ -146,6 +148,88 @@ namespace Emby.Plugins.WatchTogether
                     userId,
                     command,
                     exception);
+                error = "command_failed";
+                return false;
+            }
+        }
+
+        public bool TryIssuePlayItem(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string itemId,
+            DateTimeOffset now,
+            out string error)
+        {
+            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            {
+                return TryIssuePlayItem(
+                    roomId,
+                    controllingUserId,
+                    userId,
+                    snapshot,
+                    itemId,
+                    now,
+                    timeout.Token,
+                    out error);
+            }
+        }
+
+        public bool TryIssuePlayItem(
+            string roomId,
+            string controllingUserId,
+            string userId,
+            SessionSnapshot snapshot,
+            string itemId,
+            DateTimeOffset now,
+            CancellationToken cancellationToken,
+            out string error)
+        {
+            if (string.IsNullOrWhiteSpace(controllingUserId) ||
+                string.IsNullOrWhiteSpace(userId) ||
+                string.IsNullOrWhiteSpace(itemId) ||
+                !long.TryParse(itemId, NumberStyles.None, CultureInfo.InvariantCulture, out _))
+            {
+                error = "invalid_argument";
+                return false;
+            }
+
+            if (snapshot == null || !snapshot.Online)
+            {
+                error = "session_offline";
+                return false;
+            }
+
+            if (!string.Equals(userId, snapshot.UserId, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(snapshot.SessionId))
+            {
+                error = "invalid_argument";
+                return false;
+            }
+
+            if (snapshot.Capabilities == null || !snapshot.Capabilities.CanPlayItem)
+            {
+                error = "remote_control_unsupported";
+                return false;
+            }
+
+            try
+            {
+                _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, cancellationToken)
+                    .GetAwaiter().GetResult();
+                error = null;
+                return true;
+            }
+            catch (OperationCanceledException exception)
+            {
+                LogFailure("Watch Together play item command timed out", roomId, userId, RemoteCommands.PlayItem, exception);
+                error = "command_timeout";
+                return false;
+            }
+            catch (Exception exception)
+            {
+                LogFailure("Watch Together play item command failed", roomId, userId, RemoteCommands.PlayItem, exception);
                 error = "command_failed";
                 return false;
             }
@@ -307,6 +391,8 @@ namespace Emby.Plugins.WatchTogether
                 case RemoteCommands.Seek:
                 case RemoteCommands.Stop:
                     return true;
+                case RemoteCommands.PlayItem:
+                    return capabilities.CanPlayItem;
                 default:
                     return false;
             }

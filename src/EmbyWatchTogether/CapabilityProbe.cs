@@ -17,6 +17,7 @@ namespace Emby.Plugins.WatchTogether
         public const string Seek = "Seek";
         public const string Stop = "Stop";
         public const string DisplayMessage = "DisplayMessage";
+        public const string PlayItem = "PlayItem";
     }
 
     /// <summary>
@@ -47,6 +48,8 @@ namespace Emby.Plugins.WatchTogether
         public bool CanStop => SupportsRemoteControl && SupportedCommands.Contains(RemoteCommands.Stop);
 
         public bool CanDisplayMessage => SupportsRemoteControl && SupportedCommands.Contains(RemoteCommands.DisplayMessage);
+
+        public bool CanPlayItem => SupportsRemoteControl || SupportedCommands.Count > 0;
 
         /// <summary>
         /// A session can drive a two-person room only when pause, unpause and seek
