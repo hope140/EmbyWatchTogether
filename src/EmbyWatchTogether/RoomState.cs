@@ -14,6 +14,7 @@ namespace Emby.Plugins.WatchTogether
         Barrier = 1,
         Watching = 2,
         Unavailable = 3,
+        Handoff = 4,
     }
 
     public enum BarrierStage
@@ -76,6 +77,45 @@ namespace Emby.Plugins.WatchTogether
         public bool AnchorPositionCandidatePaused { get; set; }
 
         public bool RestoreSent { get; set; }
+
+        public bool FromMediaHandoff { get; set; }
+    }
+
+    /// <summary>
+    /// Ephemeral state for moving the participant to the primary's newly
+    /// selected item. This is deliberately separate from Barrier pending
+    /// commands and is never persisted with room metadata.
+    /// </summary>
+    public sealed class MediaHandoffState
+    {
+        public string TargetItemId { get; set; }
+
+        public string SourceItemId { get; set; }
+
+        public DateTimeOffset StartedAtUtc { get; set; }
+
+        public string PrimaryUserId { get; set; }
+
+        public string PrimarySessionId { get; set; }
+
+        public string ParticipantUserId { get; set; }
+
+        public string ParticipantSessionId { get; set; }
+
+        public bool PlayItemPending { get; set; }
+
+        public DateTimeOffset? PlayItemIssuedAtUtc { get; set; }
+
+        public int RetryCount { get; set; }
+
+        public long Generation { get; set; }
+
+        public DateTimeOffset? NextRetryAtUtc { get; set; }
+
+        public string LastError { get; set; }
+
+        public ISet<string> SupersededTargetItemIds { get; } =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 
     public sealed class PendingCommand

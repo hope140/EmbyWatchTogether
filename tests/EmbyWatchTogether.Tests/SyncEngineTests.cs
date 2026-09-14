@@ -3555,6 +3555,255 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.NotEqual("waiting pause retry limit reached", runtime.Error);
         }
 
+        [Fact]
+        public void MediaHandoff_PrimaryChangesToNewItem_RequestsOnceThenUsesBarrier()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(issuer.PlayItems);
+            Assert.Equal("item-b", issuer.PlayItems[0].itemId);
+
+            engine.PollOnce(_clock.Now);
+            Assert.Single(issuer.PlayItems);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(issuer.PlayItems);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+        }
+
+        [Fact]
+        public void MediaHandoff_ParticipantAlreadyAtTarget_SkipsPlayItem()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.PlayItems.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void MediaHandoff_StopThenPrimaryStartsNewItemInsideGrace_SkipsStopSideEffects()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.Commands.Clear();
+            issuer.PlayItems.Clear();
+
+            SetCandidates(
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
+            _clock.Advance(0.5);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(issuer.PlayItems);
+            Assert.DoesNotContain(issuer.Commands, command => command.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void MediaHandoff_ParticipantChangesItem_DoesNotFollowParticipant()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.PlayItems.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-c"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void MediaHandoff_PlayItemFailureIsBoundedAndCanRecover()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer { FailPlayItem = true };
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.PlayItems.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            _clock.Advance(SyncConstants.PendingRetryGraceSeconds);
+            var failed = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, failed.State);
+            Assert.Equal("media handoff play item failed", failed.Error);
+            Assert.Null(_rooms.GetRuntime(room.Id).Handoff);
+            Assert.Equal(2, issuer.PlayItems.Count);
+
+            issuer.FailPlayItem = false;
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+        }
+
+        [Fact]
+        public void MediaHandoff_PlayItemConfirmationTimeoutIsBounded()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.PlayItems.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + 0.1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + 0.1);
+            var failed = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, failed.State);
+            Assert.Equal("media handoff play item failed", failed.Error);
+            Assert.Null(_rooms.GetRuntime(room.Id).Handoff);
+            Assert.Equal(2, issuer.PlayItems.Count);
+        }
+
+        [Fact]
+        public void MediaHandoff_WithoutPlayItemIssuerFailsClosed()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            var failed = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, failed.State);
+            Assert.Equal("media handoff play item issuer unavailable", failed.Error);
+            Assert.Null(_rooms.GetRuntime(room.Id).Handoff);
+            Assert.Empty(_issuer.Issued);
+        }
+
+        [Fact]
+        public void MediaHandoff_TargetChangeSupersedesOldOperationAndIgnoresLateTarget()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.PlayItems.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-c"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, issuer.PlayItems.Count);
+            Assert.Equal("item-c", _rooms.GetRuntime(room.Id).Handoff.TargetItemId);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Equal(2, issuer.PlayItems.Count);
+        }
+
+        [Fact]
+        public void MediaHandoff_PrimarySessionRebindInvalidatesOldPending()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.PlayItems.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Equal(2, issuer.PlayItems.Count);
+            Assert.Equal("s1-new", _rooms.GetRuntime(room.Id).Handoff.PrimarySessionId);
+        }
+
+        private SyncEngine CreateHandoffEngine(HandoffIssuer issuer)
+        {
+            return new SyncEngine(
+                _rooms, _provider, issuer, () => "server-1", () => _clock.Now,
+                pollIntervalSeconds: 1.0,
+                pauseOtherOnPlaybackStop: true,
+                notifyOtherOnPlaybackStop: false,
+                notifyOnSyncActions: false,
+                messageIssuer: _messageIssuer);
+        }
+
+        private void EnterWatchingWithIssuer(SyncEngine engine, Room room, HandoffIssuer issuer)
+        {
+            EnterWatching(engine, room);
+            issuer.Commands.Clear();
+            issuer.PlayItems.Clear();
+        }
+
         private SyncEngine CreateEngine(
             string serverId = "server-1",
             bool pauseOtherOnPlaybackStop = true,
@@ -4077,6 +4326,47 @@ namespace Emby.Plugins.WatchTogether.Tests
 
                 error = ReturnFalse ? "message delivery failed" : null;
                 return !ReturnFalse;
+            }
+        }
+
+        private sealed class HandoffIssuer : ICommandIssuer, IPlayItemIssuer
+        {
+            public List<(string userId, string command)> Commands { get; } =
+                new List<(string, string)>();
+
+            public List<(string userId, string itemId, string sessionId, string snapshotItemId)> PlayItems { get; } =
+                new List<(string, string, string, string)>();
+
+            public bool FailPlayItem { get; set; }
+
+            public bool TryIssue(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string command,
+                long? positionTicks,
+                DateTimeOffset now,
+                out string error)
+            {
+                Commands.Add((userId, command));
+                error = null;
+                return true;
+            }
+
+            public bool TryIssuePlayItem(
+                string roomId,
+                string controllingUserId,
+                string userId,
+                SessionSnapshot snapshot,
+                string itemId,
+                DateTimeOffset now,
+                CancellationToken cancellationToken,
+                out string error)
+            {
+                PlayItems.Add((userId, itemId, snapshot?.SessionId, snapshot?.ItemId));
+                error = FailPlayItem ? "play item failed" : null;
+                return !FailPlayItem;
             }
         }
 

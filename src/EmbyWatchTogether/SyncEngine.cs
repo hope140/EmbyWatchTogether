@@ -31,6 +31,10 @@ namespace Emby.Plugins.WatchTogether
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
         private const string BarrierSeekRetryBudgetError = "barrier seek retry budget exhausted";
         private const string WaitingPauseRetryLimitError = "waiting pause retry limit reached";
+        private const string MediaHandoffIssuerUnavailableError = "media handoff play item issuer unavailable";
+        private const string MediaHandoffPlayItemFailedError = "media handoff play item failed";
+        private const string MediaHandoffTimedOutError = "media handoff timed out";
+        private const string MediaHandoffInvalidError = "media handoff identity invalid";
         private const int NotificationTimeoutMs = 3000;
         private const double RoomPollErrorLogIntervalSeconds = 30.0;
         private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
@@ -226,6 +230,7 @@ namespace Emby.Plugins.WatchTogether
                             runtime.Error = "room server is unavailable";
                             runtime.Barrier = null;
                             runtime.Pending.Clear();
+                            runtime.ClearMediaHandoff();
                             _logger?.Info($"Room {room.Id}: marked unavailable (server mismatch)");
                             results.Add(new RoomPollResult
                             {
@@ -318,6 +323,23 @@ namespace Emby.Plugins.WatchTogether
                             snapshots.Values.All(s => s != null) &&
                             snapshots.Values.Select(s => s.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
 
+                        bool primaryItemTransition = IsPrimaryItemTransition(runtime, room, snapshots, now);
+                        if ((runtime.State == RoomState.Watching && primaryItemTransition) ||
+                            runtime.State == RoomState.Handoff)
+                        {
+                            if (TryProcessMediaHandoff(
+                                runtime,
+                                room,
+                                snapshots,
+                                eligibility,
+                                primaryItemTransition,
+                                now))
+                            {
+                                results.Add(Result(room, runtime, eligible));
+                                continue;
+                            }
+                        }
+
                         if (TryGetStoppedUsers(runtime, room, snapshots, now, out var stoppedUsers))
                         {
                             // SessionSelector omits stopped/offline sessions, so the
@@ -378,6 +400,11 @@ namespace Emby.Plugins.WatchTogether
                                 results.Add(Result(room, runtime, eligible));
                                 continue;
                             }
+                        }
+
+                        if (sameItem && IsMediaHandoffError(runtime.Error))
+                        {
+                            runtime.Error = null;
                         }
 
                         PruneWaitingPauseRetries(runtime, snapshots);
@@ -908,6 +935,306 @@ namespace Emby.Plugins.WatchTogether
                 }
             }
             return false;
+        }
+
+        private static bool IsPrimaryItemTransition(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            if (runtime == null || room == null || snapshots == null ||
+                runtime.State != RoomState.Watching ||
+                room.JoinedParticipantUserIds == null || room.JoinedParticipantUserIds.Count != 2 ||
+                (runtime.MissingSessionSinceUtc.HasValue &&
+                 (now - runtime.MissingSessionSinceUtc.Value).TotalSeconds >
+                     SyncConstants.PrimaryItemTransitionGraceSeconds) ||
+                !snapshots.TryGetValue(room.PrimaryUserId, out var current) ||
+                current == null || !current.Online || !current.SupportsRemoteControl ||
+                string.IsNullOrEmpty(current.ItemId) ||
+                !runtime.Previous.TryGetValue(room.PrimaryUserId, out var previous) ||
+                previous == null || !previous.Online || string.IsNullOrEmpty(previous.ItemId))
+            {
+                return false;
+            }
+
+            return string.Equals(current.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(previous.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(previous.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool TryProcessMediaHandoff(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            RoomEligibilityEvaluation eligibility,
+            bool primaryItemTransition,
+            DateTimeOffset now)
+        {
+            if (runtime.State == RoomState.Watching)
+            {
+                if (!primaryItemTransition ||
+                    !snapshots.TryGetValue(room.PrimaryUserId, out var primary) ||
+                    primary == null || string.IsNullOrEmpty(primary.ItemId))
+                {
+                    return false;
+                }
+
+                string participantUserId = room.JoinedParticipantUserIds.FirstOrDefault(
+                    userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase));
+                if (string.IsNullOrEmpty(participantUserId))
+                {
+                    FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                    return true;
+                }
+
+                snapshots.TryGetValue(participantUserId, out var participant);
+                StartMediaHandoff(runtime, room, primary, participant, now, participant?.ItemId);
+            }
+
+            var handoff = runtime.Handoff;
+            if (handoff == null)
+            {
+                runtime.ResetToWaiting();
+                return true;
+            }
+
+            if (!snapshots.TryGetValue(room.PrimaryUserId, out var currentPrimary) ||
+                currentPrimary == null || !currentPrimary.Online ||
+                !string.Equals(currentPrimary.UserId, handoff.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrEmpty(currentPrimary.ItemId))
+            {
+                FailMediaHandoffIfExpired(runtime, room, now);
+                return true;
+            }
+
+            if (!string.Equals(currentPrimary.ItemId, handoff.TargetItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (handoff.SupersededTargetItemIds.Contains(currentPrimary.ItemId))
+                {
+                    FailMediaHandoffIfExpired(runtime, room, now);
+                    return true;
+                }
+
+                snapshots.TryGetValue(handoff.ParticipantUserId, out var currentParticipant);
+                runtime.RecordDiagnosticEvent(
+                    "handoff_superseded", null, RemoteCommands.PlayItem, "superseded", null, null, now);
+                StartMediaHandoff(
+                    runtime,
+                    room,
+                    currentPrimary,
+                    currentParticipant,
+                    now,
+                    currentParticipant?.ItemId);
+                handoff = runtime.Handoff;
+            }
+            else if (!string.Equals(currentPrimary.SessionId, handoff.PrimarySessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                // SessionSelector has already selected this identity using the
+                // normal current-candidate rules. A same-user rebind gets a new
+                // generation and cannot inherit the old PlayItem pending.
+                handoff.PrimarySessionId = currentPrimary.SessionId;
+                handoff.Generation++;
+                handoff.PlayItemPending = false;
+                handoff.PlayItemIssuedAtUtc = null;
+                handoff.RetryCount = 0;
+                handoff.NextRetryAtUtc = null;
+                handoff.LastError = null;
+                runtime.RecordDiagnosticEvent(
+                    "handoff_superseded", null, RemoteCommands.PlayItem, "superseded", null, null, now);
+            }
+
+            if (!snapshots.TryGetValue(handoff.ParticipantUserId, out var participantSnapshot) ||
+                participantSnapshot == null || !participantSnapshot.Online)
+            {
+                FailMediaHandoffIfExpired(runtime, room, now);
+                return true;
+            }
+
+            if (!string.Equals(participantSnapshot.UserId, handoff.ParticipantUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                return true;
+            }
+
+            if (!string.Equals(participantSnapshot.ItemId, handoff.TargetItemId, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrEmpty(participantSnapshot.ItemId) &&
+                !string.Equals(participantSnapshot.ItemId, handoff.SourceItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (handoff.SupersededTargetItemIds.Contains(participantSnapshot.ItemId))
+                {
+                    // A delayed acknowledgement of an invalidated target is
+                    // still a source snapshot for the current operation; it
+                    // must never turn that old target into a confirmation.
+                    handoff.SourceItemId = participantSnapshot.ItemId;
+                }
+                else
+                {
+                    FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                    return true;
+                }
+            }
+
+            if (!string.Equals(participantSnapshot.SessionId, handoff.ParticipantSessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                handoff.ParticipantSessionId = participantSnapshot.SessionId;
+                handoff.Generation++;
+                handoff.PlayItemPending = false;
+                handoff.PlayItemIssuedAtUtc = null;
+                handoff.RetryCount = 0;
+                handoff.NextRetryAtUtc = null;
+                handoff.LastError = null;
+                runtime.RecordDiagnosticEvent(
+                    "handoff_superseded", null, RemoteCommands.PlayItem, "superseded", null, null, now);
+            }
+
+            if (string.Equals(participantSnapshot.ItemId, handoff.TargetItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!eligibility.IsEligible)
+                {
+                    FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                    return true;
+                }
+
+                runtime.RecordDiagnosticEvent(
+                    "handoff_target_confirmed", null, RemoteCommands.PlayItem, "confirmed", null, null, now);
+                runtime.ClearMediaHandoff();
+                StartBarrier(runtime, room, snapshots, now, fromMediaHandoff: true);
+                BarrierTick(runtime, room, snapshots, now);
+                return true;
+            }
+
+            if (FailMediaHandoffIfExpired(runtime, room, now))
+            {
+                return true;
+            }
+
+            if (!(_issuer is IPlayItemIssuer))
+            {
+                FailMediaHandoff(runtime, room, MediaHandoffIssuerUnavailableError, now);
+                return true;
+            }
+
+            if (handoff.PlayItemPending)
+            {
+                if (!handoff.PlayItemIssuedAtUtc.HasValue ||
+                    (now - handoff.PlayItemIssuedAtUtc.Value).TotalSeconds < SyncConstants.PendingTimeoutSeconds)
+                {
+                    return true;
+                }
+
+                handoff.PlayItemPending = false;
+                handoff.PlayItemIssuedAtUtc = null;
+                handoff.LastError = "play item acknowledgement timed out";
+            }
+
+            if (handoff.NextRetryAtUtc.HasValue && now < handoff.NextRetryAtUtc.Value)
+            {
+                return true;
+            }
+
+            if (handoff.RetryCount >= SyncConstants.MaxPendingRetries + 1)
+            {
+                FailMediaHandoff(runtime, room, MediaHandoffPlayItemFailedError, now);
+                return true;
+            }
+
+            handoff.NextRetryAtUtc = null;
+            handoff.RetryCount++;
+            if (TryIssuePlayItem(room, participantSnapshot, handoff.TargetItemId, now, out var failure))
+            {
+                handoff.PlayItemPending = true;
+                handoff.PlayItemIssuedAtUtc = now;
+                handoff.LastError = null;
+                runtime.RecordDiagnosticEvent(
+                    "handoff_play_requested", null, RemoteCommands.PlayItem, "pending", null, null, now);
+                return true;
+            }
+
+            handoff.LastError = failure ?? MediaHandoffPlayItemFailedError;
+            runtime.RecordDiagnosticEvent(
+                "handoff_play_requested", null, RemoteCommands.PlayItem, "failed", null, null, now);
+            if (handoff.RetryCount < SyncConstants.MaxPendingRetries + 1)
+            {
+                handoff.NextRetryAtUtc = now.AddSeconds(SyncConstants.PendingRetryGraceSeconds);
+                return true;
+            }
+
+            FailMediaHandoff(runtime, room, MediaHandoffPlayItemFailedError, now);
+            return true;
+        }
+
+        private static bool FailMediaHandoffIfExpired(
+            RoomRuntime runtime,
+            Room room,
+            DateTimeOffset now)
+        {
+            if (runtime.Handoff == null ||
+                (now - runtime.Handoff.StartedAtUtc).TotalSeconds < SyncConstants.MediaHandoffTimeoutSeconds)
+            {
+                return false;
+            }
+
+            FailMediaHandoff(runtime, room, MediaHandoffTimedOutError, now);
+            return true;
+        }
+
+        private static bool IsMediaHandoffError(string error)
+        {
+            return string.Equals(error, MediaHandoffIssuerUnavailableError, StringComparison.Ordinal) ||
+                string.Equals(error, MediaHandoffPlayItemFailedError, StringComparison.Ordinal) ||
+                string.Equals(error, MediaHandoffTimedOutError, StringComparison.Ordinal) ||
+                string.Equals(error, MediaHandoffInvalidError, StringComparison.Ordinal);
+        }
+
+        private void StartMediaHandoff(
+            RoomRuntime runtime,
+            Room room,
+            SessionSnapshot primary,
+            SessionSnapshot participant,
+            DateTimeOffset now,
+            string sourceItemId)
+        {
+            var handoff = runtime.BeginMediaHandoff(
+                primary.ItemId,
+                sourceItemId,
+                now,
+                room.PrimaryUserId,
+                primary.SessionId,
+                room.JoinedParticipantUserIds.First(
+                    userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase)),
+                participant?.SessionId);
+            runtime.State = RoomState.Handoff;
+            runtime.Error = null;
+            runtime.Barrier = null;
+            runtime.Pending.Clear();
+            runtime.WaitingPauseRetries.Clear();
+            runtime.Suppressed.Clear();
+            runtime.PauseAlign.Clear();
+            runtime.SyncItemId = null;
+            runtime.MissingSessionSinceUtc = null;
+            runtime.ClearRemoteControlRecovery();
+            runtime.RecordDiagnosticEvent(
+                "handoff_started", null, RemoteCommands.PlayItem, "started", null, null, now);
+            _logger?.Info(
+                $"Room {room.Id}: media handoff started for primary item {ShortIdentity(handoff.TargetItemId)}");
+        }
+
+        private static void FailMediaHandoff(
+            RoomRuntime runtime,
+            Room room,
+            string error,
+            DateTimeOffset now)
+        {
+            runtime.RecordDiagnosticEvent(
+                "handoff_failed", null, RemoteCommands.PlayItem, "failed", null, null, now);
+            runtime.ResetToWaiting();
+            runtime.Previous.Clear();
+            runtime.PreviousAtUtc = null;
+            runtime.MissingSessionSinceUtc = null;
+            runtime.SyncItemId = null;
+            runtime.BarrierRetryAtUtc = null;
+            runtime.Error = error;
         }
 
         private static bool TryGetStoppedUsers(
@@ -1882,6 +2209,64 @@ namespace Emby.Plugins.WatchTogether
             _logger?.Warn($"Room {roomId}: {BarrierSeekRetryBudgetError}");
         }
 
+        private bool TryIssuePlayItem(
+            Room room,
+            SessionSnapshot snapshot,
+            string itemId,
+            DateTimeOffset now,
+            out string error)
+        {
+            error = null;
+            if (room == null || snapshot == null || !snapshot.Online ||
+                string.IsNullOrEmpty(itemId) ||
+                !string.Equals(snapshot.UserId, room.JoinedParticipantUserIds.FirstOrDefault(
+                    userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase)),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                error = "invalid_argument";
+                return false;
+            }
+
+            var issuer = _issuer as IPlayItemIssuer;
+            if (issuer == null)
+            {
+                error = MediaHandoffIssuerUnavailableError;
+                return false;
+            }
+
+            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            {
+                try
+                {
+                    bool accepted = issuer.TryIssuePlayItem(
+                        room.Id,
+                        room.AdminUserId,
+                        snapshot.UserId,
+                        snapshot,
+                        itemId,
+                        now,
+                        timeout.Token,
+                        out error);
+                    if (!accepted && string.IsNullOrEmpty(error))
+                    {
+                        error = MediaHandoffPlayItemFailedError;
+                    }
+
+                    return accepted;
+                }
+                catch (OperationCanceledException)
+                {
+                    error = "command_timeout";
+                    return false;
+                }
+                catch
+                {
+                    error = "command_failed";
+                    return false;
+                }
+            }
+        }
+
         private bool TryIssueCommand(
             string roomId,
             string controllingUserId,
@@ -2340,10 +2725,12 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now,
             string anchorUserId = null,
-            bool? primaryPausedOverride = null)
+            bool? primaryPausedOverride = null,
+            bool fromMediaHandoff = false)
         {
             string anchorUser = anchorUserId ?? room.PrimaryUserId;
             var anchor = snapshots[anchorUser];
+            runtime.ClearMediaHandoff();
             runtime.State = RoomState.Barrier;
             runtime.Error = null;
             runtime.Barrier = new BarrierState
@@ -2358,10 +2745,16 @@ namespace Emby.Plugins.WatchTogether
                 SeekSent = false,
                 SeekRetryDeadlineAtUtc = null,
                 RestoreSent = false,
+                FromMediaHandoff = fromMediaHandoff,
             };
             runtime.SyncItemId = anchor.ItemId;
             runtime.RecordDiagnosticEvent(
                 "barrier_started", anchorUser, null, "entered", anchor.PositionTicks, null, now);
+            if (fromMediaHandoff)
+            {
+                runtime.RecordDiagnosticEvent(
+                    "handoff_barrier_started", null, RemoteCommands.PlayItem, "started", null, null, now);
+            }
             foreach (var pair in snapshots)
             {
                 if (pair.Value != null)
@@ -2828,6 +3221,11 @@ namespace Emby.Plugins.WatchTogether
             runtime.SyncItemId = barrier.ItemId;
             runtime.RecordDiagnosticEvent(
                 "entered_watching", null, null, "entered", barrier.PrimaryPositionTicks, null, now);
+            if (barrier.FromMediaHandoff)
+            {
+                runtime.RecordDiagnosticEvent(
+                    "handoff_completed", null, RemoteCommands.PlayItem, "completed", null, null, now);
+            }
             NotifyParticipants(
                 room,
                 snapshots,

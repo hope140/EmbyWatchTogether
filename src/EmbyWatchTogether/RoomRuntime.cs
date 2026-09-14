@@ -89,6 +89,8 @@ namespace Emby.Plugins.WatchTogether
 
         public string SyncItemId { get; set; }
 
+        public MediaHandoffState Handoff { get; private set; }
+
         public BarrierState Barrier { get; set; }
 
         public DateTimeOffset? BarrierRetryAtUtc { get; set; }
@@ -244,6 +246,7 @@ namespace Emby.Plugins.WatchTogether
             DriftRounds = 0;
             SyncItemId = null;
             BarrierRetryAtUtc = null;
+            Handoff = null;
             ClearRemoteControlRecovery();
         }
 
@@ -293,7 +296,50 @@ namespace Emby.Plugins.WatchTogether
                 SyncItemId = null;
             }
             BarrierRetryAtUtc = null;
+            Handoff = null;
             ClearRemoteControlRecovery();
+        }
+
+        internal MediaHandoffState BeginMediaHandoff(
+            string targetItemId,
+            string sourceItemId,
+            DateTimeOffset startedAtUtc,
+            string primaryUserId,
+            string primarySessionId,
+            string participantUserId,
+            string participantSessionId)
+        {
+            var previous = Handoff;
+            long generation = (previous?.Generation ?? 0) + 1;
+            Handoff = new MediaHandoffState
+            {
+                TargetItemId = targetItemId,
+                SourceItemId = sourceItemId,
+                StartedAtUtc = startedAtUtc,
+                PrimaryUserId = primaryUserId,
+                PrimarySessionId = primarySessionId,
+                ParticipantUserId = participantUserId,
+                ParticipantSessionId = participantSessionId,
+                Generation = generation,
+            };
+            if (previous != null)
+            {
+                foreach (var itemId in previous.SupersededTargetItemIds)
+                {
+                    Handoff.SupersededTargetItemIds.Add(itemId);
+                }
+
+                if (!string.IsNullOrEmpty(previous.TargetItemId))
+                {
+                    Handoff.SupersededTargetItemIds.Add(previous.TargetItemId);
+                }
+            }
+            return Handoff;
+        }
+
+        internal void ClearMediaHandoff()
+        {
+            Handoff = null;
         }
 
         internal void StartRemoteControlRecovery(

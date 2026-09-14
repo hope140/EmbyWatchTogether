@@ -83,5 +83,13 @@ namespace Emby.Plugins.WatchTogether
         // interval so a double click cannot repeatedly rebuild the barrier.
         public const double ParticipantResyncCooldownSeconds = 3.0;
 
+        // A primary stop followed by a new item inside the existing stop
+        // debounce is a media transition, not a confirmed stop.
+        public const double PrimaryItemTransitionGraceSeconds = 2.0;
+
+        // A PlayItem handoff must always leave a bounded state behind for the
+        // next explicit resync to recover.
+        public const double MediaHandoffTimeoutSeconds = 10.0;
+
     }
 }
