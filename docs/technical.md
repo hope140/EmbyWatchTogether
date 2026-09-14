@@ -7,17 +7,17 @@
 - 起播同步使用 `Barrier`：先暂停双方，以主用户位置为锚点对齐另一端，再恢复起播前的暂停/播放状态。进入恢复阶段前，双方都必须在固定 Seek 目标的容差内；Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的预算内有限重试。
 - `Watching` 阶段只传播明确的暂停/继续和明显的手动 Seek，不做周期性追帧。主用户同时操作时作为冲突裁决者；命令确认、抑制窗口以及 session identity、Item、设备会话绑定用于避免回环和旧会话误控制。
 - 已绑定的 `Watching` 会话若仅出现原始远控标志短暂丢失，而同一 Session/Item 的有效能力证据仍在、双方仍为同一有效媒体且没有 Pending 命令，则最多等待 8 秒恢复。窗口内不推进 `WatchingTick`、不发命令或提示；恢复后按保留的上一轮快照处理真实暂停或 Seek，超时及身份、Item、能力或 Pending 变化立即回到现有严格路径。
-- 两端切换到不同 Item 时回到等待状态，不跨 Item Seek；两人同时播放时按安全规则暂停活跃会话，单人播放受到保护。
-- `PlaybackStopped` 事件只用于立即唤醒轮询，不直接确认停止。`Watching` 开始后，停止、离线或缺失状态持续达到 2 秒才确认停止；临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。合法的 seek-to-zero 不单独视为停止。
+- `Watching` 中主用户切换 Item 时进入独立的 `Handoff` 状态。插件通过 `SessionBridge` 的 `PlayItem` 抽象让非 Primary 参与者打开主用户当前 Item，收到当前用户、Session 和 ItemId 均匹配的快照确认后才进入 `Barrier`；参与者自行切换 Item 仍回到安全 `Waiting`，不会让主用户跟随。两人同时播放时按安全规则暂停活跃会话，单人播放受到保护。
+- `PlaybackStopped` 事件只用于立即唤醒轮询，不直接确认停止。`Watching` 开始后，停止、离线或缺失状态持续达到 2 秒才确认停止；这段有限窗口也用于区分主用户的 Stop A → Start B 媒体交接，窗口内出现新主用户 Item 时不执行普通停止副作用。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。合法的 seek-to-zero 不单独视为停止。
 - Session snapshot provider 连续失败达到 2 秒后进入 `Waiting` 保护，清理不可信同步状态且不向旧 session 发命令；恢复需连续成功 2 秒后使用 fresh snapshot 重新同步，弱网抖动不会频繁触发 Barrier。管理页遇到 `snapshot_unavailable` 时仅提示快照不可用，不声称播放器已暂停。
 - 多个共同 Item 候选使用对称 maximin 全局评分选出唯一共同 Item；完全同分时安全等待，不擅自选择。
 - 同一用户的多会话仅沿用唯一历史 `SessionId` + `ItemId` 关联；无历史或关联失效时保持 `Waiting`，不猜测新的会话。
-- 管理员手动 `pause`/`resume` 在 Barrier 或任一参与者存在 Pending 时整次拒绝且不覆盖同步；成功操作不会把陈旧的运行时错误误报为本次失败。
+- 管理员手动 `pause`/`resume` 在 Barrier、Handoff 或任一参与者存在 Pending 时整次拒绝且不覆盖同步；成功操作不会把陈旧的运行时错误误报为本次失败。
 - 退出自动暂停返回稳定的 `Attempted`、`Succeeded`、`Failed` 汇总；群发消息按目标隔离异常并返回 `Sent`、`Failed`、`Skipped`。
-- 命令具备取消、超时和有限重试；起播失败会进入冷却并自动重试。每个房间独立串行处理并隔离异常，不影响其他房间的轮询。
+- 命令具备取消、超时和有限重试；起播失败会进入冷却并自动重试。`PlayItem` 由 `IPlayItemIssuer` / `SessionBridge` 封装为 Emby `SendPlayCommand`，发送成功只表示请求已发出，必须等快照实际变更确认；Handoff 最多进行有限尝试，失败后清理运行时并回到 `Waiting`。每个房间独立串行处理并隔离异常，不影响其他房间的轮询。
 - `SessionInfo` 是服务器轮询快照，不是播放器内部时钟。明显位置跳变的阈值会根据已观测的命令确认延迟提高（普通情况下约 4 秒起），不保证每一帧一致，也不主动消除长期小幅漂移。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 是只读诊断接口，普通参与者和管理员可读取当前房间。接口在 room gate 内重新检查房间、成员和当前 `ServerId`，初始化未完成、房间不存在或服务器身份不匹配时沿用现有稳定错误语义；读取不会调用 `ICommandIssuer` 或消息发送器。返回字段采用白名单 DTO，`RoomRuntime` 保存最多 500 条连续去重事件、最近选中快照和最近动作，均为内存状态，删除房间或重启后清空；页面和导出只取最近 50 条，并按最新在前显示。快照位置、能力和命令确认延迟均表示服务端观察值，不代表客户端已实际执行。
-- 已加入的普通参与者可以通过 `POST /WatchTogether/Rooms/{Id}/Resync` 请求重新同步。请求在 room gate 内再次核验成员、加入状态、当前 `ServerId`、快照保护状态和运行中操作；`Barrier` 或任意 Pending 存在时返回稳定的 busy 结果，不清理当前同步。受理后仅将 runtime 复位为 `Waiting`，由现有轮询在资格满足时进入原有 `Barrier`；房间级短冷却会合并重复请求。响应的 `Status` 只使用 `accepted`、`busy`、`unavailable`，`Reason` 使用稳定原因码。
+- 已加入的普通参与者可以通过 `POST /WatchTogether/Rooms/{Id}/Resync` 请求重新同步。请求在 room gate 内再次核验成员、加入状态、当前 `ServerId`、快照保护状态和运行中操作；`Barrier`、`Handoff` 或任意 Pending 存在时返回稳定的 busy 结果，不清理当前同步。受理后仅在内存中记录一次性请求，由轮询读取 Primary 当前 Item：参与者已在相同 Item 时直接进入原有 `Barrier`，Item 不同则通过 `PlayItem` Handoff 等待确认后再进入 Barrier。发送失败或确认超时会回到安全 `Waiting`，之后仍可在冷却结束后再次请求。响应的 `Status` 只使用 `accepted`、`busy`、`unavailable`，`Reason` 使用稳定原因码。
 - 阶段 C 的自助邀请只驻留 `RoomInvitationManager` 内存。`POST /WatchTogether/Invitations` 创建 15 分钟有效的一次性邀请码，服务端只保存 SHA-256 校验值；`GET` 只返回当前用户的有效邀请元数据，`DELETE` 可撤销，`POST /WatchTogether/Invitations/{Code}/Accept` 在同一串行边界内检查接受者、成员占用和房间持久化后消费邀请码。每位创建者最多 3 个有效邀请，全局最多 100 个，接受尝试按用户每分钟 5 次、全局每分钟 100 次限制。重启后邀请失效，现有 `rooms.json` 房间不受影响。
 
 ## 配置与运行时参数
@@ -97,7 +97,7 @@ docs/                          当前实现说明、排错和协作流程
 
 ## 运行时持久化与生命周期
 
-插件运行时在 Emby 插件数据目录写入 `rooms.json`。房间元数据先写入候选文件，再用 `File.Replace` 替换现有文件并保留 `.bak`；损坏或未知房间不会被静默补建，`RoomManager` 只为已知房间创建 runtime。Pending、Suppressed、上一轮快照和 Barrier 阶段等运行时状态只保存在内存，重启后会重新进入 `Waiting` 并建立新的 Barrier。Pending 不会跨 session、Item 或设备重连重试；重复 `Leave` 不改变成员状态，也不会反复触发暂停。
+插件运行时在 Emby 插件数据目录写入 `rooms.json`。房间元数据先写入候选文件，再用 `File.Replace` 替换现有文件并保留 `.bak`；损坏或未知房间不会被静默补建，`RoomManager` 只为已知房间创建 runtime。Pending、Suppressed、上一轮快照、Handoff 和 Barrier 阶段等运行时状态只保存在内存，重启后会重新进入 `Waiting` 并建立新的 Barrier。Pending 不会跨 session、Item 或设备重连重试；重复 `Leave` 不改变成员状态，也不会反复触发暂停。
 
 ## REST API
 

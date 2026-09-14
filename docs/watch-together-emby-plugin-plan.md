@@ -14,7 +14,7 @@
 
 ### 不支持
 
-- 跨服务器、多人房间或跨 Item 追赶；
+- 跨服务器、多人房间或跨 Item 的周期性追赶；
 - 以服务器轮询快照替代播放器内部时钟；
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
@@ -38,10 +38,10 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 - `Plugin` 是 Emby 发现的插件入口，提供插件 ID、名称和嵌入式管理页。
 - `WatchTogetherEntryPoint` 在服务器启动时构造存储、会话桥接和同步线程，在停止时释放它们。
-- `SessionBridge` 将 Emby `SessionInfo` 和远程命令适配为插件使用的快照和命令；会话事件会请求立即轮询。
+- `SessionBridge` 将 Emby `SessionInfo` 和远程命令适配为插件使用的快照和命令；`SendPlayItemAsync` 通过 `SendPlayCommand` 请求当前会话打开指定 Item，会话事件会请求立即轮询。
 - `SessionSelector` 为每位已加入用户选择当前有效会话，过滤停止/陈旧记录，并尽量保留两端共同 Item；后续同步继续绑定所选 session identity。
 - `RoomManager` 管理房间元数据和每个房间的 `RoomRuntime`；只有已知房间才会创建 runtime，`RoomStore` 将房间元数据写入插件数据目录的 `rooms.json`。
-- `SyncEngine` 是轮询驱动的状态机；每个房间通过独立 gate 串行处理，单房间异常被记录并隔离；`WatchTogetherService` 提供管理页使用的 REST API，并在服务端再次校验权限。
+- `SyncEngine` 是轮询驱动的状态机；每个房间通过独立 gate 串行处理，单房间异常被记录并隔离。状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching` 和 `Unavailable`；`Handoff` 只负责媒体打开确认，`Barrier` 继续负责时间轴对齐。`WatchTogetherService` 提供管理页使用的 REST API，并在服务端再次校验权限。
 
 ## 3. 房间、资格和运行时状态
 
@@ -49,7 +49,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 一个房间必须有两名不同的参与者和一名主用户，主用户必须是参与者之一。每名用户不能同时属于其他房间。创建房间时两名参与者默认标记为已加入；参与者可以在管理页执行加入或退出。
 
-房间保存 `ServerId`、名称、管理员、主用户、参与者、加入状态和创建时间。写入时先生成候选文件，再使用 `File.Replace` 替换现有 `rooms.json` 并保留 `.bak` 备份；损坏文件会报告错误，不会静默覆盖。运行时的上一轮快照、Pending 命令、Suppressed 窗口、Barrier 阶段和错误冷却不写入 `rooms.json`；插件重启后会从 `Waiting` 重新开始。重复 `Leave` 不改变成员状态，也不会重复触发暂停。
+房间保存 `ServerId`、名称、管理员、主用户、参与者、加入状态和创建时间。写入时先生成候选文件，再使用 `File.Replace` 替换现有 `rooms.json` 并保留 `.bak` 备份；损坏文件会报告错误，不会静默覆盖。运行时的上一轮快照、Pending 命令、Suppressed 窗口、Handoff、Barrier 阶段和错误冷却不写入 `rooms.json`；插件重启后会从 `Waiting` 重新开始。重复 `Leave` 不改变成员状态，也不会重复触发暂停。
 
 ### 进入 Barrier 的资格
 
@@ -67,6 +67,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 | 状态 | 含义 | 常见进入方式 |
 | --- | --- | --- |
 | `Waiting` | 条件未满足、Item 不同或上一轮失败后的安全状态 | 初始、退出、不同 Item、命令未确认 |
+| `Handoff` | 主用户已切换媒体，正在让非 Primary 参与者打开目标 Item 并等待快照确认 | 主用户换片、参与者显式跨 Item Resync |
 | `Barrier` | 暂停—Seek—恢复的起播握手 | 双方在线且资格检查通过 |
 | `Watching` | 起播完成，只处理明确的播放操作 | Barrier 完成 |
 | `Unavailable` | 房间 `ServerId` 与当前 Emby 实例不一致 | 载入或轮询时发现归属不符 |
@@ -77,11 +78,12 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 1. 校验房间所属服务器；
 2. 拉取会话并按参与者选择快照；
-3. 在 `Watching` 中先识别停止/退出；
-4. 观察 Pending 命令是否已确认、超时或需要一次重试；
-5. 判断双方是否满足相同 Item 和远程控制条件；
-6. 推进 Barrier 或处理 Watching 中的用户操作；
-7. 生成房间状态供 REST API 和管理页显示。
+3. 在 `Watching` 中优先识别主用户 Item 变化和 Handoff；
+4. 识别停止/退出，并用 2 秒有限窗口区分 Stop 与下一 Item；
+5. 观察 Pending 命令或 Handoff PlayItem 是否已确认、超时或需要有限重试；
+6. 判断双方是否满足相同 Item 和远程控制条件；
+7. 推进 Handoff、Barrier 或处理 Watching 中的用户操作；
+8. 生成房间状态供 REST API 和管理页显示。
 
 播放开始、进度、停止、会话开始/结束和能力变化事件只调用 `RequestImmediatePoll`，具体状态仍由同步线程读取会话快照确认。配置事件会更新 `PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop`，并唤醒等待中的循环，因此保存后下一轮轮询即可看到新策略。内部唤醒事件会合并突发通知，轮询间隔仍是兜底，不会因为事件风暴创建多个线程。
 
@@ -101,7 +103,7 @@ Barrier 的三个阶段按顺序执行，每条远程命令都等待 SessionInfo
 
 按 Barrier 开始时锚点记录的暂停/播放意图向双方发送 `Pause` 或 `Unpause`。双方状态确认后直接进入 `Watching`，不再执行额外的最终 Seek。
 
-Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确认时错误为 `playback command was not acknowledged`，约 3 秒冷却后在条件仍满足时自动重新开始 Barrier。远程命令和提示消息都支持取消，并有约 5 秒的外部调用超时；引擎停止等待线程结束的时间有 10 秒上限。自动重试提示是尽力发送的消息，消息失败不会阻塞状态机。
+Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确认时错误为 `playback command was not acknowledged`，约 3 秒冷却后在条件仍满足时自动重新开始 Barrier。Handoff 的 `PlayItem` 发送使用约 5 秒外部调用超时，成功后仍必须由当前参与者 SessionInfo 的 `ItemId` 变化确认；最多有限重试，失败后清理 Handoff 并回到 `Waiting`。远程命令和提示消息都支持取消，并有约 5 秒的外部调用超时；引擎停止等待线程结束的时间有 10 秒上限。自动重试提示是尽力发送的消息，消息失败不会阻塞状态机。
 
 ## 6. Watching 阶段的同步规则
 
@@ -110,6 +112,12 @@ Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确�
 已经进入 `Watching` 的房间若仅有一端原始 `SupportsRemoteControl` 从 `true` 短暂变为 `false`，插件只在以下条件同时成立时保留最多 8 秒恢复窗口：双方仍在线且未停止、SessionId 与 ItemId 继续匹配上一轮身份、媒体相同且时长与倍速有效、有效能力证据仍在、当前没有 Pending 命令。窗口按受影响用户集合和两端身份绑定，不因重复快照刷新起始时间。
 
 窗口内保持 `Watching`，但不运行普通暂停/Seek 检测，也不发送播放命令或提示。能力恢复后使用窗口前保留的快照继续判断，自然播放不会被误认为 Seek；窗口内发生的真实暂停或明显 Seek 在恢复后按既有规则处理一次。超过 8 秒，或 Session、Item、受影响用户、有效能力、Pending 等条件变化时，立即退出保护并执行原有严格等待和安全暂停。初始 `Waiting`、Barrier、换片、停止/离线与快照源保护不使用这个窗口。
+
+### Media Handoff
+
+`Watching` 中只有 `PrimaryUserId` 的当前选中 Session 从 Item A 变为 Item B 时才触发媒体交接。插件记录 `TargetItemId`、主用户 Session identity、参与者 Session identity 和 generation，并进入 `Handoff`。参与者仍在 A 或其他 Item 时，通过 `IPlayItemIssuer` 请求它打开 B；发送成功只表示请求发出，只有当前参与者用户、Session 和 `ItemId == B` 同时匹配才算确认。参与者已经在 B 时跳过 PlayItem，直接进入 `Barrier`。目标从 B 变为 C 时立即使旧 generation 失效，迟到的 B 快照不能确认当前交接；有限重试或总超时失败后清理运行时并回到安全 `Waiting`。
+
+主用户决定媒体，参与者自行从 A 切到 C 不会让主用户跟随，仍按不同 Item 的安全路径等待。参与者通过 `POST /WatchTogether/Rooms/{Id}/Resync` 明确请求时，服务端只对非 Primary 参与者执行上述 PlayItem Handoff；请求者是 Primary 时也不会向 Primary 发送 PlayItem。
 
 ### 暂停和继续
 
@@ -136,14 +144,14 @@ else:
 
 ### 不同 Item
 
-两端 `ItemId` 不同即回到 `Waiting`，设置错误“`两位参与者打开了不同视频，暂不发送同步指令`”，不发送跨 Item Seek。若两端都在播放，插件会按安全规则暂停活跃会话；当只能确认一端独自播放时，单人保护不会打断它。两端重新打开相同 Item 后会建立新的 Barrier。
+`Watching` 中主用户切换 Item 时先进入 `Handoff`，不发送跨 Item Seek；确认参与者打开目标 Item 后再进入 `Barrier`。参与者自行切换到不同 Item 时回到 `Waiting`，设置错误“`两位参与者打开了不同视频，暂不发送同步指令`”，不让主用户跟随。若两端都在播放，插件会按安全规则暂停活跃会话；当只能确认一端独自播放时，单人保护不会打断它。两端重新打开相同 Item 或参与者明确请求 Resync 后会建立新的 Barrier。
 
 ### 停止或退出
 
 只有在 `Watching` 状态才产生持久停止处理。停止判断按以下顺序执行：
 
 1. Emby 的 `PlaybackStopped` 事件只唤醒同步轮询，不直接触发停止副作用。
-2. `Watching` 开始后，当前观察按 `Previous SessionId` + `ItemId` 绑定。当前会话标记 `stopped`、离线或缺失时先记录疑似停止时间，异常状态连续达到 2 秒 debounce 后才确认；临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。
+2. `Watching` 开始后，当前观察按 `Previous SessionId` + `ItemId` 绑定。当前会话标记 `stopped`、离线或缺失时先记录疑似停止时间，异常状态连续达到 2 秒 debounce 后才确认；这段有限窗口也作为 Primary Item transition grace，窗口内选中新的 Primary Item 时识别为 Handoff，不执行普通停止副作用。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。
 3. 位置归零不是停止条件；合法的 seek-to-zero 不会单独触发停止副作用。
 4. 仅在停止状态确认的转换上执行副作用，避免每轮重复；`PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方，`NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示。生产序列中两项副作用都必须在同一停止确认转换上执行，避免另一方遗漏暂停或提示。
 5. 清理运行时并回到 `Waiting`，要求双方重新打开同一视频。
@@ -152,7 +160,7 @@ Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久
 
 ### 会话身份和命令生命周期
 
-`SessionSelector` 选择会话后，`Watching`、Barrier、Pending、Suppressed 和暂停对齐状态都会记录对应的 session identity 与 Item。即使新设备继续播放相同 Item 和位置，只要 session identity 变化也会回到 `Waiting`，不会把旧快照当成手动 Seek。Pending 命令遇到不同会话、不同 Item 或设备重连时直接丢弃，不跨身份确认或重试。
+`SessionSelector` 选择会话后，`Watching`、Handoff、Barrier、Pending、Suppressed 和暂停对齐状态都会记录对应的 session identity 与 Item。Handoff 另以 Target Item 和 generation 绑定主用户操作；目标或主用户 Session identity 变化时旧操作立即失效。即使新设备继续播放相同 Item 和位置，只要 session identity 变化也会回到 `Waiting` 或重新建立受控 Handoff，不会把旧快照当成手动 Seek。Pending 命令遇到不同会话、不同 Item 或设备重连时直接丢弃，不跨身份确认或重试。
 
 同一用户存在多个候选会话时，仅当历史记录能唯一绑定 `SessionId` 与 `ItemId` 才沿用；无历史或绑定失效时保持等待，直到重新建立可靠关联。
 
@@ -162,7 +170,7 @@ Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久
 
 ### 管理页
 
-嵌入式页面显示房间创建表单、房间状态卡片、加入/退出、暂停、继续、重新同步和删除操作。每个房间卡片维护独立的操作反馈和忙碌状态，5 秒轮询只刷新状态，不覆盖操作结果；成功提示约 8 秒后清除，错误提示保留到下一次同房间操作或手动刷新。`StatusReason` 会映射为安全、可执行的中文说明，不直接显示后端错误文本。手动暂停/继续在 Barrier 或任一参与者存在 Pending 时整次拒绝，不覆盖同步；成功操作不会误报陈旧 runtime error。
+嵌入式页面显示房间创建表单、房间状态卡片、加入/退出、暂停、继续、重新同步和删除操作。Handoff 期间显示“正在同步下一集”以及“正在让另一位参与者打开主用户当前视频”，诊断详情显示目标/来源 Item 的短 hash、参与者别名、Pending、重试次数和 generation。每个房间卡片维护独立的操作反馈和忙碌状态，5 秒轮询只刷新状态，不覆盖操作结果；成功提示约 8 秒后清除，错误提示保留到下一次同房间操作或手动刷新。`StatusReason` 会映射为安全、可执行的中文说明，不直接显示后端错误文本。手动暂停/继续在 Barrier、Handoff 或任一参与者存在 Pending 时整次拒绝，不覆盖同步；成功操作不会误报陈旧 runtime error。
 
 页面还显示三个设置复选框：
 
@@ -281,6 +289,9 @@ git diff --check
 - 主用户冲突裁决、同轮 Seek 优先并保留最终播放意图、手动 Seek 去重、长轮询和自然速率差不误判；
 - 资格失败原因仅在变化时记录，日志身份摘要使用截短的 session/Item 标识且不记录认证参数；
 - 不同 Item 的安全暂停、单人保护、停止检测和重复通知抑制；
+- PlayItem 命令适配、Primary Media Handoff、目标覆盖、确认超时和有限重试；
+- 参与者跨 Item Resync 只作用于非 Primary，且不会反向控制主用户；
+- Handoff 状态、脱敏诊断 DTO、事件白名单和管理页状态文案；
 - 嵌入式设置页资源和配置默认值；
 - 发布密钥生成、canonical manifest、RSA 签名校验和手动发布 workflow 约束。
 
@@ -292,15 +303,16 @@ git diff --check
 2. 连续播放约 10 分钟，不应出现由本插件造成的周期性跳转；
 3. 主用户暂停/继续，另一端跟随且不来回切换；
 4. 任一端前进或后退，另一端只发生一次对应 Seek；
-5. 一端切换下一集或不同视频，双方进入等待且没有跨 Item Seek；
+5. 主用户切换下一集时，参与者自动打开相同 Item，随后通过 `Handoff → Barrier → Watching` 完成同步；参与者自行切换其他视频时主用户不跟随，房间进入安全等待；
 6. 一端停止或退出，分别切换两个停止行为开关，确认暂停和消息互相独立；
 7. 暂时阻断命令确认，确认只有限重试、进入冷却并能自动恢复；
 8. 在网络延迟、直播/STRM 或 CMS 场景观察 SessionInfo 是否稳定，并记录客户端能力差异。
-9. 管理页逐房间执行加入、退出、暂停、继续、重新同步和删除，确认反馈不会被轮询清掉；切换三个设置并确认保存摘要显示实际开启/关闭值。
+9. 管理页逐房间执行加入、退出、暂停、继续、重新同步和删除，确认反馈不会被轮询清掉；分别验证跨 Item Resync、Handoff 状态和脱敏诊断；切换三个设置并确认保存摘要显示实际开启/关闭值。
 
 ## 10. 排错与残余风险
 
 - `Waiting` 通常表示参与者未加入、Item 不同、媒体时长差过大、播放速率不为 1 或远程控制能力不足；先查看 `/WatchTogether/Rooms/{id}/State` 的 `Eligible`、会话和 `Error`。
+- `Handoff` 表示主用户已切换媒体或参与者已明确请求跨 Item Resync；先查看诊断中的目标 Item hash、PlayItem Pending、generation 和最近事件。发送成功不代表播放器已打开，必须等待 SessionInfo 的 ItemId 确认。
 - Barrier 错误通常与客户端不确认 Pause/Seek/Unpause 或 SessionInfo 更新滞后有关；冷却结束后会自动重试，也可由管理员执行 `resync`。
 - 正常播放期间出现反复跳转时，优先排查其他插件、客户端或遥控器；本实现只有检测到明显单次跳变才发 Seek。
 - 停止后的暂停/提示是尽力行为：目标客户端必须支持对应远程命令，消息失败不会阻止房间回到等待状态。
