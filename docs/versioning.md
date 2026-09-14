@@ -56,7 +56,7 @@ Git tag：v1.5.0.0
 - `beta` 只用于 `beta` 测试发布；`beta` workflow 创建 GitHub prerelease。
 - 手动运行 workflow 时必须选择 `channel` 并提供规范数字 tag。workflow 会拒绝未知 channel，以及 `stable` 从非 `main` 或 `beta` 从非 `beta` 触发的请求。
 - channel 只改变 Release 通道标记，不改变 tag、manifest 的 `tag`/`version` 约束或四个固定签名资产名称；不得使用 `-beta` 等版本后缀。
-- GitHub prerelease 不会成为 `releases/latest`。`stable` 更新器继续只读取 `releases/latest`；管理员选择 `beta` 后，更新任务通过 Releases API 获取并自动安装对应的预发布版本。beta 不能据此声称已完成真实客户端验收，任务开关和计划仍由 Emby 控制。
+- GitHub prerelease 不会成为 `releases/latest`。`stable` 更新器继续只读取 `releases/latest`；管理员选择 `beta` 后，更新任务通过 Releases API 在非 draft stable 与 prerelease 中选择最高规范版本并自动安装。beta 不能据此声称已完成真实客户端验收，任务开关和计划仍由 Emby 控制。
 
 以当前版本为基准：
 
