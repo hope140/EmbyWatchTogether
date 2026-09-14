@@ -460,9 +460,97 @@ namespace Emby.Plugins.WatchTogether.Tests
             using var bridge = new SessionBridge(sm.Object);
             var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
             var service = NewService(u1, true);
-            WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" }));
+            SetRuntimePlugin(service, plugin);
+            var response = service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" });
+            Assert.Null(GetString(response, "Error"));
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Header == "一起观看" && m.Text == "管理员已发起重新同步，请稍候" && m.TimeoutMs == 3000), It.IsAny<CancellationToken>()), Times.Once);
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Theory]
+        [InlineData("barrier")]
+        [InlineData("pending")]
+        public void Control_Resync_ConflictDoesNotNotify(string conflict)
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var runtime = manager.GetRuntime(room.Id);
+            var originalState = conflict == "barrier" ? RoomState.Barrier : RoomState.Waiting;
+            runtime.State = originalState;
+            BarrierState originalBarrier = null;
+            PendingCommand originalPending = null;
+            if (conflict == "barrier")
+            {
+                originalBarrier = new BarrierState { Stage = BarrierStage.Seek, AnchorUserId = u1 };
+                runtime.Barrier = originalBarrier;
+            }
+            else
+            {
+                originalPending = new PendingCommand { UserId = u1, Command = RemoteCommands.Pause };
+                runtime.Pending[u1] = originalPending;
+            }
+
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[]
+            {
+                NewSession(sm, "s1", u1, new[] { "DisplayMessage" }),
+                NewSession(sm, "s2", u2, new[] { "DisplayMessage" }),
+            });
+            sm.Setup(s => s.SendMessageCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(u1, true);
+            SetRuntimePlugin(service, plugin);
+
+            var response = service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" });
+
+            Assert.Equal("manual action conflicts with active synchronization", GetString(response, "Error"));
+            Assert.Equal(originalState, runtime.State);
+            if (originalBarrier != null)
+            {
+                Assert.Same(originalBarrier, runtime.Barrier);
+            }
+            else
+            {
+                Assert.Same(originalPending, runtime.Pending[u1]);
+            }
+            sm.Verify(s => s.SendMessageCommand(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public void Control_Resync_ServerUnavailableDoesNotNotify()
+        {
+            var u1 = Guid.NewGuid().ToString("N");
+            var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Watching;
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[]
+            {
+                NewSession(sm, "s1", u1, new[] { "DisplayMessage" }),
+                NewSession(sm, "s2", u2, new[] { "DisplayMessage" }),
+            });
+            sm.Setup(s => s.SendMessageCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-2");
+            var service = NewService(u1, true);
+            SetRuntimePlugin(service, plugin);
+
+            var response = service.Post(new ControlRoomRequest { Id = room.Id, Action = "resync" });
+
+            Assert.Equal("room server is unavailable", GetString(response, "Error"));
+            Assert.Equal(RoomState.Watching, runtime.State);
+            sm.Verify(s => s.SendMessageCommand(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [Fact]

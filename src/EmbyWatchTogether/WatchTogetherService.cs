@@ -302,7 +302,10 @@ namespace Emby.Plugins.WatchTogether
             }
             else if ((request.Action ?? string.Empty).Equals("resync", StringComparison.OrdinalIgnoreCase))
             {
-                NotifyAdminResync(plugin, request.Id);
+                if (result.Error == null)
+                {
+                    NotifyAdminResync(plugin, request.Id);
+                }
             }
             return new
             {
