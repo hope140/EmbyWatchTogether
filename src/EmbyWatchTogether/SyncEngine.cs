@@ -301,7 +301,8 @@ namespace Emby.Plugins.WatchTogether
                             room.JoinedParticipantUserIds,
                             now,
                             SessionSelector.StaleSessionTimeoutSeconds,
-                            runtime.Previous);
+                            runtime.Previous,
+                            runtime.State == RoomState.Watching);
                         var snapshots = selection.Selected;
                         runtime.RecordDiagnosticSnapshots(snapshots, now);
                         var eligibility = RoomEligibility.Evaluate(snapshots);

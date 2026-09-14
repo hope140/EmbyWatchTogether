@@ -570,6 +570,16 @@ namespace Emby.Plugins.WatchTogether
                 {
                     lock (_lock)
                     {
+                        if (runtime.Barrier != null || runtime.Pending.Count > 0)
+                        {
+                            return new RoomActionResult
+                            {
+                                RoomId = roomId,
+                                State = runtime.State,
+                                Error = RoomActionConflictError,
+                            };
+                        }
+
                         runtime.ResetToWaiting();
                         runtime.RecordDiagnosticEvent(
                             "resync", null, null, "success", null, null, now);
@@ -652,7 +662,6 @@ namespace Emby.Plugins.WatchTogether
                         lock (_lock)
                         {
                             operationError = $"{command} command failed: {error}";
-                            runtime.Error = operationError;
                             runtime.RecordDiagnosticEvent(
                                 "manual_action", user, command, "failed", null, null, now);
                         }
@@ -667,7 +676,7 @@ namespace Emby.Plugins.WatchTogether
                         State = runtime.State,
                         Command = command,
                         Users = issued,
-                        Error = operationError ?? (issued.Count > 0 ? null : runtime.Error),
+                        Error = operationError,
                     };
                 }
             }

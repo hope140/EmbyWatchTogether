@@ -28,7 +28,8 @@ namespace Emby.Plugins.WatchTogether
                 now,
                 TimeSpan.FromSeconds(staleTimeoutSeconds),
                 null,
-                null);
+                null,
+                false);
         }
 
         public static Dictionary<string, SessionSnapshot> Select(
@@ -43,7 +44,8 @@ namespace Emby.Plugins.WatchTogether
                 now,
                 staleTimeout,
                 null,
-                null);
+                null,
+                false);
         }
 
         internal static SessionSelectionDiagnostics SelectWithDiagnostics(
@@ -65,7 +67,8 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyList<string> userIds,
             DateTimeOffset? now,
             double staleTimeoutSeconds,
-            IReadOnlyDictionary<string, SessionSnapshot> previous)
+            IReadOnlyDictionary<string, SessionSnapshot> previous,
+            bool preservePreviousRecovery = false)
         {
             var diagnostics = new SessionSelectionDiagnostics();
             var selected = SelectCore(
@@ -74,7 +77,8 @@ namespace Emby.Plugins.WatchTogether
                 now,
                 TimeSpan.FromSeconds(staleTimeoutSeconds),
                 diagnostics,
-                previous);
+                previous,
+                preservePreviousRecovery);
             diagnostics.Selected = selected;
             return diagnostics;
         }
@@ -85,7 +89,8 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset? now,
             TimeSpan staleTimeout,
             SessionSelectionDiagnostics diagnostics,
-            IReadOnlyDictionary<string, SessionSnapshot> previous)
+            IReadOnlyDictionary<string, SessionSnapshot> previous,
+            bool preservePreviousRecovery)
         {
             var byUser = new Dictionary<string, List<SelectionCandidate>>(StringComparer.OrdinalIgnoreCase);
             var allCandidates = diagnostics == null
@@ -122,7 +127,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             RemoveSessionsLaggingBehindUserLatest(byUser);
-            PreferCommonItem(byUser);
+            PreferCommonItem(byUser, previous);
 
             var selected = new Dictionary<string, SessionSnapshot>(StringComparer.OrdinalIgnoreCase);
             foreach (var pair in byUser)
@@ -133,8 +138,21 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                var maxKey = values.Select(v => SelectionKey(v.Snapshot)).Max();
-                var latest = values.Where(v => SelectionKey(v.Snapshot) == maxKey).ToList();
+                // Keep an established identity through the narrow capability
+                // recovery window. The caller still validates the Watching
+                // state and recovery signature; this only prevents a newer
+                // raw-false snapshot from displacing that bound session before
+                // the recovery check can run.
+                var recoveryMatch = FindPreviousRecoveryCandidate(
+                    preservePreviousRecovery ? values : null,
+                    pair.Key,
+                    preservePreviousRecovery ? previous : null);
+                var maxKey = values.Select(value => SelectionKey(value.Snapshot)).Max();
+                var latest = recoveryMatch != null
+                    ? new List<SelectionCandidate> { recoveryMatch }
+                    : values
+                        .Where(v => SelectionKey(v.Snapshot) == maxKey)
+                        .ToList();
                 if (latest.Count != 1)
                 {
                     SelectionCandidate previousMatch = null;
@@ -237,7 +255,9 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private static void PreferCommonItem(Dictionary<string, List<SelectionCandidate>> byUser)
+        private static void PreferCommonItem(
+            Dictionary<string, List<SelectionCandidate>> byUser,
+            IReadOnlyDictionary<string, SessionSnapshot> previous)
         {
             var itemSets = byUser
                 .Where(p => p.Value.Count > 0)
@@ -262,7 +282,7 @@ namespace Emby.Plugins.WatchTogether
                 return;
             }
 
-            string commonItem;
+            string commonItem = null;
             if (common.Count == 1)
             {
                 // Preserve the original single-common-item behavior.
@@ -296,7 +316,8 @@ namespace Emby.Plugins.WatchTogether
                 var tied = scored
                     .Where(candidate => CompareScores(candidate.Keys, winner.Keys) == 0)
                     .ToList();
-                if (tied.Count != 1)
+                if (tied.Count != 1 &&
+                    !TryApplyPreviousCommonItemTieBreak(tied, byUser, previous, out commonItem))
                 {
                     var ambiguousItems = new HashSet<string>(
                         tied.Select(candidate => candidate.ItemId),
@@ -318,7 +339,10 @@ namespace Emby.Plugins.WatchTogether
                     return;
                 }
 
-                commonItem = winner.ItemId;
+                if (tied.Count == 1)
+                {
+                    commonItem = winner.ItemId;
+                }
             }
 
             foreach (var key in byUser.Keys.ToList())
@@ -338,9 +362,82 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        private static bool TryApplyPreviousCommonItemTieBreak(
+            IReadOnlyList<CommonItemScore> tied,
+            Dictionary<string, List<SelectionCandidate>> byUser,
+            IReadOnlyDictionary<string, SessionSnapshot> previous,
+            out string commonItem)
+        {
+            commonItem = null;
+            if (tied == null || previous == null)
+            {
+                return false;
+            }
+
+            var viable = new List<(string itemId, Dictionary<string, SelectionCandidate> matches)>();
+            foreach (var score in tied)
+            {
+                var matches = new Dictionary<string, SelectionCandidate>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pair in byUser)
+                {
+                    if (!previous.TryGetValue(pair.Key, out var previousSnapshot) ||
+                        previousSnapshot == null)
+                    {
+                        matches.Clear();
+                        break;
+                    }
+
+                    var userMatches = pair.Value
+                        .Where(candidate =>
+                            string.Equals(candidate.Snapshot.ItemId, score.ItemId, StringComparison.OrdinalIgnoreCase) &&
+                            HasSameIdentity(candidate.Snapshot, previousSnapshot))
+                        .ToList();
+                    if (userMatches.Count != 1)
+                    {
+                        matches.Clear();
+                        break;
+                    }
+
+                    matches[pair.Key] = userMatches[0];
+                }
+
+                if (matches.Count == byUser.Count)
+                {
+                    viable.Add((score.ItemId, matches));
+                }
+            }
+
+            if (viable.Count != 1)
+            {
+                return false;
+            }
+
+            commonItem = viable[0].itemId;
+            foreach (var pair in byUser)
+            {
+                var selected = viable[0].matches[pair.Key];
+                foreach (var candidate in pair.Value)
+                {
+                    if (!ReferenceEquals(candidate, selected))
+                    {
+                        candidate.Disposition = string.Equals(
+                            candidate.Snapshot.ItemId,
+                            commonItem,
+                            StringComparison.OrdinalIgnoreCase)
+                            ? "previous-selection-filtered"
+                            : "common-item-filtered";
+                    }
+                }
+
+                byUser[pair.Key] = new List<SelectionCandidate> { selected };
+            }
+
+            return true;
+        }
+
         private static int CompareScores(
-            IReadOnlyList<(int active, int capabilityRank, long activityTicks)> left,
-            IReadOnlyList<(int active, int capabilityRank, long activityTicks)> right)
+            IReadOnlyList<(int active, int rawCapabilityRank, int effectiveCapabilityRank, long activityTicks)> left,
+            IReadOnlyList<(int active, int rawCapabilityRank, int effectiveCapabilityRank, long activityTicks)> right)
         {
             int count = Math.Min(left.Count, right.Count);
             for (int index = 0; index < count; index++)
@@ -359,7 +456,7 @@ namespace Emby.Plugins.WatchTogether
         {
             public string ItemId { get; set; }
 
-            public List<(int active, int capabilityRank, long activityTicks)> Keys { get; set; }
+            public List<(int active, int rawCapabilityRank, int effectiveCapabilityRank, long activityTicks)> Keys { get; set; }
         }
 
         private static List<SelectionCandidate> DeduplicateBySessionId(List<SelectionCandidate> values)
@@ -401,14 +498,39 @@ namespace Emby.Plugins.WatchTogether
                 string.Equals(left.ItemId, right.ItemId, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static (int active, int capabilityRank, long activityTicks) SelectionKey(SessionSnapshot snapshot)
+        private static SelectionCandidate FindPreviousRecoveryCandidate(
+            IReadOnlyList<SelectionCandidate> values,
+            string userId,
+            IReadOnlyDictionary<string, SessionSnapshot> previous)
+        {
+            if (values == null || previous == null ||
+                !previous.TryGetValue(userId, out var previousSnapshot) ||
+                previousSnapshot == null || !previousSnapshot.SupportsRemoteControl)
+            {
+                return null;
+            }
+
+            var matches = values
+                .Where(value =>
+                    HasSameIdentity(value.Snapshot, previousSnapshot) &&
+                    !value.Snapshot.SupportsRemoteControl &&
+                    value.Snapshot.Capabilities?.SupportsRemoteControl == true)
+                .ToList();
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        private static (int active, int rawCapabilityRank, int effectiveCapabilityRank, long activityTicks) SelectionKey(SessionSnapshot snapshot)
         {
             int active = snapshot.Online ? 1 : 0;
-            int capabilityRank = snapshot.Capabilities != null && snapshot.Capabilities.SupportsRemoteControl
+            // RoomEligibility requires the raw session flag. Effective
+            // capability evidence remains a secondary preference for records
+            // that have the same raw eligibility state.
+            int rawCapabilityRank = snapshot.SupportsRemoteControl ? 1 : 0;
+            int effectiveCapabilityRank = snapshot.Capabilities != null && snapshot.Capabilities.SupportsRemoteControl
                 ? 2
                 : (snapshot.Capabilities != null && snapshot.Capabilities.SupportedCommands.Count > 0 ? 1 : 0);
             long activity = snapshot.LastActivityDateUtc.Ticks;
-            return (active, capabilityRank, activity);
+            return (active, rawCapabilityRank, effectiveCapabilityRank, activity);
         }
 
         private sealed class SelectionCandidate
