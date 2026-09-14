@@ -3787,6 +3787,38 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void MediaHandoff_ParticipantChangesToThirdItemWhilePending_CancelsHandoff()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.PlayItems.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(issuer.PlayItems);
+            Assert.Equal("item-b", issuer.PlayItems[0].itemId);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-c"));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Null(runtime.Handoff);
+            Assert.Equal("media handoff participant changed item", runtime.Error);
+            Assert.Single(issuer.PlayItems);
+            Assert.DoesNotContain(issuer.PlayItems, item => item.userId == "u1");
+            Assert.DoesNotContain(issuer.Commands, command => command.userId == "u1" && command.command == RemoteCommands.PlayItem);
+        }
+
+        [Fact]
         public void ParticipantResync_DifferentItem_HandsOffOnlyParticipantThenStartsBarrier()
         {
             var room = CreateRoom();

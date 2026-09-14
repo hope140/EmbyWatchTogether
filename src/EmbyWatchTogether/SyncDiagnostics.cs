@@ -457,6 +457,7 @@ namespace Emby.Plugins.WatchTogether
                 case "media handoff play item failed": return "handoff_failed";
                 case "media handoff timed out": return "handoff_failed";
                 case "media handoff identity invalid": return "handoff_failed";
+                case "media handoff participant changed item": return "handoff_failed";
                 case "participant resync timed out": return "participant_resync_failed";
                 case "participant resync unavailable": return "participant_resync_failed";
                 default: return "command_failed";

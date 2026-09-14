@@ -35,6 +35,7 @@ namespace Emby.Plugins.WatchTogether
         private const string MediaHandoffPlayItemFailedError = "media handoff play item failed";
         private const string MediaHandoffTimedOutError = "media handoff timed out";
         private const string MediaHandoffInvalidError = "media handoff identity invalid";
+        private const string MediaHandoffParticipantChangedError = "media handoff participant changed item";
         private const string ParticipantResyncTimedOutError = "participant resync timed out";
         private const string ParticipantResyncUnavailableError = "participant resync unavailable";
         private const int NotificationTimeoutMs = 3000;
@@ -1085,6 +1086,13 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 snapshots.TryGetValue(participantUserId, out var participant);
+                string sourceItemId = participant?.ItemId;
+                if (string.IsNullOrEmpty(sourceItemId) &&
+                    runtime.Previous.TryGetValue(participantUserId, out var previousParticipant) &&
+                    previousParticipant != null)
+                {
+                    sourceItemId = previousParticipant.ItemId;
+                }
                 runtime.RecordDiagnosticEvent(
                     "primary_item_changed", room.PrimaryUserId, RemoteCommands.PlayItem,
                     "observed", null, null, now);
@@ -1094,7 +1102,7 @@ namespace Emby.Plugins.WatchTogether
                     primary,
                     participant,
                     now,
-                    participant?.ItemId,
+                    sourceItemId,
                     isParticipantResync: false);
             }
 
@@ -1162,6 +1170,27 @@ namespace Emby.Plugins.WatchTogether
             {
                 FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
                 return true;
+            }
+
+            if (!string.Equals(participantSnapshot.ItemId, handoff.TargetItemId, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrEmpty(participantSnapshot.ItemId) &&
+                !string.Equals(participantSnapshot.ItemId, handoff.SourceItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (handoff.SupersededTargetItemIds.Contains(participantSnapshot.ItemId))
+                {
+                    // A delayed acknowledgement of an invalidated target is
+                    // still a source snapshot for the current operation; it
+                    // must never turn that old target into a confirmation.
+                    handoff.SourceItemId = participantSnapshot.ItemId;
+                }
+                else
+                {
+                    // A participant leaving the source/target pair is a local
+                    // opt-out from this automatic handoff. Do not keep retrying
+                    // PlayItem and do not control the primary in response.
+                    FailMediaHandoff(runtime, room, MediaHandoffParticipantChangedError, now);
+                    return true;
+                }
             }
 
             if (!string.Equals(participantSnapshot.SessionId, handoff.ParticipantSessionId, StringComparison.OrdinalIgnoreCase))
