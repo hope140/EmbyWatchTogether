@@ -3486,6 +3486,117 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PlaybackStabilityRace_RecoveryDoesNotOverwritePrimaryItemChange()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Null(_rooms.GetRuntime(room.Id).Barrier);
+            Assert.Null(_rooms.GetRuntime(room.Id).Handoff);
+        }
+
+        [Fact]
+        public void PlaybackStabilityRace_ManualSeekWinsOverPendingDriftRepair()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            for (int round = 0; round < 5; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false,
+                        position: (50 + round) * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false,
+                        position: (54 + round) * SessionSnapshot.TicksPerSecond));
+                _clock.Advance(round == 0 ? 0.5 : 1);
+                engine.PollOnce(_clock.Now);
+            }
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 60 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 55 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.NotNull(runtime.Barrier);
+            Assert.False(runtime.Barrier.FromAutomaticDriftRepair);
+            Assert.Equal(0, runtime.AutoRepairCount);
+            Assert.Equal("u1", runtime.Barrier.AnchorUserId);
+        }
+
+        [Fact]
+        public void PlaybackStabilityRace_HandoffWinsOverPendingDriftRepair()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+
+            for (int round = 0; round < 5; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false,
+                        position: (50 + round) * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false,
+                        position: (54 + round) * SessionSnapshot.TicksPerSecond));
+                _clock.Advance(round == 0 ? 0.5 : 1);
+                engine.PollOnce(_clock.Now);
+            }
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 55 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 55 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            Assert.Equal(RoomState.Handoff, result.State);
+            Assert.Equal(0, runtime.AutoRepairCount);
+            Assert.Single(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void PlaybackStabilityRace_LateOldSessionAfterRecoveryTimeoutDoesNotRestoreWatching()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+
+            _clock.Advance(SyncConstants.TransientRecoveryTimeoutSeconds);
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.NotEqual(RoomState.Watching, result.State);
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Null(_rooms.GetRuntime(room.Id).Recovery);
+        }
+
+        [Fact]
         public void WatchingTick_ManualSeek_StartsAlignBarrier_AndAlignsFollower()
         {
             var room = CreateRoom();
