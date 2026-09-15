@@ -3353,6 +3353,139 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PlaybackStabilitySoak_FixedPatternRemainsBounded()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            var runtime = _rooms.GetRuntime(room.Id);
+            var jitterPattern = new[] { 0.0, 0.5, -0.5, 1.0, -1.0, 0.25, -0.25 };
+            string itemId = "i1";
+            long positionTicks = runtime.Previous[room.PrimaryUserId].PositionTicks;
+
+            for (int round = 0; round < 720; round++)
+            {
+                if (round == 120)
+                {
+                    _clock.Advance(10);
+                    positionTicks += 10 * SessionSnapshot.TicksPerSecond;
+                    SetFreshCandidates(itemId, false, positionTicks,
+                        positionTicks + (long)(3.5 * SessionSnapshot.TicksPerSecond));
+                    engine.PollOnce(_clock.Now);
+
+                    _clock.Advance(10);
+                    positionTicks += 10 * SessionSnapshot.TicksPerSecond;
+                    SetFreshCandidates(itemId, false, positionTicks,
+                        positionTicks + SessionSnapshot.TicksPerSecond);
+                    engine.PollOnce(_clock.Now);
+                    continue;
+                }
+
+                if (round == 240)
+                {
+                    for (int sample = 0; sample < 7 && runtime.State != RoomState.Barrier; sample++)
+                    {
+                        _clock.Advance(10);
+                        positionTicks += 10 * SessionSnapshot.TicksPerSecond;
+                        long driftTicks = (sample == 0 ? 3 : 4) * SessionSnapshot.TicksPerSecond;
+                        SetFreshCandidates(itemId, false, positionTicks, positionTicks + driftTicks);
+                        engine.PollOnce(_clock.Now);
+                    }
+
+                    Assert.Equal(RoomState.Barrier, runtime.State);
+                    CompleteBarrierAtTarget(engine, room);
+                    positionTicks = runtime.Previous[room.PrimaryUserId].PositionTicks;
+                    continue;
+                }
+
+                if (round == 360)
+                {
+                    _clock.Advance(10);
+                    positionTicks += 10 * SessionSnapshot.TicksPerSecond;
+                    SetCandidates(Snapshot("s2", "u2", paused: false, position: positionTicks,
+                        lastActivityDateUtc: _clock.Now));
+                    Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+
+                    _clock.Advance(3);
+                    SetFreshCandidates(itemId, false, positionTicks, positionTicks);
+                    Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+                    CompleteBarrierAtTarget(engine, room);
+                    positionTicks = runtime.Previous[room.PrimaryUserId].PositionTicks;
+                    continue;
+                }
+
+                if (round == 480)
+                {
+                    _clock.Advance(10);
+                    positionTicks += 10 * SessionSnapshot.TicksPerSecond;
+                    long soughtPositionTicks = positionTicks + 20 * SessionSnapshot.TicksPerSecond;
+                    SetFreshCandidates(itemId, false, soughtPositionTicks, positionTicks);
+                    Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+                    CompleteBarrierAtTarget(engine, room);
+                    positionTicks = soughtPositionTicks;
+                    continue;
+                }
+
+                if (round == 600)
+                {
+                    _clock.Advance(10);
+                    positionTicks += 10 * SessionSnapshot.TicksPerSecond;
+                    SetFreshCandidates(itemId, true, positionTicks, positionTicks);
+                    engine.PollOnce(_clock.Now);
+                    SetFreshCandidates(itemId, true, positionTicks, positionTicks);
+                    _clock.Advance(1);
+                    engine.PollOnce(_clock.Now);
+                    SetFreshCandidates(itemId, false, positionTicks, positionTicks);
+                    _clock.Advance(1);
+                    engine.PollOnce(_clock.Now);
+                    SetFreshCandidates(itemId, false, positionTicks, positionTicks);
+                    _clock.Advance(1);
+                    Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+                    continue;
+                }
+
+                if (round == 680)
+                {
+                    _clock.Advance(10);
+                    positionTicks += 10 * SessionSnapshot.TicksPerSecond;
+                    SetCandidates(
+                        Snapshot("s1", "u1", paused: false, position: positionTicks,
+                            itemId: "item-b", lastActivityDateUtc: _clock.Now),
+                        Snapshot("s2", "u2", paused: false, position: positionTicks,
+                            itemId: itemId, lastActivityDateUtc: _clock.Now));
+                    Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+
+                    itemId = "item-b";
+                    SetFreshCandidates(itemId, false, positionTicks, positionTicks);
+                    _clock.Advance(1);
+                    Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+                    CompleteBarrierAtTarget(engine, room);
+                    positionTicks = runtime.Previous[room.PrimaryUserId].PositionTicks;
+                    continue;
+                }
+
+                _clock.Advance(10);
+                positionTicks += 10 * SessionSnapshot.TicksPerSecond;
+                long jitterTicks = (long)(jitterPattern[round % jitterPattern.Length] * SessionSnapshot.TicksPerSecond);
+                SetFreshCandidates(itemId, false, positionTicks, positionTicks + jitterTicks);
+                var result = engine.PollOnce(_clock.Now).Single();
+                Assert.NotEqual(RoomState.Unavailable, result.State);
+            }
+
+            var diagnostics = SyncDiagnostics.Build(
+                room, runtime, "server-1", "1.6.0.1", "watching", _clock.Now);
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Empty(runtime.Pending);
+            Assert.Null(runtime.Barrier);
+            Assert.Null(runtime.Handoff);
+            Assert.True(runtime.AutoRepairCount >= 1);
+            Assert.True(issuer.Commands.Count <= 80);
+            Assert.Single(issuer.PlayItems);
+            Assert.True(diagnostics.Events.Count <= SyncDiagnostics.MaxEvents);
+        }
+
+        [Fact]
         public void WatchingTick_ManualSeek_StartsAlignBarrier_AndAlignsFollower()
         {
             var room = CreateRoom();
@@ -4760,6 +4893,39 @@ namespace Emby.Plugins.WatchTogether.Tests
         private void SetCandidates(params SessionSnapshot[] snapshots)
         {
             _provider.Snapshots = snapshots.ToList();
+        }
+
+        private void SetFreshCandidates(
+            string itemId,
+            bool paused,
+            long primaryPositionTicks,
+            long participantPositionTicks)
+        {
+            SetCandidates(
+                Snapshot("s1", "u1", paused, primaryPositionTicks,
+                    itemId: itemId, lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", paused, participantPositionTicks,
+                    itemId: itemId, lastActivityDateUtc: _clock.Now));
+        }
+
+        private void CompleteBarrierAtTarget(SyncEngine engine, Room room)
+        {
+            var runtime = _rooms.GetRuntime(room.Id);
+            RoomPollResult result = null;
+            for (int attempt = 0; attempt < 12 && runtime.State != RoomState.Watching; attempt++)
+            {
+                Assert.NotNull(runtime.Barrier);
+                string itemId = runtime.Barrier.ItemId;
+                long targetPositionTicks = runtime.Barrier.PrimaryPositionTicks;
+                bool paused = runtime.Barrier.Stage == BarrierStage.Restore
+                    ? runtime.Barrier.PrimaryPaused
+                    : true;
+                SetFreshCandidates(itemId, paused, targetPositionTicks, targetPositionTicks);
+                _clock.Advance(1);
+                result = engine.PollOnce(_clock.Now).Single();
+            }
+
+            Assert.Equal(RoomState.Watching, result?.State ?? runtime.State);
         }
 
         private static object GetRecoveryProperty(RoomRuntime runtime, string propertyName)

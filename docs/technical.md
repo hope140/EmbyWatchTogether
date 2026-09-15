@@ -20,6 +20,12 @@
 - 已加入的普通参与者可以通过 `POST /WatchTogether/Rooms/{Id}/Resync` 请求重新同步。请求在 room gate 内再次核验成员、加入状态、当前 `ServerId`、快照保护状态和运行中操作；`Barrier`、`Handoff` 或任意 Pending 存在时返回稳定的 busy 结果，不清理当前同步。受理后仅在内存中记录一次性请求，由轮询读取 Primary 当前 Item：参与者已在相同 Item 时直接进入原有 `Barrier`，Item 不同则通过 `PlayItem` Handoff 等待确认后再进入 Barrier。发送失败或确认超时会回到安全 `Waiting`，之后仍可在冷却结束后再次请求。响应的 `Status` 只使用 `accepted`、`busy`、`unavailable`，`Reason` 使用稳定原因码。
 - 阶段 C 的自助邀请只驻留 `RoomInvitationManager` 内存。`POST /WatchTogether/Invitations` 创建 15 分钟有效的一次性邀请码，服务端只保存 SHA-256 校验值；`GET` 只返回当前用户的有效邀请元数据，`DELETE` 可撤销，`POST /WatchTogether/Invitations/{Code}/Accept` 在同一串行边界内检查接受者、成员占用和房间持久化后消费邀请码。每位创建者最多 3 个有效邀请，全局最多 100 个，接受尝试按用户每分钟 5 次、全局每分钟 100 次限制。重启后邀请失效，现有 `rooms.json` 房间不受影响。
 
+## Phase E Playback Stability
+
+- `Recovering` 只从 `Watching` 的已绑定 Session 短暂缺失进入，窗口固定为 10 秒。恢复必须同时满足原 User、原 SessionId、原 ItemId、在线和有效播放身份，并重新执行一次 `Barrier`；SessionId 或 ItemId 变化、超时和显式停止都不会自动恢复。
+- Drift telemetry 只在 `Watching`、同 Item、双方 actively playing、倍速接近 1x、无 Pending/Handoff/Barrier/Recovering 时采样，定义为 `Participant.PositionTicks - Primary.PositionTicks`。观察阈值为 1.5 秒，自动纠偏阈值为 3 秒，hold 为 5 秒，cooldown 为 120 秒。
+- 自动纠偏只启动一次既有 `Barrier`，不执行连续追帧式 Seek。Recovery、drift hold、cooldown、最近自动纠偏和事件均为内存 runtime 数据，不写入 `rooms.json`；诊断只输出别名、短 hash 和有限时间/数值字段。
+
 ## 配置与运行时参数
 
 `PollIntervalSeconds` 默认 `0.5` 秒，用于控制会话轮询频率；`PollIntervalSeconds`、`PauseOtherOnPlaybackStop` 和 `NotifyOtherOnPlaybackStop` 保存后通过配置事件热更新，下一轮轮询生效，配置变更还会唤醒等待中的循环。`Enabled`、`MaxRuntimeDifferenceSeconds`、`SeekToleranceSeconds`、`BarrierSeekTimeoutSeconds` 和 `StaleSessionTimeoutSeconds` 仍保留在配置模型中，但不作为当前实时同步策略；轮询频率也不会开启周期性漂移 Seek。

@@ -70,6 +70,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 | `Handoff` | 主用户已切换媒体，正在让非 Primary 参与者打开目标 Item 并等待快照确认 | 主用户换片、参与者显式跨 Item Resync |
 | `Barrier` | 暂停—Seek—恢复的起播握手 | 双方在线且资格检查通过 |
 | `Watching` | 起播完成，只处理明确的播放操作 | Barrier 完成 |
+| `Recovering` | 已绑定会话短暂缺失，等待原 Session 在固定 Item 上恢复 | Watching 中选中快照暂时缺失 |
 | `Unavailable` | 房间 `ServerId` 与当前 Emby 实例不一致 | 载入或轮询时发现归属不符 |
 
 ## 4. 轮询和事件唤醒
@@ -112,6 +113,12 @@ Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确�
 已经进入 `Watching` 的房间若仅有一端原始 `SupportsRemoteControl` 从 `true` 短暂变为 `false`，插件只在以下条件同时成立时保留最多 8 秒恢复窗口：双方仍在线且未停止、SessionId 与 ItemId 继续匹配上一轮身份、媒体相同且时长与倍速有效、有效能力证据仍在、当前没有 Pending 命令。窗口按受影响用户集合和两端身份绑定，不因重复快照刷新起始时间。
 
 窗口内保持 `Watching`，但不运行普通暂停/Seek 检测，也不发送播放命令或提示。能力恢复后使用窗口前保留的快照继续判断，自然播放不会被误认为 Seek；窗口内发生的真实暂停或明显 Seek 在恢复后按既有规则处理一次。超过 8 秒，或 Session、Item、受影响用户、有效能力、Pending 等条件变化时，立即退出保护并执行原有严格等待和安全暂停。初始 `Waiting`、Barrier、换片、停止/离线与快照源保护不使用这个窗口。
+
+### Session 缺失恢复与 drift 监测
+
+已经进入 `Watching` 的房间若某个已绑定 Session 从选中快照中短暂消失，且原始候选没有明确的 stopped 记录，则进入 `Recovering`。窗口固定为 10 秒，记录缺失用户、预期 SessionId、预期 ItemId、开始时间、上次位置和暂停状态；窗口内不向缺失端发送 Pause、Seek 或 PlayItem，也不启动 drift auto repair。原 User、原 SessionId、原 ItemId 恢复并满足有效播放身份后，必须经过一次现有 Barrier 才能回到 `Watching`；明确 Stop、SessionId 变化、Item 变化或超时都回到 `Waiting`。
+
+正常播放期间仅在双方同 Item、actively playing、倍速接近 1x 且没有 Pending、Handoff、Barrier 或 Recovery 时记录 `Participant.PositionTicks - Primary.PositionTicks`。绝对偏移达到 1.5 秒进入 telemetry，达到 3 秒并持续 5 秒才触发一次现有 Barrier；自动纠偏后冷却 120 秒。系统不执行连续追帧式 Seek，hold 和 cooldown 均按 UTC 时间计算。
 
 ### Media Handoff
 

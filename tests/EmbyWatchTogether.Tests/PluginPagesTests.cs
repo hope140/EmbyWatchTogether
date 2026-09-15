@@ -116,6 +116,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("snapshot_unavailable", javascript);
             Assert.Contains("正在同步下一集", javascript);
             Assert.Contains("正在让另一位参与者打开主用户当前视频", javascript);
+            Assert.Contains("Recovering", javascript);
+            Assert.Contains("正在等待临时掉线的参与者恢复", javascript);
+            Assert.Contains(".wt-roomState-recovering", html);
             Assert.Contains("media_handoff", javascript);
             Assert.Contains("PlayItem", javascript);
             Assert.Contains("handoff_started", javascript);
@@ -183,6 +186,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("raw.Pending", javascript);
             Assert.Contains("raw.Barrier", javascript);
             Assert.Contains("raw.RecoveryWindow", javascript);
+            Assert.Contains("raw.TransientRecovery", javascript);
+            Assert.Contains("raw.Drift", javascript);
+            Assert.Contains("播放漂移", javascript);
+            Assert.Contains("预期 Session 标识", javascript);
+            Assert.Contains("drift_auto_repair_started", javascript);
             Assert.Contains("raw.LastAction", javascript);
             Assert.Contains("raw.Events", javascript);
             Assert.Contains("导出诊断 JSON", javascript);

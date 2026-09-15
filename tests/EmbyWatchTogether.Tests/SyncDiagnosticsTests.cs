@@ -180,6 +180,54 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void ExportIncludesTransientRecoveryAndDriftTelemetryWithoutRawIdentity()
+        {
+            string userA = "11111111111111111111111111111111";
+            string userB = "22222222222222222222222222222222";
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", userA,
+                new[] { userA, userB }, userA);
+            var runtime = manager.GetRuntime(room.Id);
+            var started = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            var previous = new Dictionary<string, SessionSnapshot>
+            {
+                [userA] = DiagnosticSnapshot("session-a", userA, "item-a", started),
+                [userB] = DiagnosticSnapshot("session-b", userB, "item-a", started),
+            };
+            typeof(RoomRuntime).GetMethod(
+                "BeginTransientSessionRecovery", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(runtime, new object[] { started, new[] { userB }, previous });
+            runtime.State = RoomState.Recovering;
+            SetRuntimeProperty(runtime, "CurrentDriftSeconds", 4.0);
+            SetRuntimeProperty(runtime, "MaxObservedAbsoluteDriftSeconds", 4.0);
+            SetRuntimeProperty(runtime, "DriftAboveRepairThresholdSinceUtc", started.AddSeconds(-2));
+            SetRuntimeProperty(runtime, "LastAutoRepairAtUtc", started.AddSeconds(-10));
+            SetRuntimeProperty(runtime, "AutoRepairCount", 1);
+            SetRuntimeProperty(runtime, "LastAutoRepairDriftSeconds", 4.0);
+
+            var exported = SyncDiagnostics.Build(
+                room,
+                runtime,
+                "server-1",
+                "1.6.0.1",
+                "transient_recovery",
+                started.AddSeconds(2));
+
+            Assert.Equal("Recovering", exported.RoomState);
+            Assert.True(exported.TransientRecovery.Active);
+            Assert.Contains("userB", exported.TransientRecovery.MissingAliases);
+            var recoveringParticipant = Assert.Single(exported.TransientRecovery.Participants,
+                item => item.Alias == "userB");
+            Assert.Equal(SyncDiagnostics.Hash("session-b"), recoveringParticipant.ExpectedSessionHash);
+            Assert.Equal(SyncDiagnostics.Hash("item-a"), recoveringParticipant.ExpectedItemHash);
+            Assert.DoesNotContain("session-b", recoveringParticipant.ExpectedSessionHash);
+            Assert.True(exported.Drift.CurrentDriftSeconds.HasValue);
+            Assert.Equal(4.0, exported.Drift.CurrentDriftSeconds.Value, precision: 3);
+            Assert.Equal(1, exported.Drift.AutoRepairCount);
+            Assert.Equal(4.0, exported.Drift.LastAutoRepairDriftSeconds.Value, precision: 3);
+        }
+
+        [Fact]
         public void DiagnosticsEndpointAllowsMemberAndRejectsOutsiderWithoutIssuer()
         {
             string userA = "11111111111111111111111111111111";
@@ -237,6 +285,35 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             typeof(RoomRuntime).GetMethod("RecordDiagnosticSnapshots", BindingFlags.Instance | BindingFlags.NonPublic)
                 .Invoke(runtime, new object[] { snapshots, at });
+        }
+
+        private static SessionSnapshot DiagnosticSnapshot(
+            string sessionId,
+            string userId,
+            string itemId,
+            DateTimeOffset at)
+        {
+            return new SessionSnapshot(
+                sessionId,
+                userId,
+                itemId,
+                "media",
+                50 * SessionSnapshot.TicksPerSecond,
+                100 * SessionSnapshot.TicksPerSecond,
+                false,
+                1.0,
+                stopped: false,
+                supportsRemoteControl: true,
+                new SessionCapabilityReport(true, new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek }),
+                at);
+        }
+
+        private static void SetRuntimeProperty(RoomRuntime runtime, string name, object value)
+        {
+            typeof(RoomRuntime).GetProperty(
+                name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .SetValue(runtime, value);
         }
 
         private static object Capture(RoomRuntime runtime)
