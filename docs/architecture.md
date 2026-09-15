@@ -37,7 +37,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 `PlaybackStopped` 只唤醒轮询。主用户停止 A 后，现有 2 秒停止 debounce 同时作为有限的媒体切换观察窗口；窗口内选中 B 时识别为 Handoff，不执行普通停止副作用，窗口结束仍无新 Item 时继续原有 Stop 行为。参与者自行切换 Item 不触发主用户跟随；只有显式 Participant Resync 请求才会让非 Primary 参与者通过同一 Handoff/Barrier 流程回到主用户当前 Item。运行时快照、Pending 命令、Handoff、恢复窗口和 Barrier 阶段不写入 `rooms.json`；房间文件采用候选文件替换并保留备份，损坏时报告错误而不静默覆盖。
 
-Phase E 在现有 `Watching` 逻辑旁增加独立的 `Recovering` runtime。已绑定 Session 从选中快照中短暂消失时最多等待 10 秒；只有原 User、原 SessionId 和原 ItemId 恢复，才重新执行一次现有 Barrier。替换 Session 或 Item 变化会回到 `Waiting`，不自动换绑设备。双方 actively playing 且无 Pending/Handoff/Barrier/Recovering 时记录 `Participant.PositionTicks - Primary.PositionTicks` 的 signed drift；绝对 drift 至少 3 秒并持续 5 秒才触发一次 Barrier，自动纠偏之间冷却 120 秒，不执行连续追帧式 Seek。
+Phase E 在现有 `Watching` 逻辑旁增加独立的 `Recovering` runtime。已绑定 Session 从选中快照中短暂消失时最多等待 10 秒；缺失会话按原 User、原 SessionId 和原 ItemId 恢复时重新执行一次现有 Barrier。若同一已绑定 Primary Session 明确从 Item A 切换到 Item B，则取消 Recovery 并进入既有 Handoff；替换 SessionId 或其他不受控的 Item 变化会回到 `Waiting`，不自动换绑设备。双方 actively playing 且无 Pending/Handoff/Barrier/Recovering 时记录 `Participant.PositionTicks - Primary.PositionTicks` 的 signed drift；绝对 drift 至少 3 秒并持续 5 秒才触发一次 Barrier，自动纠偏之间冷却 120 秒，不执行连续追帧式 Seek。
 
 ## 发布信任边界
 

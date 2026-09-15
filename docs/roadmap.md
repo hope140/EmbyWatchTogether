@@ -9,7 +9,7 @@
 
 ### Phase E — Playback Stability
 
-- Transient same-session recovery：`Watching` 中原绑定 Session 短暂消失时，最多等待 10 秒；只有原 User、原 SessionId 和原 ItemId 同时恢复，才经过 Barrier 回到 `Watching`。
+- Transient same-session recovery：`Watching` 中原绑定 Session 短暂消失时，最多等待 10 秒；原 User、原 SessionId 和原 ItemId 同时恢复时经过 Barrier 回到 `Watching`。同一已绑定 Primary Session 的显式换片沿用既有 Handoff。
 - Drift telemetry：仅在双方同 Item、actively playing、正常倍速且没有进行中的同步操作时记录时间轴偏移。
 - Conservative drift auto repair：绝对漂移至少 3 秒并持续 5 秒时，只触发一次现有 Barrier；自动纠偏之间保持 120 秒冷却。
 - 管理页和诊断接口展示 `Recovering`、恢复窗口、预期身份摘要、当前 drift、最大 drift、最近自动纠偏和次数。

@@ -11,8 +11,8 @@ SessionInfo 轮询和客户端连接都可能出现短暂缺失。长期播放�
 ## 决策
 
 1. `Recovering` 是独立的 transient runtime state，只能从 `Watching` 中已绑定 Session 的短暂缺失进入。
-2. 恢复只接受同一 User、同一 SessionId、同一 ItemId 的在线会话，并且必须再次经过现有 `Barrier`；不同 SessionId 或 ItemId 不会自动换绑。
-3. Recovery 只驻留内存，不写入 `rooms.json`；超时、身份变化和 Item 变化回到既有安全 `Waiting` 路径。
+2. 缺失会话恢复只接受同一 User、同一 SessionId、同一 ItemId 的在线会话，并且必须再次经过现有 `Barrier`；同一已绑定 Primary Session 的显式 Item transition 可以取消 Recovery 并复用既有 `Handoff`。
+3. Recovery 只驻留内存，不写入 `rooms.json`；超时、替换 SessionId、Participant Item 变化和其他身份变化回到既有安全 `Waiting` 路径。
 4. Drift 使用 `Participant.PositionTicks - Primary.PositionTicks` 计算 signed telemetry，同时保留绝对值最大值。
 5. 只有绝对 drift 至少 3 秒并持续 5 秒，且双方 actively playing、无 Pending/Handoff/Barrier/Recovering 时，才触发一次现有 Barrier。
 6. 不实现 continuous drift chasing；自动纠偏完成或失败后使用 120 秒 time-based cooldown。

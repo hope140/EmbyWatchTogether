@@ -22,7 +22,7 @@
 
 ## Phase E Playback Stability
 
-- `Recovering` 只从 `Watching` 的已绑定 Session 短暂缺失进入，窗口固定为 10 秒。恢复必须同时满足原 User、原 SessionId、原 ItemId、在线和有效播放身份，并重新执行一次 `Barrier`；SessionId 或 ItemId 变化、超时和显式停止都不会自动恢复。
+- `Recovering` 只从 `Watching` 的已绑定 Session 短暂缺失进入，窗口固定为 10 秒。缺失会话按原 User、原 SessionId、原 ItemId、在线和有效播放身份恢复，并重新执行一次 `Barrier`；同一已绑定 Primary Session 明确换到新 Item 时取消 Recovery 并进入既有 `Handoff`，替换 SessionId、超时和显式停止都不会自动恢复。
 - Drift telemetry 只在 `Watching`、同 Item、双方 actively playing、倍速接近 1x、无 Pending/Handoff/Barrier/Recovering 时采样，定义为 `Participant.PositionTicks - Primary.PositionTicks`。观察阈值为 1.5 秒，自动纠偏阈值为 3 秒，hold 为 5 秒，cooldown 为 120 秒。
 - 自动纠偏只启动一次既有 `Barrier`，不执行连续追帧式 Seek。Recovery、drift hold、cooldown、最近自动纠偏和事件均为内存 runtime 数据，不写入 `rooms.json`；诊断只输出别名、短 hash 和有限时间/数值字段。
 

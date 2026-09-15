@@ -3486,11 +3486,12 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void PlaybackStabilityRace_RecoveryDoesNotOverwritePrimaryItemChange()
+        public void PlaybackStabilityRace_SameSessionPrimaryItemChangeCancelsRecoveryForHandoff()
         {
             var room = CreateRoom();
-            var engine = CreateEngine();
-            EnterWatching(engine, room);
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
 
             SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
@@ -3501,10 +3502,72 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
             _clock.Advance(1);
             var result = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            Assert.Equal(RoomState.Handoff, result.State);
+            Assert.Null(runtime.Recovery);
+            Assert.Null(runtime.Barrier);
+            Assert.NotNull(runtime.Handoff);
+            Assert.Equal("item-b", runtime.Handoff.TargetItemId);
+            Assert.Single(issuer.PlayItems, item =>
+                item.userId == "u2" && item.itemId == "item-b");
+            Assert.DoesNotContain(issuer.PlayItems, item => item.userId == "u1");
+        }
+
+        [Fact]
+        public void PlaybackStabilityRace_PrimaryReplacementSessionDoesNotBecomeHandoff()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
 
             Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Null(_rooms.GetRuntime(room.Id).Barrier);
-            Assert.Null(_rooms.GetRuntime(room.Id).Handoff);
+            Assert.Null(runtime.Recovery);
+            Assert.Null(runtime.Handoff);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void PlaybackStabilityRace_SameSessionPrimaryChangeWaitsForParticipantThenUsesHandoff()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+
+            SetCandidates(Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            var waitingForParticipant = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Handoff, waitingForParticipant.State);
+            Assert.Null(runtime.Recovery);
+            Assert.NotNull(runtime.Handoff);
+            Assert.Empty(issuer.PlayItems);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(issuer.PlayItems, item =>
+                item.userId == "u2" && item.itemId == "item-b");
+            Assert.DoesNotContain(issuer.PlayItems, item => item.userId == "u1");
         }
 
         [Fact]
@@ -4317,7 +4380,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
 
             SetCandidates(
-                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
             _clock.Advance(0.5);
             Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);

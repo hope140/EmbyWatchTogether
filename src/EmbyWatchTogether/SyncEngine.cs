@@ -345,18 +345,17 @@ namespace Emby.Plugins.WatchTogether
                         bool recoveringPrimaryHandoff =
                             runtime.State == RoomState.Recovering &&
                             primaryItemTransition &&
-                            IsRecoveringPrimarySessionReplacement(runtime, room, snapshots);
+                            IsRecoveringPrimarySessionMediaTransition(runtime, room, snapshots);
                         if ((runtime.State == RoomState.Watching && primaryItemTransition) ||
                             runtime.State == RoomState.Handoff ||
                             recoveringPrimaryHandoff)
                         {
                             if (recoveringPrimaryHandoff)
                             {
-                                // A primary who changed item while also
-                                // receiving a replacement session has made an
-                                // explicit media transition. Preserve the
-                                // existing Handoff path, but never treat the
-                                // replacement session as a recovery.
+                                // A primary who changed item on the already
+                                // bound session has made an explicit media
+                                // transition. Preserve the existing Handoff
+                                // path and discard only the Recovery runtime.
                                 runtime.ClearTransientSessionRecovery();
                                 runtime.State = RoomState.Watching;
                             }
@@ -1009,7 +1008,7 @@ namespace Emby.Plugins.WatchTogether
                 !string.Equals(previous.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsRecoveringPrimarySessionReplacement(
+        private static bool IsRecoveringPrimarySessionMediaTransition(
             RoomRuntime runtime,
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots)
@@ -1022,10 +1021,12 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
-            return !string.Equals(
-                expected.ExpectedSessionId,
-                current.SessionId,
-                StringComparison.OrdinalIgnoreCase);
+            return string.Equals(expected.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(current.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    expected.ExpectedSessionId,
+                    current.SessionId,
+                    StringComparison.OrdinalIgnoreCase);
         }
 
         private bool TryProcessTransientSessionRecovery(

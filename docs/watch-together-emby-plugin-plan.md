@@ -116,7 +116,7 @@ Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确�
 
 ### Session 缺失恢复与 drift 监测
 
-已经进入 `Watching` 的房间若某个已绑定 Session 从选中快照中短暂消失，且原始候选没有明确的 stopped 记录，则进入 `Recovering`。窗口固定为 10 秒，记录缺失用户、预期 SessionId、预期 ItemId、开始时间、上次位置和暂停状态；窗口内不向缺失端发送 Pause、Seek 或 PlayItem，也不启动 drift auto repair。原 User、原 SessionId、原 ItemId 恢复并满足有效播放身份后，必须经过一次现有 Barrier 才能回到 `Watching`；明确 Stop、SessionId 变化、Item 变化或超时都回到 `Waiting`。
+已经进入 `Watching` 的房间若某个已绑定 Session 从选中快照中短暂消失，且原始候选没有明确的 stopped 记录，则进入 `Recovering`。窗口固定为 10 秒，记录缺失用户、预期 SessionId、预期 ItemId、开始时间、上次位置和暂停状态；窗口内不向缺失端发送 Pause、Seek 或 PlayItem，也不启动 drift auto repair。缺失会话按原 User、原 SessionId、原 ItemId 恢复并满足有效播放身份后，必须经过一次现有 Barrier 才能回到 `Watching`；若同一已绑定 Primary Session 明确从 Item A 切换到 Item B，则取消 Recovery 并沿用既有 Handoff。明确 Stop、替换 SessionId、Participant Item 变化或超时都回到 `Waiting`。
 
 正常播放期间仅在双方同 Item、actively playing、倍速接近 1x 且没有 Pending、Handoff、Barrier 或 Recovery 时记录 `Participant.PositionTicks - Primary.PositionTicks`。绝对偏移达到 1.5 秒进入 telemetry，达到 3 秒并持续 5 秒才触发一次现有 Barrier；自动纠偏后冷却 120 秒。系统不执行连续追帧式 Seek，hold 和 cooldown 均按 UTC 时间计算。
 
