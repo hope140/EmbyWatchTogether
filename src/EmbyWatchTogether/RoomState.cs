@@ -80,6 +80,10 @@ namespace Emby.Plugins.WatchTogether
         public bool RestoreSent { get; set; }
 
         public bool FromMediaHandoff { get; set; }
+
+        public bool FromAutomaticDriftRepair { get; set; }
+
+        public double? AutomaticDriftSeconds { get; set; }
     }
 
     /// <summary>

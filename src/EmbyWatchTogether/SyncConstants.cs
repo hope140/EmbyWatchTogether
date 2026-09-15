@@ -84,6 +84,14 @@ namespace Emby.Plugins.WatchTogether
         // this in-memory window; a replacement session never inherits it.
         public const double TransientRecoveryTimeoutSeconds = 10.0;
 
+        public const double DriftObserveThresholdSeconds = 1.5;
+
+        public const double DriftRepairThresholdSeconds = 3.0;
+
+        public const double DriftRepairHoldSeconds = 5.0;
+
+        public const double DriftRepairCooldownSeconds = 120.0;
+
         // Participant initiated resync requests are coalesced for a short
         // interval so a double click cannot repeatedly rebuild the barrier.
         public const double ParticipantResyncCooldownSeconds = 3.0;

@@ -3008,6 +3008,351 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void WatchingDrift_BelowObserveThresholdRecordsTelemetryWithoutRepair()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false,
+                    position: (long)(50.5 * SessionSnapshot.TicksPerSecond)));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Equal(0.5, runtime.CurrentDriftSeconds.Value, precision: 3);
+            Assert.Equal(0.5, runtime.MaxObservedAbsoluteDriftSeconds, precision: 3);
+            Assert.Equal(0, runtime.AutoRepairCount);
+            Assert.DoesNotContain(_issuer.Issued, issue => issue.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingDrift_ObserveRangeDoesNotRepair()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            for (int round = 1; round <= 8; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false,
+                        position: (50 + round) * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false,
+                        position: (52 + round) * SessionSnapshot.TicksPerSecond));
+                _clock.Advance(1);
+                var result = engine.PollOnce(_clock.Now).Single();
+                Assert.Equal(RoomState.Watching, result.State);
+            }
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(2, runtime.CurrentDriftSeconds.Value, precision: 3);
+            Assert.Equal(2, runtime.MaxObservedAbsoluteDriftSeconds, precision: 3);
+            Assert.Equal(0, runtime.AutoRepairCount);
+            Assert.Null(runtime.DriftAboveRepairThresholdSinceUtc);
+            Assert.DoesNotContain(_issuer.Issued, issue => issue.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingDrift_TransientLargeSpikeClearsHoldWithoutRepair()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 54 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(0.5);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.NotNull(_rooms.GetRuntime(room.Id).DriftAboveRepairThresholdSinceUtc);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 51 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 55 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 52 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 53 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Null(runtime.DriftAboveRepairThresholdSinceUtc);
+            Assert.Equal(0, runtime.AutoRepairCount);
+            Assert.DoesNotContain(_issuer.Issued, issue => issue.command == RemoteCommands.Seek);
+        }
+
+        [Fact]
+        public void WatchingDrift_PersistentLargeDriftStartsOneBarrier()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            for (int round = 0; round <= 5; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false,
+                        position: (50 + round) * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false,
+                        position: (54 + round) * SessionSnapshot.TicksPerSecond));
+                _clock.Advance(round == 0 ? 0.5 : 1);
+                var result = engine.PollOnce(_clock.Now).Single();
+                if (round < 5)
+                {
+                    Assert.Equal(RoomState.Watching, result.State);
+                }
+            }
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.NotNull(runtime.Barrier);
+            Assert.True(runtime.Barrier.FromAutomaticDriftRepair);
+            Assert.Equal(1, runtime.AutoRepairCount);
+            Assert.Equal(4, runtime.LastAutoRepairDriftSeconds.Value, precision: 3);
+            Assert.Equal(2, _issuer.Issued.Count(issue => issue.command == RemoteCommands.Pause));
+            var diagnostics = SyncDiagnostics.Build(
+                room, runtime, "server-1", "1.6.0.1", "barrier", _clock.Now);
+            Assert.Contains(diagnostics.Events, item => item.Type == "drift_threshold_entered");
+            Assert.Contains(diagnostics.Events, item =>
+                item.Type == "drift_auto_repair_started" &&
+                item.DriftSeconds.HasValue &&
+                Math.Abs(item.DriftSeconds.Value - 4) < 0.001);
+
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(1, runtime.AutoRepairCount);
+            Assert.Equal(2, _issuer.Issued.Count(issue => issue.command == RemoteCommands.Pause));
+        }
+
+        [Fact]
+        public void WatchingDrift_AutoRepairCooldownSuppressesSecondRepair()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            for (int round = 0; round <= 5; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false,
+                        position: (50 + round) * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false,
+                        position: (54 + round) * SessionSnapshot.TicksPerSecond));
+                _clock.Advance(round == 0 ? 0.5 : 1);
+                engine.PollOnce(_clock.Now);
+            }
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Equal(1, runtime.AutoRepairCount);
+            var firstRepairAt = runtime.LastAutoRepairAtUtc;
+
+            // Acknowledge the barrier with both clients at the anchor position.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 55 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 55 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Pause acknowledgement -> Seek
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Both already at target -> Restore
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 55 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 55 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now); // Restore issues Unpause
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+
+            Assert.Equal(1, runtime.AutoRepairCount);
+            Assert.Equal(firstRepairAt, runtime.LastAutoRepairAtUtc);
+
+            // A new persistent four-second drift inside the cooldown is still
+            // observed but cannot create another Barrier.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 55 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 59 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(0.5);
+            engine.PollOnce(_clock.Now);
+            for (int round = 1; round <= 6; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false,
+                        position: (55 + round) * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false,
+                        position: (59 + round) * SessionSnapshot.TicksPerSecond));
+                _clock.Advance(1);
+                var result = engine.PollOnce(_clock.Now).Single();
+                Assert.Equal(RoomState.Watching, result.State);
+            }
+
+            Assert.Equal(1, runtime.AutoRepairCount);
+            Assert.Null(runtime.Barrier);
+
+            // Once cooldown has elapsed, the same persistent drift must be
+            // allowed to trigger a second one-shot Barrier after a new hold.
+            double elapsedSinceRepair = (_clock.Now - firstRepairAt.Value).TotalSeconds;
+            double untilCooldown = Math.Max(0.1,
+                SyncConstants.DriftRepairCooldownSeconds - elapsedSinceRepair + 0.1);
+            _clock.Advance(untilCooldown);
+            long elapsedTicks = (long)(untilCooldown * SessionSnapshot.TicksPerSecond);
+            long primaryPosition = 61 * SessionSnapshot.TicksPerSecond + elapsedTicks;
+            long participantPosition = 65 * SessionSnapshot.TicksPerSecond + elapsedTicks;
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: primaryPosition,
+                    lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", paused: false, position: participantPosition,
+                    lastActivityDateUtc: _clock.Now));
+            engine.PollOnce(_clock.Now);
+
+            for (int round = 1; round <= 5; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false,
+                        position: primaryPosition + round * SessionSnapshot.TicksPerSecond,
+                        lastActivityDateUtc: _clock.Now),
+                    Snapshot("s2", "u2", paused: false,
+                        position: participantPosition + round * SessionSnapshot.TicksPerSecond,
+                        lastActivityDateUtc: _clock.Now));
+                _clock.Advance(1);
+                engine.PollOnce(_clock.Now);
+            }
+
+            Assert.Equal(2, runtime.AutoRepairCount);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+        }
+
+        [Fact]
+        public void WatchingDrift_PendingSeekDoesNotRepair()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+            runtime.Pending["u1"] = new PendingCommand
+            {
+                UserId = "u1",
+                SessionId = "s1",
+                ItemId = "i1",
+                Command = RemoteCommands.Seek,
+                PositionTicks = 90 * SessionSnapshot.TicksPerSecond,
+                IssuedAtUtc = _clock.Now,
+            };
+            _issuer.Issued.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 54 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Equal(0, runtime.AutoRepairCount);
+            Assert.Null(runtime.DriftAboveRepairThresholdSinceUtc);
+            Assert.Null(runtime.Barrier);
+        }
+
+        [Fact]
+        public void WatchingDrift_DoesNotRepairDuringRecovery()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 54 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Equal(0, runtime.AutoRepairCount);
+
+            Assert.Empty(runtime.Pending);
+        }
+
+        [Fact]
+        public void WatchingDrift_NegativePersistentDriftUsesAbsoluteValue()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            _issuer.Issued.Clear();
+
+            for (int round = 0; round <= 5; round++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false,
+                        position: (54 + round) * SessionSnapshot.TicksPerSecond),
+                    Snapshot("s2", "u2", paused: false,
+                        position: (50 + round) * SessionSnapshot.TicksPerSecond));
+                _clock.Advance(round == 0 ? 0.5 : 1);
+                engine.PollOnce(_clock.Now);
+            }
+
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Equal(-4, runtime.LastAutoRepairDriftSeconds.Value, precision: 3);
+            Assert.Equal(1, runtime.AutoRepairCount);
+        }
+
+        [Fact]
+        public void WatchingDrift_PausedPairDoesNotRepairStaticPositionDifference()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 54 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 54 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Equal(0, runtime.AutoRepairCount);
+            Assert.Null(runtime.CurrentDriftSeconds);
+            Assert.Null(runtime.Barrier);
+        }
+
+        [Fact]
+        public void WatchingDrift_NonNormalPlaybackRateDoesNotRepair()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false,
+                    position: 54 * SessionSnapshot.TicksPerSecond, playbackRate: 1.5));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(0, runtime.AutoRepairCount);
+            Assert.Null(runtime.Barrier);
+            Assert.DoesNotContain(_issuer.Issued, issue => issue.command == RemoteCommands.Seek);
+            Assert.NotEqual(RoomState.Barrier, result.State);
+        }
+
+        [Fact]
         public void WatchingTick_ManualSeek_StartsAlignBarrier_AndAlignsFollower()
         {
             var room = CreateRoom();

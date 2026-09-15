@@ -2571,7 +2571,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     if (IsSeekRetryBudgetExpired(runtime.Barrier, now))
                     {
-                        FailSeekBarrier(runtime, room.Id);
+                        FailSeekBarrier(runtime, room.Id, now);
                     }
                     else
                     {
@@ -2598,6 +2598,7 @@ namespace Emby.Plugins.WatchTogether
             string error,
             DateTimeOffset now)
         {
+            RecordAutomaticDriftRepairFailure(runtime, now);
             runtime.ResetToWaiting();
             runtime.Error = error;
             runtime.BarrierRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
@@ -2625,7 +2626,7 @@ namespace Emby.Plugins.WatchTogether
             EnsureSeekRetryDeadline(barrier, now);
             if (IsSeekRetryBudgetExpired(barrier, now))
             {
-                FailSeekBarrier(runtime, roomId);
+                FailSeekBarrier(runtime, roomId, now);
                 return;
             }
 
@@ -2656,12 +2657,32 @@ namespace Emby.Plugins.WatchTogether
                 now >= barrier.SeekRetryDeadlineAtUtc.Value;
         }
 
-        private void FailSeekBarrier(RoomRuntime runtime, string roomId)
+        private void FailSeekBarrier(
+            RoomRuntime runtime,
+            string roomId,
+            DateTimeOffset now)
         {
+            RecordAutomaticDriftRepairFailure(runtime, now);
             runtime.ResetToWaiting();
             runtime.Error = BarrierSeekRetryBudgetError;
             runtime.BarrierRetryAtUtc = null;
             _logger?.Warn($"Room {roomId}: {BarrierSeekRetryBudgetError}");
+        }
+
+        private static void RecordAutomaticDriftRepairFailure(
+            RoomRuntime runtime,
+            DateTimeOffset now)
+        {
+            if (runtime?.Barrier?.FromAutomaticDriftRepair != true)
+            {
+                return;
+            }
+
+            runtime.RecordDriftDiagnosticEvent(
+                "drift_auto_repair_failed",
+                "failed",
+                runtime.Barrier.AutomaticDriftSeconds.GetValueOrDefault(),
+                now);
         }
 
         private bool TryIssuePlayItem(
@@ -3181,11 +3202,14 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now,
             string anchorUserId = null,
             bool? primaryPausedOverride = null,
-            bool fromMediaHandoff = false)
+            bool fromMediaHandoff = false,
+            bool fromAutomaticDriftRepair = false,
+            double? automaticDriftSeconds = null)
         {
             string anchorUser = anchorUserId ?? room.PrimaryUserId;
             var anchor = snapshots[anchorUser];
             runtime.ClearMediaHandoff();
+            runtime.ClearDriftTelemetry(clearAutoRepairHistory: false);
             runtime.State = RoomState.Barrier;
             runtime.Error = null;
             runtime.Barrier = new BarrierState
@@ -3201,6 +3225,8 @@ namespace Emby.Plugins.WatchTogether
                 SeekRetryDeadlineAtUtc = null,
                 RestoreSent = false,
                 FromMediaHandoff = fromMediaHandoff,
+                FromAutomaticDriftRepair = fromAutomaticDriftRepair,
+                AutomaticDriftSeconds = automaticDriftSeconds,
             };
             runtime.SyncItemId = anchor.ItemId;
             runtime.RecordDiagnosticEvent(
@@ -3249,6 +3275,7 @@ namespace Emby.Plugins.WatchTogether
                     !barrier.SessionIds.TryGetValue(user, out var sessionId) ||
                     !HasSameIdentity(sessionId, barrier.ItemId, snapshot)))
             {
+                RecordAutomaticDriftRepairFailure(runtime, now);
                 runtime.ResetToWaiting();
                 return;
             }
@@ -3363,7 +3390,7 @@ namespace Emby.Plugins.WatchTogether
 
                     if (IsSeekRetryBudgetExpired(barrier, now))
                     {
-                        FailSeekBarrier(runtime, room.Id);
+                        FailSeekBarrier(runtime, room.Id, now);
                         return;
                     }
 
@@ -3659,8 +3686,11 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
+            bool completedAutomaticDriftRepair = barrier?.FromAutomaticDriftRepair == true;
+            double? automaticDriftSeconds = barrier?.AutomaticDriftSeconds;
             runtime.ClearTransientSessionRecovery();
             runtime.ClearRemoteControlRecovery();
+            runtime.ClearDriftTelemetry(clearAutoRepairHistory: false);
             runtime.State = RoomState.Watching;
             runtime.Barrier = null;
             runtime.Pending.Clear();
@@ -3681,6 +3711,14 @@ namespace Emby.Plugins.WatchTogether
             {
                 runtime.RecordDiagnosticEvent(
                     "handoff_completed", null, RemoteCommands.PlayItem, "completed", null, null, now);
+            }
+            if (completedAutomaticDriftRepair)
+            {
+                runtime.RecordDriftDiagnosticEvent(
+                    "drift_auto_repair_completed",
+                    "completed",
+                    automaticDriftSeconds.GetValueOrDefault(),
+                    now);
             }
             NotifyParticipants(
                 room,
@@ -4066,6 +4104,16 @@ namespace Emby.Plugins.WatchTogether
                     excludeUserId: winner.userId);
             }
 
+            if (seekChanges.Count > 0 || pauseChanges.Count > 0)
+            {
+                runtime.CurrentDriftSeconds = null;
+                runtime.DriftAboveRepairThresholdSinceUtc = null;
+            }
+            else if (TryObserveDriftAndMaybeRepair(runtime, room, snapshots, now))
+            {
+                return;
+            }
+
             AlignPausedPeers(runtime, room, snapshots, now);
 
             runtime.Previous.Clear();
@@ -4075,6 +4123,121 @@ namespace Emby.Plugins.WatchTogether
             }
 
             runtime.PreviousAtUtc = now;
+        }
+
+        private bool TryObserveDriftAndMaybeRepair(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            if (runtime == null || room == null || snapshots == null ||
+                runtime.State != RoomState.Watching ||
+                runtime.Barrier != null ||
+                runtime.Handoff != null ||
+                runtime.Pending.Count != 0 ||
+                runtime.Suppressed.Count != 0 ||
+                runtime.Recovery != null ||
+                room.JoinedParticipantUserIds == null ||
+                room.JoinedParticipantUserIds.Count != 2)
+            {
+                if (runtime != null)
+                {
+                    runtime.DriftAboveRepairThresholdSinceUtc = null;
+                    runtime.CurrentDriftSeconds = null;
+                }
+                return false;
+            }
+
+            string primaryUserId = room.PrimaryUserId;
+            string participantUserId = room.JoinedParticipantUserIds.FirstOrDefault(
+                userId => !string.Equals(userId, primaryUserId, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(participantUserId) ||
+                !snapshots.TryGetValue(primaryUserId, out var primary) ||
+                !snapshots.TryGetValue(participantUserId, out var participant) ||
+                primary == null ||
+                participant == null ||
+                !primary.Online ||
+                !participant.Online ||
+                primary.Stopped ||
+                participant.Stopped ||
+                primary.IsPaused ||
+                participant.IsPaused ||
+                Math.Abs(primary.PlaybackRate - 1.0) > SyncConstants.PlaybackRateTolerance ||
+                Math.Abs(participant.PlaybackRate - 1.0) > SyncConstants.PlaybackRateTolerance ||
+                !string.Equals(primary.ItemId, participant.ItemId, StringComparison.OrdinalIgnoreCase) ||
+                primary.RunTimeTicks <= 0 ||
+                participant.RunTimeTicks <= 0)
+            {
+                runtime.DriftAboveRepairThresholdSinceUtc = null;
+                runtime.CurrentDriftSeconds = null;
+                return false;
+            }
+
+            double previousAbsoluteDrift = runtime.CurrentDriftSeconds.HasValue
+                ? Math.Abs(runtime.CurrentDriftSeconds.Value)
+                : 0;
+            double driftSeconds =
+                (participant.PositionTicks - primary.PositionTicks) /
+                (double)SessionSnapshot.TicksPerSecond;
+            double absoluteDriftSeconds = Math.Abs(driftSeconds);
+            runtime.CurrentDriftSeconds = driftSeconds;
+            runtime.MaxObservedAbsoluteDriftSeconds = Math.Max(
+                runtime.MaxObservedAbsoluteDriftSeconds,
+                absoluteDriftSeconds);
+
+            if (previousAbsoluteDrift < SyncConstants.DriftObserveThresholdSeconds &&
+                absoluteDriftSeconds >= SyncConstants.DriftObserveThresholdSeconds)
+            {
+                runtime.RecordDriftDiagnosticEvent(
+                    "drift_threshold_entered", "entered", driftSeconds, now);
+            }
+            else if (previousAbsoluteDrift >= SyncConstants.DriftObserveThresholdSeconds &&
+                     absoluteDriftSeconds < SyncConstants.DriftObserveThresholdSeconds)
+            {
+                runtime.RecordDriftDiagnosticEvent(
+                    "drift_threshold_cleared", "cleared", driftSeconds, now);
+            }
+
+            if (absoluteDriftSeconds < SyncConstants.DriftRepairThresholdSeconds)
+            {
+                runtime.DriftAboveRepairThresholdSinceUtc = null;
+                return false;
+            }
+
+            if (runtime.LastAutoRepairAtUtc.HasValue &&
+                (now - runtime.LastAutoRepairAtUtc.Value).TotalSeconds <
+                    SyncConstants.DriftRepairCooldownSeconds)
+            {
+                runtime.DriftAboveRepairThresholdSinceUtc = null;
+                return false;
+            }
+
+            if (!runtime.DriftAboveRepairThresholdSinceUtc.HasValue)
+            {
+                runtime.DriftAboveRepairThresholdSinceUtc = now;
+                return false;
+            }
+
+            if ((now - runtime.DriftAboveRepairThresholdSinceUtc.Value).TotalSeconds <
+                SyncConstants.DriftRepairHoldSeconds)
+            {
+                return false;
+            }
+
+            runtime.DriftAboveRepairThresholdSinceUtc = null;
+            runtime.RecordAutoRepairStarted(now, driftSeconds);
+            runtime.RecordDriftDiagnosticEvent(
+                "drift_auto_repair_started", "started", driftSeconds, now);
+            StartBarrier(
+                runtime,
+                room,
+                snapshots,
+                now,
+                fromAutomaticDriftRepair: true,
+                automaticDriftSeconds: driftSeconds);
+            BarrierTick(runtime, room, snapshots, now);
+            return true;
         }
 
         private static void CancelSupersededPausePending(

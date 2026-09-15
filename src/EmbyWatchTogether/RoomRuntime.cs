@@ -96,6 +96,18 @@ namespace Emby.Plugins.WatchTogether
 
         public int DriftRounds { get; set; }
 
+        public double? CurrentDriftSeconds { get; internal set; }
+
+        public double MaxObservedAbsoluteDriftSeconds { get; internal set; }
+
+        public DateTimeOffset? DriftAboveRepairThresholdSinceUtc { get; internal set; }
+
+        public DateTimeOffset? LastAutoRepairAtUtc { get; internal set; }
+
+        public int AutoRepairCount { get; internal set; }
+
+        public double? LastAutoRepairDriftSeconds { get; internal set; }
+
         public string SyncItemId { get; set; }
 
         public MediaHandoffState Handoff { get; private set; }
@@ -142,12 +154,36 @@ namespace Emby.Plugins.WatchTogether
             double? latencySeconds,
             DateTimeOffset atUtc)
         {
+            RecordDiagnosticEventCore(
+                type, userId, command, result, positionTicks, latencySeconds, atUtc, null);
+        }
+
+        internal void RecordDriftDiagnosticEvent(
+            string type,
+            string result,
+            double driftSeconds,
+            DateTimeOffset atUtc)
+        {
+            RecordDiagnosticEventCore(
+                type, null, null, result, null, null, atUtc, driftSeconds);
+        }
+
+        private void RecordDiagnosticEventCore(
+            string type,
+            string userId,
+            string command,
+            string result,
+            long? positionTicks,
+            double? latencySeconds,
+            DateTimeOffset atUtc,
+            double? driftSeconds)
+        {
             if (string.IsNullOrWhiteSpace(type)) return;
             var record = new SyncDiagnosticEventRecord
             {
                 Type = type.Trim(), UserId = userId, Command = SyncDiagnostics.NormalizeCommand(command),
                 Result = SyncDiagnostics.NormalizeResult(result), PositionTicks = positionTicks,
-                LatencySeconds = latencySeconds, AtUtc = atUtc,
+                LatencySeconds = latencySeconds, DriftSeconds = driftSeconds, AtUtc = atUtc,
             };
             lock (_diagnosticsLock)
             {
@@ -165,7 +201,8 @@ namespace Emby.Plugins.WatchTogether
                 {
                     Type = record.Type, UserId = record.UserId, Command = record.Command,
                     Result = record.Result, PositionTicks = record.PositionTicks,
-                    LatencySeconds = record.LatencySeconds, AtUtc = record.AtUtc,
+                    LatencySeconds = record.LatencySeconds, DriftSeconds = record.DriftSeconds,
+                    AtUtc = record.AtUtc,
                 };
             }
         }
@@ -202,7 +239,8 @@ namespace Emby.Plugins.WatchTogether
         private static string EventSignature(SyncDiagnosticEventRecord record)
         {
             return string.Join("|", record.Type, record.UserId, record.Command, record.Result,
-                record.PositionTicks?.ToString() ?? "", record.LatencySeconds?.ToString("0.###") ?? "");
+                record.PositionTicks?.ToString() ?? "", record.LatencySeconds?.ToString("0.###") ?? "",
+                record.DriftSeconds?.ToString("0.###") ?? "");
         }
 
         private static SessionSnapshot CopySnapshot(SessionSnapshot source)
@@ -222,6 +260,7 @@ namespace Emby.Plugins.WatchTogether
             {
                 Type = source.Type, UserId = source.UserId, Command = source.Command, Result = source.Result,
                 PositionTicks = source.PositionTicks, LatencySeconds = source.LatencySeconds, AtUtc = source.AtUtc,
+                DriftSeconds = source.DriftSeconds,
             };
         }
 
@@ -231,6 +270,7 @@ namespace Emby.Plugins.WatchTogether
             {
                 Type = source.Type, UserId = source.UserId, Command = source.Command, Result = source.Result,
                 PositionTicks = source.PositionTicks, LatencySeconds = source.LatencySeconds, AtUtc = source.AtUtc,
+                DriftSeconds = source.DriftSeconds,
             };
         }
 
@@ -259,6 +299,7 @@ namespace Emby.Plugins.WatchTogether
             ParticipantResyncRequestedUserId = null;
             ClearTransientSessionRecovery();
             ClearRemoteControlRecovery();
+            ClearDriftTelemetry(clearAutoRepairHistory: true);
         }
 
         internal void ExitSnapshotUnavailableProtection()
@@ -288,6 +329,7 @@ namespace Emby.Plugins.WatchTogether
         public void ResetToWaiting()
         {
             bool preserveStopIdentity = MissingSessionSinceUtc.HasValue;
+            bool preserveAutoRepairHistory = Barrier?.FromAutomaticDriftRepair == true;
             State = RoomState.Waiting;
             Error = null;
             Barrier = null;
@@ -311,6 +353,7 @@ namespace Emby.Plugins.WatchTogether
             ParticipantResyncRequestedUserId = null;
             ClearTransientSessionRecovery();
             ClearRemoteControlRecovery();
+            ClearDriftTelemetry(clearAutoRepairHistory: !preserveAutoRepairHistory);
         }
 
         internal MediaHandoffState BeginMediaHandoff(
@@ -353,6 +396,26 @@ namespace Emby.Plugins.WatchTogether
         internal void ClearMediaHandoff()
         {
             Handoff = null;
+        }
+
+        internal void ClearDriftTelemetry(bool clearAutoRepairHistory)
+        {
+            CurrentDriftSeconds = null;
+            MaxObservedAbsoluteDriftSeconds = 0;
+            DriftAboveRepairThresholdSinceUtc = null;
+            if (clearAutoRepairHistory)
+            {
+                LastAutoRepairAtUtc = null;
+                AutoRepairCount = 0;
+                LastAutoRepairDriftSeconds = null;
+            }
+        }
+
+        internal void RecordAutoRepairStarted(DateTimeOffset atUtc, double driftSeconds)
+        {
+            LastAutoRepairAtUtc = atUtc;
+            AutoRepairCount++;
+            LastAutoRepairDriftSeconds = driftSeconds;
         }
 
         internal void BeginTransientSessionRecovery(

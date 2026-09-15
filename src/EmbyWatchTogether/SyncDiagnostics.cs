@@ -119,6 +119,7 @@ namespace Emby.Plugins.WatchTogether
         public string Result { get; set; }
         public long? PositionTicks { get; set; }
         public double? LatencySeconds { get; set; }
+        public double? DriftSeconds { get; set; }
         public DateTimeOffset AtUtc { get; set; }
     }
 
@@ -130,6 +131,7 @@ namespace Emby.Plugins.WatchTogether
         public string Result { get; set; }
         public long? PositionTicks { get; set; }
         public double? LatencySeconds { get; set; }
+        public double? DriftSeconds { get; set; }
         public DateTimeOffset AtUtc { get; set; }
     }
 
@@ -141,6 +143,7 @@ namespace Emby.Plugins.WatchTogether
         public string Result { get; set; }
         public long? PositionTicks { get; set; }
         public double? LatencySeconds { get; set; }
+        public double? DriftSeconds { get; set; }
         public DateTimeOffset AtUtc { get; set; }
     }
 
@@ -152,6 +155,7 @@ namespace Emby.Plugins.WatchTogether
         public string Result { get; set; }
         public long? PositionTicks { get; set; }
         public double? LatencySeconds { get; set; }
+        public double? DriftSeconds { get; set; }
         public DateTimeOffset AtUtc { get; set; }
     }
 
@@ -185,7 +189,11 @@ namespace Emby.Plugins.WatchTogether
                 "snapshot_protection_entered", "snapshot_protection_recovered", "eligibility_changed",
                 "manual_action", "resync", "resync_barrier_started", "handoff_started",
                 "handoff_play_requested", "handoff_target_confirmed", "handoff_barrier_started",
-                "handoff_completed", "handoff_failed", "handoff_superseded", "primary_item_changed" },
+                "handoff_completed", "handoff_failed", "handoff_superseded", "primary_item_changed",
+                "recovery_started", "recovery_confirmed", "recovery_timed_out",
+                "recovery_session_changed", "recovery_item_changed", "drift_threshold_entered",
+                "drift_threshold_cleared", "drift_auto_repair_started",
+                "drift_auto_repair_completed", "drift_auto_repair_failed" },
             StringComparer.OrdinalIgnoreCase);
 
         public static string Hash(string value)
@@ -242,6 +250,7 @@ namespace Emby.Plugins.WatchTogether
                 case "superseded": case "cancelled": return "changed";
                 case "stopped": return "stopped";
                 case "entered": return "entered";
+                case "cleared": return "cleared";
                 case "recovered": return "recovered";
                 case "changed": return "changed";
                 default: return "observed";
@@ -429,6 +438,7 @@ namespace Emby.Plugins.WatchTogether
                 Type = NormalizeEventType(a.Type), Command = NormalizeCommand(a.Command), Alias = AliasFor(room, a.UserId),
                 Result = NormalizeResult(a.Result), PositionTicks = a.PositionTicks,
                 LatencySeconds = a.LatencySeconds, AtUtc = a.AtUtc,
+                DriftSeconds = a.DriftSeconds,
             };
         }
 
@@ -439,6 +449,7 @@ namespace Emby.Plugins.WatchTogether
                 Type = NormalizeEventType(e.Type), Command = NormalizeCommand(e.Command), Alias = AliasFor(room, e.UserId),
                 Result = NormalizeResult(e.Result), PositionTicks = e.PositionTicks,
                 LatencySeconds = e.LatencySeconds, AtUtc = e.AtUtc,
+                DriftSeconds = e.DriftSeconds,
             };
         }
 
