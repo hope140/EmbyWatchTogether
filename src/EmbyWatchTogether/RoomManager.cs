@@ -400,7 +400,8 @@ namespace Emby.Plugins.WatchTogether
                 // Check every pending command, including a command left by a
                 // participant whose membership is changing. This keeps a
                 // participant request from clearing an in-flight operation.
-                if (runtime.Barrier != null ||
+                if (runtime.State == RoomState.Recovering ||
+                    runtime.Barrier != null ||
                     runtime.Handoff != null ||
                     runtime.Pending.Count > 0)
                 {
@@ -574,7 +575,8 @@ namespace Emby.Plugins.WatchTogether
                 {
                     lock (_lock)
                     {
-                        if (runtime.Barrier != null ||
+                        if (runtime.State == RoomState.Recovering ||
+                            runtime.Barrier != null ||
                             runtime.Handoff != null ||
                             runtime.Pending.Count > 0)
                         {

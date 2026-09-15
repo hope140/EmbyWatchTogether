@@ -85,6 +85,13 @@ namespace Emby.Plugins.WatchTogether
             get { return _remoteControlRecoveryAffectedUserIds.ToList(); }
         }
 
+        /// <summary>
+        /// Short same-session disappearance recovery. This is runtime-only and
+        /// is intentionally separate from the existing remote-control flag
+        /// recovery window.
+        /// </summary>
+        public TransientSessionRecoveryState Recovery { get; private set; }
+
         public DateTimeOffset? MissingSessionSinceUtc { get; set; }
 
         public int DriftRounds { get; set; }
@@ -250,6 +257,7 @@ namespace Emby.Plugins.WatchTogether
             BarrierRetryAtUtc = null;
             Handoff = null;
             ParticipantResyncRequestedUserId = null;
+            ClearTransientSessionRecovery();
             ClearRemoteControlRecovery();
         }
 
@@ -301,6 +309,7 @@ namespace Emby.Plugins.WatchTogether
             BarrierRetryAtUtc = null;
             Handoff = null;
             ParticipantResyncRequestedUserId = null;
+            ClearTransientSessionRecovery();
             ClearRemoteControlRecovery();
         }
 
@@ -344,6 +353,71 @@ namespace Emby.Plugins.WatchTogether
         internal void ClearMediaHandoff()
         {
             Handoff = null;
+        }
+
+        internal void BeginTransientSessionRecovery(
+            DateTimeOffset startedAtUtc,
+            IEnumerable<string> missingUserIds,
+            IReadOnlyDictionary<string, SessionSnapshot> previous)
+        {
+            var state = new TransientSessionRecoveryState
+            {
+                StartedAtUtc = startedAtUtc,
+            };
+            var missing = (missingUserIds ?? Enumerable.Empty<string>())
+                .Where(userId => !string.IsNullOrWhiteSpace(userId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(userId => userId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (previous != null)
+            {
+                foreach (var pair in previous.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    var snapshot = pair.Value;
+                    if (snapshot == null)
+                    {
+                        continue;
+                    }
+
+                    state.Participants[pair.Key] = new TransientSessionRecoveryParticipant
+                    {
+                        UserId = pair.Key,
+                        ExpectedSessionId = snapshot.SessionId,
+                        ExpectedItemId = snapshot.ItemId,
+                        LastKnownPositionTicks = snapshot.PositionTicks,
+                        LastKnownPaused = snapshot.IsPaused,
+                    };
+                }
+            }
+
+            foreach (var userId in missing)
+            {
+                if (state.Participants.ContainsKey(userId))
+                {
+                    state.MissingUserIds.Add(userId);
+                }
+            }
+
+            var firstMissingUserId = state.MissingUserIds.Count == 1
+                ? state.MissingUserIds[0]
+                : null;
+            if (firstMissingUserId != null &&
+                state.Participants.TryGetValue(firstMissingUserId, out var first))
+            {
+                state.MissingUserId = first.UserId;
+                state.ExpectedSessionId = first.ExpectedSessionId;
+                state.ExpectedItemId = first.ExpectedItemId;
+                state.LastKnownPositionTicks = first.LastKnownPositionTicks;
+                state.LastKnownPaused = first.LastKnownPaused;
+            }
+
+            Recovery = state;
+        }
+
+        internal void ClearTransientSessionRecovery()
+        {
+            Recovery = null;
         }
 
         internal void StartRemoteControlRecovery(

@@ -1797,50 +1797,43 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void MissingSessionRecovery_RequiresPreviousIdentityAndRemoteControl()
+        public void TransientRecovery_DifferentSessionFallsBackToWaiting()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
             EnterWatching(engine, room);
             _messageIssuer.Issued.Clear();
 
-            // The original u1 session disappears and starts the stop debounce.
+            // The original u1 session disappears and enters the explicit
+            // transient recovery state without sending a command.
             SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             var result = engine.PollOnce(_clock.Now).Single();
             var runtime = _rooms.GetRuntime(room.Id);
-            Assert.Equal(RoomState.Watching, result.State);
-            Assert.NotNull(runtime.MissingSessionSinceUtc);
+            Assert.Equal(RoomState.Recovering, result.State);
+            Assert.NotNull(runtime.Recovery);
+            Assert.Equal("s1", runtime.Recovery.ExpectedSessionId);
+            Assert.Equal("i1", runtime.Recovery.ExpectedItemId);
+            Assert.Null(runtime.MissingSessionSinceUtc);
+            Assert.Empty(_issuer.Issued);
 
-            // A different, non-controllable session is not a trusted
-            // recovery and must not clear the existing observation window.
+            // A different session is never accepted as recovery, even when it
+            // reports the same item.
             SetCandidates(
                 Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond,
                     supportsRemoteControl: false),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(0.5);
             result = engine.PollOnce(_clock.Now).Single();
-            Assert.Equal(RoomState.Watching, result.State);
-            Assert.NotNull(runtime.MissingSessionSinceUtc);
-            Assert.Empty(_issuer.Issued);
-            Assert.Empty(_messageIssuer.Issued);
-
-            // The participant disappears again; the original observation now
-            // reaches the two-second threshold and stops playback once.
-            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
-            _clock.Advance(1.5);
-            result = engine.PollOnce(_clock.Now).Single();
             Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Equal("播放已停止，等待双方重新打开同一视频", result.Error);
-            Assert.Single(_issuer.Issued, issued =>
+            Assert.Null(runtime.Recovery);
+            Assert.Contains(_issuer.Issued, issued =>
                 issued.userId == "u2" && issued.command == RemoteCommands.Pause);
-            Assert.Single(_messageIssuer.Issued, message => message.userId == "u2");
-            Assert.DoesNotContain(_issuer.Issued, issued => issued.userId == "u1");
-            Assert.DoesNotContain(_messageIssuer.Issued, message => message.userId == "u1");
+            Assert.DoesNotContain(_issuer.Issued, issued => issued.sessionId == "s1");
         }
 
         [Fact]
-        public void MissingSessionRecovery_DifferentControllableSessionDoesNotClearObservation()
+        public void TransientRecovery_DifferentControllableSessionFallsBackToWaiting()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -1849,24 +1842,24 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
+            var result = engine.PollOnce(_clock.Now).Single();
             var runtime = _rooms.GetRuntime(room.Id);
-            Assert.NotNull(runtime.MissingSessionSinceUtc);
+            Assert.Equal(RoomState.Recovering, result.State);
 
             SetCandidates(
                 Snapshot("s1-reconnected", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(0.5);
-            var result = engine.PollOnce(_clock.Now).Single();
+            result = engine.PollOnce(_clock.Now).Single();
 
-            Assert.Equal(RoomState.Watching, result.State);
-            Assert.NotNull(runtime.MissingSessionSinceUtc);
-            Assert.Empty(_issuer.Issued);
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Null(runtime.Recovery);
+            Assert.Contains(_issuer.Issued, issued => issued.command == RemoteCommands.Pause);
             Assert.Empty(_messageIssuer.Issued);
         }
 
         [Fact]
-        public void MissingSessionRecovery_SameIdentityClearsObservationWithoutSideEffects()
+        public void TransientRecovery_SameIdentityStartsBarrier()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -1875,21 +1868,128 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
-            engine.PollOnce(_clock.Now);
+            var result = engine.PollOnce(_clock.Now).Single();
             var runtime = _rooms.GetRuntime(room.Id);
-            Assert.NotNull(runtime.MissingSessionSinceUtc);
+            Assert.Equal(RoomState.Recovering, result.State);
 
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(0.5);
+            result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Null(runtime.Recovery);
+            Assert.Null(result.Error);
+            Assert.Contains(_issuer.Issued, issued => issued.command == RemoteCommands.Pause);
+            Assert.Empty(_messageIssuer.Issued);
+        }
+
+        [Fact]
+        public void TransientRecovery_SameSessionDifferentItemFallsBackToWaiting()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Waiting, result.State);
+            Assert.Null(_rooms.GetRuntime(room.Id).Recovery);
+            Assert.DoesNotContain(_issuer.Issued, issue => issue.command == RemoteCommands.PlayItem);
+        }
+
+        [Fact]
+        public void TransientRecovery_PrimarySameSessionReturnsThroughBarrier()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Contains(_issuer.Issued, issue => issue.userId == "u1" && issue.command == RemoteCommands.Pause);
+            Assert.Contains(_issuer.Issued, issue => issue.userId == "u2" && issue.command == RemoteCommands.Pause);
+        }
+
+        [Fact]
+        public void TransientRecovery_BothSessionsMissingThenReturnThroughBarrier()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates();
+            _clock.Advance(1);
+            var result = engine.PollOnce(_clock.Now).Single();
+            var runtime = _rooms.GetRuntime(room.Id);
+
+            Assert.Equal(RoomState.Recovering, result.State);
+            Assert.Equal(2, runtime.Recovery.Participants.Count);
+            Assert.Empty(_issuer.Issued);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            result = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, result.State);
+            Assert.Null(runtime.Recovery);
+        }
+
+        [Fact]
+        public void TransientRecovery_ExplicitStopDoesNotEnterRecovering()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, stopped: true),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
             var result = engine.PollOnce(_clock.Now).Single();
 
             Assert.Equal(RoomState.Watching, result.State);
-            Assert.Null(runtime.MissingSessionSinceUtc);
-            Assert.Null(result.Error);
-            Assert.Empty(_issuer.Issued);
-            Assert.Empty(_messageIssuer.Issued);
+            Assert.Null(_rooms.GetRuntime(room.Id).Recovery);
+            Assert.NotNull(_rooms.GetRuntime(room.Id).MissingSessionSinceUtc);
+        }
+
+        [Fact]
+        public void TransientRecovery_ParticipantResyncIsBusy()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
+
+            var result = _rooms.RequestParticipantResync(
+                room.Id, "u2", () => "server-1", _clock.Now);
+
+            Assert.Equal("busy", result.Status);
+            Assert.Equal("synchronization_in_progress", result.Reason);
+            Assert.Equal(RoomState.Recovering, result.State);
         }
 
         [Fact]
@@ -2000,7 +2100,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void TransientMissingParticipant_RecoversBeforeDebounceWithoutBarrier()
+        public void TransientMissingParticipant_EntersRecoveryAndReturnsThroughBarrier()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -2010,7 +2110,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             var result = engine.PollOnce(_clock.Now).Single();
 
-            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Equal(RoomState.Recovering, result.State);
             Assert.Empty(_issuer.Issued);
 
             SetCandidates(
@@ -2019,9 +2119,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             result = engine.PollOnce(_clock.Now).Single();
 
-            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Equal(RoomState.Barrier, result.State);
             Assert.Null(result.Error);
-            Assert.Empty(_issuer.Issued);
+            Assert.Contains(_issuer.Issued, issued => issued.command == RemoteCommands.Pause);
         }
 
         [Fact]
@@ -2127,7 +2227,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void MissingParticipant_PausesOnlyTheRemainingParticipant()
+        public void MissingParticipant_TimeoutReturnsToWaitingWithoutControllingMissingSession()
         {
             var room = CreateRoom();
             var engine = CreateEngine();
@@ -2138,16 +2238,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             var result = engine.PollOnce(_clock.Now).Single();
 
-            Assert.Equal(RoomState.Watching, result.State);
+            Assert.Equal(RoomState.Recovering, result.State);
             Assert.Empty(_issuer.Issued);
 
-            _clock.Advance(2);
+            _clock.Advance(SyncConstants.TransientRecoveryTimeoutSeconds);
             result = engine.PollOnce(_clock.Now).Single();
 
             Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Contains(_issuer.Issued, i =>
-                i.userId == "u2" && i.command == RemoteCommands.Pause);
-            Assert.DoesNotContain(_issuer.Issued, i => i.userId == "u1");
+            Assert.Empty(_issuer.Issued);
         }
 
         [Fact]
@@ -3627,7 +3725,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             SetCandidates(
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
-            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Equal(RoomState.Recovering, engine.PollOnce(_clock.Now).Single().State);
 
             SetCandidates(
                 Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),

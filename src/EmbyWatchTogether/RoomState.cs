@@ -15,6 +15,7 @@ namespace Emby.Plugins.WatchTogether
         Watching = 2,
         Unavailable = 3,
         Handoff = 4,
+        Recovering = 5,
     }
 
     public enum BarrierStage
@@ -118,6 +119,45 @@ namespace Emby.Plugins.WatchTogether
 
         public ISet<string> SupersededTargetItemIds { get; } =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Ephemeral state for a short disappearance of one or both already-bound
+    /// sessions while a room is Watching. The expected identity is copied from
+    /// the last confirmed Watching snapshot so a later device session cannot
+    /// be mistaken for a recovery.
+    /// </summary>
+    public sealed class TransientSessionRecoveryState
+    {
+        public string MissingUserId { get; set; }
+
+        public string ExpectedSessionId { get; set; }
+
+        public string ExpectedItemId { get; set; }
+
+        public DateTimeOffset StartedAtUtc { get; set; }
+
+        public long LastKnownPositionTicks { get; set; }
+
+        public bool LastKnownPaused { get; set; }
+
+        public List<string> MissingUserIds { get; } = new List<string>();
+
+        public Dictionary<string, TransientSessionRecoveryParticipant> Participants { get; } =
+            new Dictionary<string, TransientSessionRecoveryParticipant>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public sealed class TransientSessionRecoveryParticipant
+    {
+        public string UserId { get; set; }
+
+        public string ExpectedSessionId { get; set; }
+
+        public string ExpectedItemId { get; set; }
+
+        public long LastKnownPositionTicks { get; set; }
+
+        public bool LastKnownPaused { get; set; }
     }
 
     public sealed class PendingCommand

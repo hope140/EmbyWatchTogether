@@ -79,6 +79,11 @@ namespace Emby.Plugins.WatchTogether
         // not assert that a live WebSocket is usable.
         public const double RemoteControlRecoveryGraceSeconds = 8.0;
 
+        // A Watching room may tolerate a short disappearance of an already
+        // bound session. The expected SessionId and ItemId remain fixed for
+        // this in-memory window; a replacement session never inherits it.
+        public const double TransientRecoveryTimeoutSeconds = 10.0;
+
         // Participant initiated resync requests are coalesced for a short
         // interval so a double click cannot repeatedly rebuild the barrier.
         public const double ParticipantResyncCooldownSeconds = 3.0;
