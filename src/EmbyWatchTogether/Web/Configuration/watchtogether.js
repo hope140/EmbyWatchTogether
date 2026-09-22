@@ -1065,9 +1065,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var adminSection = page.querySelector('#wtAdminSection');
         var settingsSection = page.querySelector('#wtSettingsSection');
         var roomsHeading = page.querySelector('#wtRoomsHeading');
+        var pluginNav = page._wtPluginNav || page.querySelector('.wt-pluginNav');
         var adminTabs = [
-            page.querySelector('#wtTabManage'),
-            page.querySelector('#wtTabSettings')
+            pluginNav && pluginNav.querySelector('#wtTabManage'),
+            pluginNav && pluginNav.querySelector('#wtTabSettings')
         ];
         var helpSteps = [
             page.querySelector('#wtHelpStep1'),
@@ -1115,7 +1116,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var views = String(section.getAttribute('data-wt-section') || '').split(/\s+/);
             section.classList.toggle('wt-viewHidden', views.indexOf(view) < 0);
         });
-        Array.prototype.slice.call(page.querySelectorAll('.wt-pluginNavLink')).forEach(function (tab) {
+        var pluginNav = page._wtPluginNav || page.querySelector('.wt-pluginNav');
+        Array.prototype.slice.call(pluginNav ? pluginNav.querySelectorAll('.wt-pluginNavLink') : []).forEach(function (tab) {
             var active = tab.getAttribute('data-wt-view') === view;
             if (active) tab.setAttribute('aria-current', 'page');
             else tab.removeAttribute('aria-current');
@@ -1128,6 +1130,47 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         document.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') closeMoreMenus(page, true);
         }, true);
+    }
+
+    function mountPluginNav(page) {
+        var nav = page._wtPluginNav || page.querySelector('#wtPluginNav');
+        var slot = page.querySelector('#wtPluginNavSlot');
+        if (!nav || !slot) {
+            return;
+        }
+        page._wtPluginNav = nav;
+        page._wtPluginNavHome = slot;
+        var doc = page.ownerDocument || document;
+        var host = doc.querySelector('.skinHeader .headerMiddle');
+        if (host) {
+            if (nav.parentNode !== host) {
+                host.appendChild(nav);
+            }
+            nav.classList.add('wt-pluginNav--host');
+            page._wtPluginNavHost = host;
+            page._wtPluginNavMounted = true;
+            return;
+        }
+        if (nav.parentNode !== slot) {
+            slot.appendChild(nav);
+        }
+        nav.classList.remove('wt-pluginNav--host');
+        page._wtPluginNavHost = null;
+        page._wtPluginNavMounted = false;
+    }
+
+    function unmountPluginNav(page) {
+        var nav = page._wtPluginNav || page.querySelector('#wtPluginNav');
+        var slot = page._wtPluginNavHome || page.querySelector('#wtPluginNavSlot');
+        if (!nav || !slot) {
+            return;
+        }
+        if (nav.parentNode !== slot) {
+            slot.appendChild(nav);
+        }
+        nav.classList.remove('wt-pluginNav--host');
+        page._wtPluginNavHost = null;
+        page._wtPluginNavMounted = false;
     }
 
     function clearChildren(element) {
@@ -1344,9 +1387,32 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function appendRoomStateDetails(card, room) {
         var state = roomState(room);
         var media = document.createElement('div');
-        media.className = 'fieldDescription wt-roomMeta wt-roomMediaPlaceholder';
-        media.textContent = '媒体信息待权限验证';
-        card.appendChild(media);
+        media.className = 'fieldDescription wt-roomMediaPlaceholder';
+        var mediaIcon = document.createElement('span');
+        mediaIcon.className = 'wt-mediaIcon';
+        mediaIcon.setAttribute('aria-hidden', 'true');
+        var mediaSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        mediaSvg.setAttribute('viewBox', '0 0 24 24');
+        mediaSvg.setAttribute('fill', 'none');
+        mediaSvg.setAttribute('stroke', 'currentColor');
+        mediaSvg.setAttribute('stroke-width', '1.5');
+        mediaSvg.setAttribute('stroke-linecap', 'round');
+        mediaSvg.setAttribute('stroke-linejoin', 'round');
+        var mediaFrame = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        mediaFrame.setAttribute('x', '3');
+        mediaFrame.setAttribute('y', '4');
+        mediaFrame.setAttribute('width', '18');
+        mediaFrame.setAttribute('height', '16');
+        mediaFrame.setAttribute('rx', '2');
+        var mediaLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        mediaLine.setAttribute('d', 'M3 9h18M8 4v5M16 4v5M8 13h.01M12 13h.01M16 13h.01M8 17h8');
+        mediaSvg.appendChild(mediaFrame);
+        mediaSvg.appendChild(mediaLine);
+        mediaIcon.appendChild(mediaSvg);
+        var mediaLabel = document.createElement('span');
+        mediaLabel.textContent = '媒体信息待权限验证';
+        media.appendChild(mediaIcon);
+        media.appendChild(mediaLabel);
 
         var participants = document.createElement('div');
         participants.className = 'wt-roomParticipants';
@@ -1371,15 +1437,18 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             row.appendChild(status);
             participants.appendChild(row);
         });
-        if (participantList.length > 0) {
-            card.appendChild(participants);
-        }
+        participants.hidden = participantList.length === 0;
+        var overview = document.createElement('div');
+        overview.className = 'wt-roomOverview';
+        overview.appendChild(media);
+        overview.appendChild(participants);
+        card.appendChild(overview);
 
         var updated = document.createElement('div');
         updated.className = 'fieldDescription wt-roomMeta wt-roomUpdated';
         updated.textContent = room._wtStateStale === true ? '更新时间：可能已过期' : '更新时间：刚刚';
         card.appendChild(updated);
-        card._wtStateDetails = { media: media, participants: participants, updated: updated };
+        card._wtStateDetails = { media: media, mediaLabel: mediaLabel, overview: overview, participants: participants, updated: updated };
     }
 
     function updateRoomStateDetails(card, room) {
@@ -1388,7 +1457,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             appendRoomStateDetails(card, room);
             return;
         }
-        details.media.textContent = '媒体信息待权限验证';
+        if (details.mediaLabel) {
+            details.mediaLabel.textContent = '媒体信息待权限验证';
+        } else {
+            details.media.textContent = '媒体信息待权限验证';
+        }
         clearChildren(details.participants);
         var state = roomState(room);
         var sessions = state && Array.isArray(state.Sessions) ? state.Sessions : [];
@@ -1418,16 +1491,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function desiredRoomActions(room) {
         var actions = [];
-        if (room.CurrentUserIsParticipant === true) {
-            actions.push(room.CurrentUserJoined ? 'leave' : 'join');
-        }
         if (room.CurrentUserIsParticipant === true && room.CurrentUserJoined) {
-            actions.push('participantResync');
-        }
-        if (room.IsAdmin) {
-            actions.push('pause', 'resume', 'resync');
+            actions.push('participantResync', 'leave');
+        } else if (room.CurrentUserIsParticipant === true) {
+            actions.push('join');
         } else if (room.CanEnd) {
-            // Ending a self-service room is exposed inside the More menu.
+            // Ending a self-service room remains available from More.
         }
         actions.push('more');
         return actions;
@@ -1592,12 +1661,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var inviteCreateButton = page.querySelector('#wtCreateInvitation');
         var inviteAcceptButton = page.querySelector('#wtAcceptInvitation');
         var invitationSection = page.querySelector('#wtInvitationSection');
+        var helpSection = page.querySelector('.wt-help');
         var activeRoom = (Array.isArray(page._wtRooms) ? page._wtRooms : []).filter(function (room) {
             return room && room.CurrentUserIsParticipant === true;
         })[0] || null;
         if (inviteCreateButton) inviteCreateButton.disabled = !!activeRoom;
         if (inviteAcceptButton) inviteAcceptButton.disabled = !!activeRoom;
         if (invitationSection) invitationSection.hidden = !!activeRoom;
+        if (helpSection) helpSection.hidden = !!activeRoom;
         if (activeRoom && !page._wtInvitationFeedback) {
             setInvitationStatus(page, '你已属于房间“' + roomName(activeRoom) + '”，请先回到当前房间。', false);
         }
@@ -1766,6 +1837,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         menu.setAttribute('role', 'menu');
         menu.setAttribute('aria-label', '房间更多操作');
         var desired = ['diagnostics'];
+        if (room.IsAdmin) desired.push('pause', 'resume', 'resync');
         if (room.IsAdmin || room.CanEnd) desired.push('delete');
         var existing = {};
         Array.prototype.slice.call(menu.querySelectorAll('[data-act]')).forEach(function (item) {
@@ -2463,7 +2535,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         dom.addEventListener(page.querySelector('#wtSaveConfig'), 'click', function () {
             savePluginConfiguration(page);
         });
-        Array.prototype.slice.call(page.querySelectorAll('.wt-pluginNavLink')).forEach(function (tab) {
+        var pluginNav = page._wtPluginNav || page.querySelector('.wt-pluginNav');
+        Array.prototype.slice.call(pluginNav ? pluginNav.querySelectorAll('.wt-pluginNavLink') : []).forEach(function (tab) {
             dom.addEventListener(tab, 'click', function (event) {
                 event.preventDefault();
                 var view = tab.getAttribute('data-wt-view') || 'mine';
@@ -2524,6 +2597,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var page = this.view;
         beginPageGeneration(page, false);
         bindPageEvents(page);
+        mountPluginNav(page);
         setAdminVisibility(page, false);
         syncForm(page);
         loading.show();
@@ -2554,6 +2628,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     View.prototype.onPause = function () {
         var page = this.view;
         beginPageGeneration(page, true);
+        unmountPluginNav(page);
         clearInterval(page._wtTimer);
         clearInvitationDraft(page);
         closeConfirmDialog(page, false);

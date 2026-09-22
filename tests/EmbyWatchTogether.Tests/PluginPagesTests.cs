@@ -87,6 +87,15 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("wt-moreMenu", html);
             Assert.Contains("stroke=\"currentColor\"", html);
             Assert.Contains("--wt-control-height: 44px", html);
+            Assert.Contains("id=\"wtPluginNavSlot\"", html);
+            Assert.Contains("id=\"wtPluginNav\"", html);
+            Assert.Contains(".wt-pluginNav--host", html);
+            Assert.Contains(".skinHeader .headerMiddle", javascript);
+            Assert.Contains("mountPluginNav(page)", javascript);
+            Assert.Contains("unmountPluginNav(page)", javascript);
+            Assert.Contains("grid-template-columns: minmax(13em, .85fr)", html);
+            Assert.Contains("wt-roomOverview", html);
+            Assert.DoesNotContain("border-bottom: 2px solid var(--wt-accent)", html);
             Assert.Contains("--wt-accent: var(--theme-primary-color", html);
             Assert.Contains("tab.style.display = isAdmin ? '' : 'none'", javascript);
             Assert.DoesNotContain("<h1>一起看</h1>", html);
@@ -183,6 +192,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("roomUserName", javascript);
             Assert.Contains("查看诊断", javascript);
             Assert.Contains("participantResync", javascript);
+            Assert.Contains("actions.push('participantResync', 'leave')", javascript);
+            Assert.Contains("if (room.IsAdmin) desired.push('pause', 'resume', 'resync')", javascript);
             Assert.Contains("请求重新同步", javascript);
             Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync", javascript);
             Assert.Contains("/State')", javascript);
