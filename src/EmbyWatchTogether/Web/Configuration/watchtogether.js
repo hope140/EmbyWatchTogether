@@ -1130,7 +1130,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             })[0] || null;
             var status = document.createElement('span');
             status.className = 'fieldDescription wt-roomParticipantStatus';
-            status.textContent = sessionStatusLabel(session);
+            status.textContent = (participant.Joined === true ? '已加入同步' : '已暂离同步') +
+                ' · ' + sessionStatusLabel(session);
             row.appendChild(identity);
             row.appendChild(status);
             participants.appendChild(row);
@@ -1143,6 +1144,129 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         updated.className = 'fieldDescription wt-roomMeta wt-roomUpdated';
         updated.textContent = room._wtStateStale === true ? '更新时间：可能已过期' : '更新时间：刚刚';
         card.appendChild(updated);
+        card._wtStateDetails = { media: media, participants: participants, updated: updated };
+    }
+
+    function updateRoomStateDetails(card, room) {
+        var details = card._wtStateDetails;
+        if (!details) {
+            appendRoomStateDetails(card, room);
+            return;
+        }
+        details.media.textContent = '媒体信息待权限验证';
+        clearChildren(details.participants);
+        var state = roomState(room);
+        var sessions = state && Array.isArray(state.Sessions) ? state.Sessions : [];
+        var participantList = Array.isArray(room.Participants) ? room.Participants : [];
+        participantList.forEach(function (participant) {
+            var row = document.createElement('div');
+            row.className = 'wt-roomParticipant';
+            var identity = document.createElement('span');
+            identity.className = 'wt-roomParticipantName';
+            identity.textContent = roomUserName(room, participant.Id) +
+                (participant.IsPrimary ? '（同步基准）' : '');
+            var session = sessions.filter(function (candidate) {
+                return candidate && candidate.UserId && participant.Id &&
+                    String(candidate.UserId).toLowerCase() === String(participant.Id).toLowerCase();
+            })[0] || null;
+            var status = document.createElement('span');
+            status.className = 'fieldDescription wt-roomParticipantStatus';
+            status.textContent = (participant.Joined === true ? '已加入同步' : '已暂离同步') +
+                ' · ' + sessionStatusLabel(session);
+            row.appendChild(identity);
+            row.appendChild(status);
+            details.participants.appendChild(row);
+        });
+        details.participants.hidden = participantList.length === 0;
+        details.updated.textContent = room._wtStateStale === true ? '更新时间：可能已过期' : '更新时间：刚刚';
+    }
+
+    function desiredRoomActions(room) {
+        var actions = [];
+        if (room.CurrentUserIsParticipant === true) {
+            actions.push(room.CurrentUserJoined ? 'leave' : 'join');
+        }
+        actions.push('diagnostics');
+        if (room.CurrentUserIsParticipant === true && room.CurrentUserJoined) {
+            actions.push('participantResync');
+        }
+        if (room.IsAdmin) {
+            actions.push('pause', 'resume', 'resync', 'delete');
+        } else if (room.CanEnd) {
+            actions.push('delete');
+        }
+        return actions;
+    }
+
+    function updateActionButtonState(page, button, room) {
+        var action = button.dataset.act;
+        button.disabled = !!(page._wtRoomBusy && page._wtRoomBusy[room.RoomId]);
+        if (action === 'diagnostics' && page._wtDiagnosticBusy && page._wtDiagnosticBusy[room.RoomId]) {
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            button.textContent = '读取中…';
+        } else if (!(page._wtRoomBusy && page._wtRoomBusy[room.RoomId])) {
+            button.removeAttribute('aria-busy');
+            button.textContent = action === 'delete'
+                ? (room.CanEnd ? '结束房间' : '删除房间')
+                : action === 'leave' ? '暂离房间'
+                    : action === 'join' ? '加入房间'
+                        : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
+        }
+    }
+
+    function patchRoomActions(page, room, actions) {
+        var desired = desiredRoomActions(room);
+        var existing = {};
+        Array.prototype.slice.call(actions.querySelectorAll('button')).forEach(function (button) {
+            existing[button.dataset.act] = button;
+        });
+        desired.forEach(function (action) {
+            var button = existing[action] || createActionButton(page, room, action);
+            actions.appendChild(button);
+            updateActionButtonState(page, button, room);
+            delete existing[action];
+        });
+        Object.keys(existing).forEach(function (action) {
+            if (existing[action].parentNode === actions) {
+                actions.removeChild(existing[action]);
+            }
+        });
+    }
+
+    function patchRoomCard(page, card, room) {
+        var fields = card._wtFields;
+        if (!fields) {
+            return;
+        }
+        if (card._wtDiagnosticPanel) {
+            page._wtDiagnosticPanels[room.RoomId] = card._wtDiagnosticPanel;
+        }
+        var info = getStateInfo(room.State);
+        info.description = statusReasonMessage(room.StatusReason);
+        if (room.StatusReason === 'different_video') {
+            info.label = '视频不一致';
+        }
+        fields.name.textContent = room.Name || '未命名房间';
+        fields.stateDescription.textContent = info.description;
+        fields.state.textContent = info.label;
+        fields.state.title = info.description;
+        fields.state.className = 'wt-roomState wt-roomState-' + info.className;
+        fields.participantLine.textContent = '参与者：' + (room.ParticipantUserIds || []).map(function (id) {
+            return roomUserName(room, id);
+        }).join('、');
+        fields.primaryLine.textContent = '主用户：' + roomUserName(room, room.PrimaryUserId);
+        fields.membershipLine.textContent = room.CurrentUserIsParticipant === true
+            ? '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
+                '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。'
+            : '管理员可管理此房间；当前账号不是参与者。';
+        var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
+        fields.feedback.textContent = feedback ? feedback.text : '';
+        fields.feedback.className = 'wt-roomFeedback' + (feedback && feedback.isError ? ' error' : '');
+        fields.feedback.setAttribute('role', feedback && feedback.isError ? 'alert' : 'status');
+        fields.feedback.hidden = !feedback;
+        updateRoomStateDetails(card, room);
+        patchRoomActions(page, room, fields.actions);
     }
 
     function findRoomForUser(page, userId) {
@@ -1281,8 +1405,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             syncForm(page);
             if (isPermissionError(err)) {
                 setAdminVisibility(page, false);
-                setFormHint(page, '只有管理员可以创建房间。', true);
-                setStatus(page, '当前账号没有管理员权限，已隐藏管理设置。', true);
+                setFormHint(page, '管理员功能已隐藏。', false);
             } else {
                 setFormHint(page, '用户列表暂时无法加载，请稍后重试。', true);
                 setStatus(page, '用户列表加载失败：' + errorMessage(err), true);
@@ -1408,16 +1531,19 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                             ? '请求服务端重新对齐双方播放位置'
                             : actionLabels[action] + '：' + (getStateInfo(room.State).description || '');
         button.addEventListener('click', function () {
+            var currentRoom = (Array.isArray(page._wtRooms) ? page._wtRooms : []).filter(function (candidate) {
+                return candidate && candidate.RoomId === room.RoomId;
+            })[0] || room;
             if (action === 'delete') {
-                deleteRoom(page, room, button);
+                deleteRoom(page, currentRoom, button);
             } else if (action === 'join' || action === 'leave') {
-                membership(page, room, action, button);
+                membership(page, currentRoom, action, button);
             } else if (action === 'diagnostics') {
-                loadRoomDiagnostics(page, room.RoomId, button);
+                loadRoomDiagnostics(page, currentRoom.RoomId, button);
             } else if (action === 'participantResync') {
-                participantResync(page, room.RoomId, button);
+                participantResync(page, currentRoom.RoomId, button);
             } else {
-                control(page, room.RoomId, action, button);
+                control(page, currentRoom.RoomId, action, button);
             }
         });
         if (action === 'diagnostics' && page._wtDiagnosticBusy && page._wtDiagnosticBusy[room.RoomId]) {
@@ -1524,6 +1650,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         });
 
         rooms.forEach(function (room) {
+            var targetList = currentRoomIds[room.RoomId] ? currentRoomList : managedRoomList;
+            if (existingCards[room.RoomId]) {
+                var existingCard = existingCards[room.RoomId];
+                patchRoomCard(page, existingCard, room);
+                targetList.appendChild(existingCard);
+                delete existingCards[room.RoomId];
+                return;
+            }
             var card = document.createElement('article');
             card.className = 'wt-roomCard';
             card._wtRoomId = room.RoomId;
@@ -1534,6 +1668,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var name = document.createElement('h3');
             name.className = 'wt-roomName';
             name.textContent = room.Name || '未命名房间';
+            card._wtFields = { name: name };
             identity.appendChild(name);
 
             var info = getStateInfo(room.State);
@@ -1544,12 +1679,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var stateDescription = document.createElement('p');
             stateDescription.className = 'fieldDescription wt-roomStateDescription';
             stateDescription.textContent = info.description;
+            card._wtFields.stateDescription = stateDescription;
             identity.appendChild(stateDescription);
 
             var state = document.createElement('span');
             state.className = 'wt-roomState wt-roomState-' + info.className;
             state.textContent = info.label;
             state.title = info.description;
+            card._wtFields.state = state;
 
             header.appendChild(identity);
             header.appendChild(state);
@@ -1562,8 +1699,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             participantLine.textContent = '参与者：' + participantIds.map(function (id) {
                 return roomUserName(room, id);
             }).join('、');
+            card._wtFields.participantLine = participantLine;
             var primaryLine = document.createElement('div');
             primaryLine.textContent = '主用户：' + roomUserName(room, room.PrimaryUserId);
+            card._wtFields.primaryLine = primaryLine;
             meta.appendChild(participantLine);
             meta.appendChild(primaryLine);
             card.appendChild(meta);
@@ -1576,6 +1715,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 ? '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
                     '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。'
                 : '管理员可管理此房间；当前账号不是参与者。';
+            card._wtFields.membershipLine = membershipLine;
             card.appendChild(membershipLine);
 
             var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
@@ -1585,6 +1725,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             feedbackEl.setAttribute('aria-live', 'polite');
             feedbackEl.textContent = feedback ? feedback.text : '';
             feedbackEl.hidden = !feedback;
+            card._wtFields.feedback = feedbackEl;
             card.appendChild(feedbackEl);
 
             var actions = document.createElement('div');
@@ -1593,10 +1734,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 actions.appendChild(createActionButton(page, room, room.CurrentUserJoined ? 'leave' : 'join'));
             }
             actions.appendChild(createActionButton(page, room, 'diagnostics'));
-            // Keep the legacy non-admin condition visible for embedded-page
-            // compatibility checks; membership is now required for admins too.
-            if (room.CurrentUserIsParticipant === true && room.CurrentUserJoined &&
-                (room.IsAdmin || room.CurrentUserJoined && !room.IsAdmin)) {
+            if (room.CurrentUserIsParticipant === true && room.CurrentUserJoined) {
                 actions.appendChild(createActionButton(page, room, 'participantResync'));
             }
             if (room.IsAdmin) {
@@ -1607,22 +1745,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 actions.appendChild(createActionButton(page, room, 'delete'));
             }
             card.appendChild(actions);
-            card.appendChild(createDiagnosticPanel(page, room));
-            var targetList = currentRoomIds[room.RoomId] ? currentRoomList : managedRoomList;
-            if (existingCards[room.RoomId]) {
-                var existingCard = existingCards[room.RoomId];
-                if (existingCard.parentNode === targetList) {
-                    targetList.replaceChild(card, existingCard);
-                } else {
-                    targetList.appendChild(card);
-                    if (existingCard.parentNode) {
-                        existingCard.parentNode.removeChild(existingCard);
-                    }
-                }
-                delete existingCards[room.RoomId];
-            } else {
-                targetList.appendChild(card);
-            }
+            card._wtFields.actions = actions;
+            card._wtDiagnosticPanel = createDiagnosticPanel(page, room);
+            card.appendChild(card._wtDiagnosticPanel.details);
+            targetList.appendChild(card);
         });
         Object.keys(existingCards).forEach(function (roomId) {
             if (existingCards[roomId] && existingCards[roomId].parentNode) {
@@ -1637,7 +1763,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return resource.promise || Promise.resolve(page._wtRooms || rooms || []);
         }
         var list = Array.isArray(rooms) ? rooms.filter(function (room) {
-            return room && room.RoomId;
+            // /State is a participant view. Administrators can still see
+            // management summaries for rooms they do not belong to, but those
+            // rooms must not trigger per-poll state reads.
+            return room && room.RoomId && room.CurrentUserIsParticipant === true;
         }) : [];
         resource.busy = true;
         resource.sequence += 1;
@@ -2042,7 +2171,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }).then(function () {
             return loadInvitations(page);
         }).then(function () {
-            return loadPluginInfo(page);
+            return page._wtIsAdmin === true ? loadPluginInfo(page) : null;
         }).then(function () {
             loading.hide();
         }, function () {

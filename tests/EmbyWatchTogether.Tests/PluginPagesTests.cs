@@ -176,10 +176,17 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("participantResync", javascript);
             Assert.Contains("请求重新同步", javascript);
             Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync", javascript);
+            Assert.Contains("/State')", javascript);
+            Assert.Contains("CurrentUserIsParticipant === true", javascript);
+            Assert.Contains("_wtGeneration", javascript);
+            Assert.Contains("sequence", javascript);
+            Assert.Contains("数据可能已过期", javascript);
+            Assert.Contains("page._wtIsAdmin === true ? loadPluginInfo(page) : null", javascript);
+            Assert.DoesNotContain("setStatus(page, '当前账号没有管理员权限", javascript);
             Assert.Contains("status === 'accepted'", javascript);
             Assert.Contains("status === 'busy'", javascript);
             Assert.Contains("status === 'unavailable'", javascript);
-            Assert.Contains("room.CurrentUserJoined && !room.IsAdmin", javascript);
+            Assert.Contains("room.CurrentUserIsParticipant === true && room.CurrentUserJoined", javascript);
             Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Diagnostics", javascript);
             Assert.Contains("function sanitizeDiagnostic", javascript);
             Assert.Contains("SnapshotHealth", javascript);
