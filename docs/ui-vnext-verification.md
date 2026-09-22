@@ -29,7 +29,7 @@
 | 操作 | 点击前、accepted、busy、部分失败、失败、取消 | .NET/STATIC CONTRACT PASS；mock 覆盖取消零请求与焦点循环 |
 | 设置 | dirty、离开确认、失败保留草稿、成功回读、隐藏字段保留 | MOCK PASS：失败保留与放弃恢复；真实服务器回读待验收 |
 | 诊断 | 按需读取、三轮轮询后保持展开、迟到隔离、导出脱敏 | MOCK BROWSER PASS |
-| 构建包 | 最终 commit 构建、单 DLL ZIP、DLL/ZIP 哈希、provenance | NOT RUN |
+| 构建包 | 最终 commit 构建、单 DLL ZIP、DLL/ZIP 哈希、provenance | LOCAL PACKAGE GATE PASS；精确身份见交付目录 provenance |
 | 真实 Emby | 桌面/手机、双账号、真实主题、真实播放与缓存 | NOT AUTHORIZED / NOT RUN |
 
 ## P0 / P1 状态
@@ -64,6 +64,10 @@
 - `node --check` 覆盖生产控制器、fixture 与 spec；.NET 462/462 PASS；Release build 0 warning / 0 error；四组 PowerShell build/release/CI 门禁 PASS；`git diff --check` PASS。
 
 未执行：真实 Emby 登录、实际宿主 CSS/缓存、真实双账号邀请与播放同步、移动端软键盘、真实剪贴板失败、部署、重启、签名与发布。
+
+### 本地包门禁
+
+标准 `scripts/build.ps1 -Configuration Release` 已在独立输出目录完成 build、462 项测试、publish 和单 DLL ZIP；ZIP 布局检查要求恰好一个根目录 `Emby.Plugins.WatchTogether.dll`，ZIP entry 与旁边 DLL 的 SHA-256 必须一致。最终交付目录以 commit 标识命名，并包含 `SHA256.txt` 与 `PROVENANCE.txt`；精确 commit、字节数和哈希以该目录内文件为准。
 
 ## 本地测试包约束
 
