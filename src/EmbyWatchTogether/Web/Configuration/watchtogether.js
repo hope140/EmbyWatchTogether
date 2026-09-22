@@ -1591,11 +1591,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var createButton = page.querySelector('#wtCreate');
         var inviteCreateButton = page.querySelector('#wtCreateInvitation');
         var inviteAcceptButton = page.querySelector('#wtAcceptInvitation');
+        var invitationSection = page.querySelector('#wtInvitationSection');
         var activeRoom = (Array.isArray(page._wtRooms) ? page._wtRooms : []).filter(function (room) {
             return room && room.CurrentUserIsParticipant === true;
         })[0] || null;
         if (inviteCreateButton) inviteCreateButton.disabled = !!activeRoom;
         if (inviteAcceptButton) inviteAcceptButton.disabled = !!activeRoom;
+        if (invitationSection) invitationSection.hidden = !!activeRoom;
         if (activeRoom && !page._wtInvitationFeedback) {
             setInvitationStatus(page, '你已属于房间“' + roomName(activeRoom) + '”，请先回到当前房间。', false);
         }
@@ -2056,8 +2058,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             });
             card.appendChild(actions);
             card._wtFields.actions = actions;
-            card._wtDiagnosticPanel = createDiagnosticPanel(page, room);
-            card.appendChild(card._wtDiagnosticPanel.details);
+            var diagnosticDetails = createDiagnosticPanel(page, room);
+            card._wtDiagnosticPanel = page._wtDiagnosticPanels[room.RoomId];
+            card.appendChild(diagnosticDetails);
             targetList.appendChild(card);
         });
         Object.keys(existingCards).forEach(function (roomId) {

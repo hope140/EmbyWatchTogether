@@ -16,26 +16,26 @@
 
 ## 验收矩阵
 
-以下项目在对应 Stack 完成前均为 `NOT RUN`。
+以下项目仅在对应命令或真实环境执行后更新。
 
 | 类别 | 需要的证据 | 当前状态 |
 |---|---|---|
-| 主题 | 宿主浅色、深色、完整色变量、仅 HSL 分量 | NOT RUN |
-| 响应式 | 320、360、390、430、768、1024、1440px；无页面横向溢出 | NOT RUN |
-| 身份 | 管理员非成员、管理员成员、普通已加入、普通暂离 | NOT RUN |
-| 房间状态 | Waiting、Barrier、Watching、Handoff、Unavailable、未知原因 | NOT RUN |
-| 生命周期 | 单一轮询、迟到响应隔离、pause/resume、账号切换、旧数据标记 | NOT RUN |
-| 邀请 | 完整 24 位码、大小写、`-`/`_`、复制失败、撤销、过期、Accept 超时读回 | NOT RUN |
-| 操作 | 点击前、accepted、busy、部分失败、失败、取消 | NOT RUN |
-| 设置 | dirty、离开确认、失败保留草稿、成功回读、隐藏字段保留 | NOT RUN |
-| 诊断 | 按需读取、三轮轮询后保持展开、迟到隔离、导出脱敏 | NOT RUN |
+| 主题 | 宿主浅色、深色、完整色变量、仅 HSL 分量 | MOCK BROWSER PASS：light / dark / HSL-only |
+| 响应式 | 320、360、390、430、768、1024、1440、1920px；无页面横向溢出 | MOCK BROWSER PASS |
+| 身份 | 管理员非成员、管理员成员、普通已加入、普通暂离 | .NET CONTRACT PASS；mock 覆盖普通成员与管理员非成员 |
+| 房间状态 | Waiting、Barrier、Watching、Handoff、Unavailable、未知原因 | STATIC CONTRACT PASS；mock 浏览器覆盖 Watching，其他状态待真实客户端 |
+| 生命周期 | 单一轮询、迟到响应隔离、pause/resume、账号切换、旧数据标记 | MOCK PASS：5 秒更新与 pause 迟到响应；账号切换待真实客户端 |
+| 邀请 | 完整 24 位码、大小写、`-`/`_`、复制失败、撤销、过期、Accept 超时读回 | MOCK PARTIAL PASS：创建/原码/业务失败/网络读回；剪贴板与过期实机待验收 |
+| 操作 | 点击前、accepted、busy、部分失败、失败、取消 | .NET/STATIC CONTRACT PASS；mock 覆盖取消零请求与焦点循环 |
+| 设置 | dirty、离开确认、失败保留草稿、成功回读、隐藏字段保留 | MOCK PASS：失败保留与放弃恢复；真实服务器回读待验收 |
+| 诊断 | 按需读取、三轮轮询后保持展开、迟到隔离、导出脱敏 | MOCK BROWSER PASS |
 | 构建包 | 最终 commit 构建、单 DLL ZIP、DLL/ZIP 哈希、provenance | NOT RUN |
 | 真实 Emby | 桌面/手机、双账号、真实主题、真实播放与缓存 | NOT AUTHORIZED / NOT RUN |
 
 ## P0 / P1 状态
 
-- P0：进行中。
-- P1：待宿主媒体读取能力和当前用户权限验证；未验证前使用占位。
+- P0：本地自动化候选已通过；真实 Emby/双客户端验收待授权。
+- P1：skipped；未验证前使用“媒体信息待权限验证”占位。
 
 ### S4 媒体展示能力门禁审计（2026-09-22）
 
@@ -43,25 +43,36 @@
 
 代码与测试证据：
 
-- `src/EmbyWatchTogether/WatchTogetherService.cs:321-373` 的 `GET /WatchTogether/Rooms/{Id}/State` 只返回 `SyncItemId`、每个 `Sessions` 的 `ItemId`、`PositionTicks`、`RunTimeTicks`、播放状态和能力标志；没有片名、媒体详情、封面 URL 或头像 URL。
-- `src/EmbyWatchTogether/SessionSnapshot.cs:70-113` 从 `SessionInfo.NowPlayingItem` 只提取 `Id` 与 `RunTimeTicks`，没有保留 `BaseItemDto` 的标题或图片字段。因此现有状态 DTO 无法支撑媒体卡片。
-- `src/EmbyWatchTogether/WatchTogetherService.cs:951-978` 的参与者摘要只通过 `IUserManager.GetUserById` 读取并返回用户 `Id`、`Name`；未返回头像标识或图片地址。
-- `src/EmbyWatchTogether/WatchTogetherService.cs:662-678` 的 `/WatchTogether/Users` 是管理员专用（`RequireAdmin()`），返回范围为全站用户 Id/Name；它不是普通参与者可用的头像或媒体读取授权边界。
-- `src/EmbyWatchTogether/Web/Configuration/watchtogether.js:28-47` 仅封装 `ApiClient.getUrl`、`getJSON`、`fetch` 调用插件路由；代码中没有已验证的 Emby `Items`、图片或用户头像 API 调用。`loadRoomStates`（约 `2085` 行）也只读取本插件 `/Rooms/{Id}/State`。
-- `tests/EmbyWatchTogether.Tests/WatchTogetherServiceRoomTests.cs:198-248` 验证管理员非成员、普通成员/暂离成员和房间状态读取隔离；测试仅断言 `Sessions` 的运行时字段，未证明跨用户媒体详情或图片访问权限。测试构造的 `NowPlayingItem`（约 `1594` 行）也只提供 Id/时长。
+- `WatchTogetherService.GetRoomState` 只返回 `SyncItemId`、Session 的 Item/位置/时长/播放状态和能力标志；没有片名、封面或头像字段。
+- `SessionSnapshot` 只从 `NowPlayingItem` 提取 Id 与 `RunTimeTicks`，现有状态 DTO 无法支撑媒体卡片。
+- 参与者摘要和管理员 `/Users` 只返回 Id/Name；后者也不是普通参与者的媒体或头像授权边界。
+- 前端只调用本插件路由，没有经过验证的 Emby Items、图片或头像 API 读取与跨账号缓存隔离。
 
-待真实 Emby 验收后才能重新评估放行：使用双账号（管理员非成员、普通已加入/暂离）分别验证宿主 `Items`/图片/头像 API 的可调用性、返回字段的用户权限过滤、跨账号缓存隔离、账号切换后的旧数据清除，以及无媒体/过期状态的回退。未完成这些检查前不得写入 mock 片名、封面或头像，也不得把 `ItemId` 当作可展示标题。
+待真实双账号 Emby 验收宿主媒体/图片权限、账号切换清除和无媒体回退后再评估。P0 占位属于权限门禁的预期行为，不是媒体展示缺陷。
 
-P0 占位属于当前权限门禁的预期行为，不是媒体展示缺陷；本 Stack 未修改 HTML/JS/tests。
+## S5 浏览器验证边界
+
+`tests/ui` 在 `127.0.0.1` 加载仓库真实 HTML/JS，只模拟最小 AMD loader、BaseView、Emby custom elements、主题变量和 `ApiClient`。截图中的账号、房间、邀请码和诊断值均为固定 mock 数据，不连接真实 Emby，不是部署或双客户端验收证据。
+
+### S5 已执行结果（2026-09-23）
+
+- `@playwright/test` 固定为 `1.63.0`；`npm ci` 与 `npm audit --audit-level=high` 通过，0 vulnerabilities。
+- Playwright Chromium 153 mock 浏览器测试 19/19 PASS。
+- 覆盖普通成员当前房间、管理员非成员、插件内导航、邀请创建与接受失败、Accept 网络失败只读回、确认取消零请求与焦点循环、5 秒轮询状态保持、pause 后迟到响应、设置 dirty/失败/放弃、诊断脱敏、浅色/深色/HSL-only，以及 320–1920px 无横向溢出和 44px 控件目标。
+- Mock 截图位于忽略目录 `tests/ui/test-results/ui-vnext/`，包含桌面浅/深、390px 当前房间/邀请/设置/诊断和 320px 长文本。
+- 浏览器门禁发现并修复：隐藏确认遮罩仍拦截点击、房间卡错误读取诊断节点导致首次渲染失败、成员状态在 320/390px 横向溢出、当前房间未置顶。
+- `node --check` 覆盖生产控制器、fixture 与 spec；.NET 462/462 PASS；Release build 0 warning / 0 error；四组 PowerShell build/release/CI 门禁 PASS；`git diff --check` PASS。
+
+未执行：真实 Emby 登录、实际宿主 CSS/缓存、真实双账号邀请与播放同步、移动端软键盘、真实剪贴板失败、部署、重启、签名与发布。
 
 ## 本地测试包约束
 
 - 包类型：未签名本地候选，不是 Release。
-- 程序集版本：保持 `1.6.0.1`，因此必须依靠 commit 与 SHA-256 区分公开 `v1.6.0.1`。
+- 程序集版本保持 `1.6.0.1`，必须依靠 commit 与 SHA-256 区分公开 `v1.6.0.1`。
 - 输出名称：`EmbyWatchTogether-UI-VNext-localtest-<short-sha>-UNSIGNED.zip`。
 - 附件：`SHA256.txt`、`PROVENANCE.txt`。
 - 禁止：manifest、signature、tag、Release、上传、部署、Emby 重启。
 
 ## Knowledge Review
 
-S0 新确认：`/Rooms` 已有 `IsAdmin`；计划内最小只读扩展应为 `/Rooms.CurrentUserIsParticipant`、`/State.CurrentUserIsParticipant`、`/State.IsAdmin` 和 `/State.Sessions.RunTimeTicks`。管理员非成员当前会被前端误渲染为暂离成员，这是 P0 必修缺陷。暂不需要更新 `architecture.md` 或新增 ADR。
+新增稳定约束：插件自有 fixed overlay 必须显式声明 `[hidden] { display: none !important; }`，不能只依赖宿主/UA 默认样式；RoomId keyed 卡片必须保留实际诊断节点对象而不是把 DOM 节点误当作 panel 记录。两项均由真实 Chromium 复现并已加入浏览器门禁。无需更新 `architecture.md` 或新增 ADR。

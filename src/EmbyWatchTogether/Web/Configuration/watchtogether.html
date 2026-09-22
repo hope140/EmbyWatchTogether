@@ -597,9 +597,25 @@
 
         .wt-page .settingsContainer {
             box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
             width: 100%;
             max-width: 1120px;
             margin: 0 auto;
+        }
+
+        .wt-page #wtAdminSection,
+        .wt-page #wtSettingsSection,
+        .wt-page #wtRoomsSection {
+            order: 1;
+        }
+
+        .wt-page #wtInvitationSection {
+            order: 2;
+        }
+
+        .wt-page .wt-help {
+            order: 3;
         }
 
         .wt-pageHeader {
@@ -665,6 +681,11 @@
             background: rgba(0, 0, 0, .45);
         }
 
+        .wt-confirmOverlay[hidden],
+        .wt-moreMenu[hidden] {
+            display: none !important;
+        }
+
         .wt-confirmDialog {
             width: min(32em, 100%);
             padding: 1.2em;
@@ -678,6 +699,17 @@
         .wt-confirmDialog p { margin: 0; color: var(--wt-muted); line-height: 1.5; }
         .wt-confirmActions { display: flex; justify-content: flex-end; gap: .6em; margin-top: 1em; }
         .wt-confirmActions button { min-height: 2.4em; padding: .45em .9em; }
+
+        .wt-page input:not([type="checkbox"]),
+        .wt-page select,
+        .wt-page .checkboxContainer {
+            min-height: var(--wt-control-height);
+        }
+
+        .wt-page .checkboxContainer {
+            display: flex;
+            align-items: center;
+        }
         .wt-invitationCodeValue {
             display: block;
             max-width: 100%;
@@ -785,6 +817,26 @@
 
             .wt-pluginNavIcon {
                 display: none;
+            }
+
+            .wt-roomParticipants {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .wt-roomParticipant {
+                min-width: 0;
+                flex-wrap: wrap;
+                gap: .25em .75em;
+            }
+
+            .wt-roomParticipantName,
+            .wt-roomParticipantStatus {
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            .wt-roomParticipantStatus {
+                white-space: normal;
             }
         }
 
