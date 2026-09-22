@@ -37,6 +37,23 @@
 - P0：进行中。
 - P1：待宿主媒体读取能力和当前用户权限验证；未验证前使用占位。
 
+### S4 媒体展示能力门禁审计（2026-09-22）
+
+结论：P1 skipped。生产代码保持“媒体信息待权限验证”占位，当前证据不足以安全显示真实片名、封面或头像。
+
+代码与测试证据：
+
+- `src/EmbyWatchTogether/WatchTogetherService.cs:321-373` 的 `GET /WatchTogether/Rooms/{Id}/State` 只返回 `SyncItemId`、每个 `Sessions` 的 `ItemId`、`PositionTicks`、`RunTimeTicks`、播放状态和能力标志；没有片名、媒体详情、封面 URL 或头像 URL。
+- `src/EmbyWatchTogether/SessionSnapshot.cs:70-113` 从 `SessionInfo.NowPlayingItem` 只提取 `Id` 与 `RunTimeTicks`，没有保留 `BaseItemDto` 的标题或图片字段。因此现有状态 DTO 无法支撑媒体卡片。
+- `src/EmbyWatchTogether/WatchTogetherService.cs:951-978` 的参与者摘要只通过 `IUserManager.GetUserById` 读取并返回用户 `Id`、`Name`；未返回头像标识或图片地址。
+- `src/EmbyWatchTogether/WatchTogetherService.cs:662-678` 的 `/WatchTogether/Users` 是管理员专用（`RequireAdmin()`），返回范围为全站用户 Id/Name；它不是普通参与者可用的头像或媒体读取授权边界。
+- `src/EmbyWatchTogether/Web/Configuration/watchtogether.js:28-47` 仅封装 `ApiClient.getUrl`、`getJSON`、`fetch` 调用插件路由；代码中没有已验证的 Emby `Items`、图片或用户头像 API 调用。`loadRoomStates`（约 `2085` 行）也只读取本插件 `/Rooms/{Id}/State`。
+- `tests/EmbyWatchTogether.Tests/WatchTogetherServiceRoomTests.cs:198-248` 验证管理员非成员、普通成员/暂离成员和房间状态读取隔离；测试仅断言 `Sessions` 的运行时字段，未证明跨用户媒体详情或图片访问权限。测试构造的 `NowPlayingItem`（约 `1594` 行）也只提供 Id/时长。
+
+待真实 Emby 验收后才能重新评估放行：使用双账号（管理员非成员、普通已加入/暂离）分别验证宿主 `Items`/图片/头像 API 的可调用性、返回字段的用户权限过滤、跨账号缓存隔离、账号切换后的旧数据清除，以及无媒体/过期状态的回退。未完成这些检查前不得写入 mock 片名、封面或头像，也不得把 `ItemId` 当作可展示标题。
+
+P0 占位属于当前权限门禁的预期行为，不是媒体展示缺陷；本 Stack 未修改 HTML/JS/tests。
+
 ## 本地测试包约束
 
 - 包类型：未签名本地候选，不是 Release。
