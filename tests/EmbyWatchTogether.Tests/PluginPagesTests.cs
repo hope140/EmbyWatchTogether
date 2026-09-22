@@ -70,6 +70,15 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Contains("data-bindheader=\"true\"", html);
             Assert.Contains("data-controller=\"__plugin/WatchTogetherDiagnostics.js\"", html);
+            Assert.Contains("class=\"wt-title\">Watch Together</h1>", html);
+            Assert.Contains("class=\"wt-pluginNav\"", html);
+            Assert.Contains("id=\"wtTabMine\"", html);
+            Assert.Contains("id=\"wtTabManage\"", html);
+            Assert.Contains("id=\"wtTabSettings\"", html);
+            Assert.Contains("stroke=\"currentColor\"", html);
+            Assert.Contains("--wt-control-height: 44px", html);
+            Assert.Contains("--wt-accent: var(--theme-primary-color", html);
+            Assert.Contains("tab.style.display = isAdmin ? '' : 'none'", javascript);
             Assert.DoesNotContain("<h1>一起看</h1>", html);
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);

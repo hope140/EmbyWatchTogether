@@ -513,15 +513,230 @@
             width: 1.2em;
             height: 1.2em;
         }
+
+        /* UI VNext surface: keep the host shell intact and scope all styling to this page. */
+        .wt-page {
+            --wt-accent: var(--theme-primary-color, hsla(var(--theme-primary-color-hue, 140), var(--theme-primary-color-saturation, 56%), var(--theme-primary-color-lightness, 39%), var(--theme-primary-color-alpha, 1)));
+            --wt-accent-soft: hsla(var(--theme-primary-color-hue, 140), var(--theme-primary-color-saturation, 56%), var(--theme-primary-color-lightness, 39%), .1);
+            --wt-focus: hsla(var(--theme-primary-color-hue, 140), var(--theme-primary-color-saturation, 56%), var(--theme-primary-color-lightness, 39%), .55);
+            --wt-radius: 8px;
+            --wt-control-height: 44px;
+        }
+
+        .wt-page .settingsContainer {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 1120px;
+            margin: 0 auto;
+        }
+
+        .wt-pageHeader {
+            margin-bottom: 1.1em;
+            padding: .2em 0 .8em;
+            border-bottom: 1px solid var(--wt-border);
+        }
+
+        .wt-title {
+            margin: 0;
+            color: var(--wt-text);
+            font-size: clamp(1.35rem, 2.1vw, 1.8rem);
+            font-weight: 600;
+            letter-spacing: -.015em;
+        }
+
+        .wt-lead {
+            max-width: 56em;
+            margin: .35em 0 0;
+            line-height: 1.55;
+        }
+
+        .wt-pluginNav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .25em;
+            margin: 0 0 1.25em;
+            padding: .2em;
+            border: 1px solid var(--wt-border);
+            border-radius: var(--wt-radius);
+            background: var(--wt-surface);
+        }
+
+        .wt-pluginNavLink {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .45em;
+            min-height: var(--wt-control-height);
+            padding: .45em .9em;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: var(--wt-muted) !important;
+            font-weight: 600;
+            line-height: 1.2;
+            text-decoration: none;
+            transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+        }
+
+        .wt-pluginNavLink:hover,
+        .wt-pluginNavLink:focus-visible {
+            border-color: var(--wt-border);
+            background: var(--wt-card);
+            color: var(--wt-text) !important;
+        }
+
+        .wt-pluginNavLink[aria-current="page"] {
+            border-color: var(--wt-accent);
+            background: var(--wt-accent-soft);
+            color: var(--wt-accent) !important;
+        }
+
+        .wt-pluginNavIcon {
+            display: inline-flex;
+            flex: 0 0 auto;
+            width: 1.05em;
+            height: 1.05em;
+        }
+
+        .wt-pluginNavIcon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .wt-page .wt-section {
+            margin-bottom: 1em;
+            padding: 1.1em 1.15em 1.2em;
+            border-radius: var(--wt-radius);
+            background: var(--wt-card);
+            box-shadow: 0 1px 2px rgba(20, 29, 36, .05);
+        }
+
+        .wt-page .wt-sectionHeading {
+            margin-bottom: .9em;
+        }
+
+        .wt-page .wt-sectionHeading h2 {
+            font-size: 1.15em;
+            font-weight: 600;
+        }
+
+        .wt-page button,
+        .wt-page a.wt-pluginNavLink,
+        .wt-page .wt-roomActions button.wt-action {
+            min-height: var(--wt-control-height);
+        }
+
+        .wt-page #wtCreate,
+        .wt-page #wtSaveConfig,
+        .wt-page #wtCreateInvitation,
+        .wt-page #wtAcceptInvitation {
+            border-color: var(--wt-accent) !important;
+            border-radius: 6px;
+            background: var(--wt-accent) !important;
+            box-shadow: none !important;
+        }
+
+        .wt-page #wtCreate:hover:not(:disabled),
+        .wt-page #wtSaveConfig:hover:not(:disabled),
+        .wt-page #wtCreateInvitation:hover:not(:disabled),
+        .wt-page #wtAcceptInvitation:hover:not(:disabled) {
+            border-color: var(--wt-accent) !important;
+            background: var(--wt-accent) !important;
+            filter: brightness(.92);
+        }
+
+        .wt-page .wt-refresh,
+        .wt-page .wt-formActions .button-flat,
+        .wt-page .wt-diagnosticToolbar button {
+            min-height: var(--wt-control-height);
+            border-radius: 6px;
+        }
+
+        .wt-page input:focus-visible,
+        .wt-page select:focus-visible,
+        .wt-page button:focus-visible,
+        .wt-page a:focus-visible {
+            outline: 2px solid var(--wt-focus);
+            outline-offset: 2px;
+        }
+
+        .wt-page .wt-roomCard,
+        .wt-page .wt-invitationCode,
+        .wt-page .wt-diagnostics,
+        .wt-page .wt-emptyState {
+            border-radius: 6px;
+            box-shadow: none;
+        }
+
+        @media (max-width: 40em) {
+            .wt-page .settingsContainer {
+                padding-left: 1em;
+                padding-right: 1em;
+            }
+
+            .wt-pluginNav {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+
+            .wt-pluginNavLink {
+                padding-left: .45em;
+                padding-right: .45em;
+                text-align: center;
+            }
+
+            .wt-pluginNavIcon {
+                display: none;
+            }
+        }
+
+        @media (max-width: 22em) {
+            .wt-pluginNav {
+                grid-template-columns: 1fr;
+            }
+
+            .wt-pluginNavLink {
+                justify-content: flex-start;
+                padding-left: .8em;
+                text-align: left;
+            }
+        }
     </style>
 
     <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
         <div class="wt-pageHeader">
+            <h1 class="wt-title">Watch Together</h1>
             <p class="sectionDescription wt-lead">
                 创建房间后，两位参与者打开同一视频，播放、暂停和进度会自动同步。
             </p>
             <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite">正在加载…</p>
         </div>
+
+        <nav class="wt-pluginNav" aria-label="Watch Together 导航">
+            <a id="wtTabMine" class="wt-pluginNavLink" href="#wtRooms" aria-current="page">
+                <span class="wt-pluginNavIcon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 11.5 12 5l8 6.5" /><path d="M6.5 10.5V20h11v-9.5" /><path d="M10 20v-5h4v5" />
+                    </svg>
+                </span>
+                <span>我的房间</span>
+            </a>
+            <a id="wtTabManage" class="wt-pluginNavLink" href="#wtAdminSection">
+                <span class="wt-pluginNavIcon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 5h16v14H4z" /><path d="M8 9h8M8 13h5" /><path d="M17 17v4M15 19h4" />
+                    </svg>
+                </span>
+                <span>房间管理</span>
+            </a>
+            <a id="wtTabSettings" class="wt-pluginNavLink" href="#wtSettingsSection">
+                <span class="wt-pluginNavIcon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /><circle cx="12" cy="12" r="3.5" />
+                    </svg>
+                </span>
+                <span>设置</span>
+            </a>
+        </nav>
 
         <div class="verticalSection wt-section" id="wtAdminSection">
             <div class="wt-sectionHeading">

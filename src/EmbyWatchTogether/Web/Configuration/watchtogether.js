@@ -832,6 +832,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var adminSection = page.querySelector('#wtAdminSection');
         var settingsSection = page.querySelector('#wtSettingsSection');
         var roomsHeading = page.querySelector('#wtRoomsHeading');
+        var adminTabs = [
+            page.querySelector('#wtTabManage'),
+            page.querySelector('#wtTabSettings')
+        ];
         var helpSteps = [
             page.querySelector('#wtHelpStep1'),
             page.querySelector('#wtHelpStep2'),
@@ -843,6 +847,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (settingsSection) {
             settingsSection.style.display = isAdmin ? '' : 'none';
         }
+        adminTabs.forEach(function (tab) {
+            if (tab) {
+                tab.style.display = isAdmin ? '' : 'none';
+                tab.setAttribute('aria-hidden', isAdmin ? 'false' : 'true');
+                tab.tabIndex = isAdmin ? 0 : -1;
+            }
+        });
         if (roomsHeading) {
             roomsHeading.textContent = isAdmin ? '房间' : '我的房间';
         }
