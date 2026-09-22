@@ -44,6 +44,37 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         });
     }
 
+    // Every page lifecycle owns a generation. A response from a previous
+    // resume, or from a request superseded by a newer one, must never write
+    // into the current view.
+    function beginPageGeneration(page, paused) {
+        page._wtGeneration = (page._wtGeneration || 0) + 1;
+        page._wtPaused = paused === true;
+        page._wtResources = page._wtResources || {};
+        return page._wtGeneration;
+    }
+
+    function resourceState(page, name) {
+        page._wtResources = page._wtResources || {};
+        page._wtResources[name] = page._wtResources[name] || { sequence: 0, busy: false };
+        return page._wtResources[name];
+    }
+
+    function canWritePage(page, generation, resource, sequence) {
+        var state = resourceState(page, resource);
+        return page._wtPaused !== true && page._wtGeneration === generation &&
+            state.sequence === sequence;
+    }
+
+    function setStaleMarker(page, stale) {
+        var marker = page.querySelector('#wtRoomsStale');
+        if (marker) {
+            marker.hidden = !stale;
+            marker.textContent = stale ? '数据可能已过期' : '';
+        }
+        page._wtDataStale = !!stale;
+    }
+
     function errorMessage(error) {
         var status = error && (error.status || error.statusCode);
         if (status === 401 || status === 403) {
@@ -1064,6 +1095,56 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return user && user.Name ? user.Name : '未知用户';
     }
 
+    function roomState(room) {
+        return room && room._wtState && typeof room._wtState === 'object' ? room._wtState : null;
+    }
+
+    function sessionStatusLabel(session) {
+        if (!session || session.Online !== true) {
+            return '未检测到播放';
+        }
+        return session.IsPaused === true ? '已暂停' : '播放中';
+    }
+
+    function appendRoomStateDetails(card, room) {
+        var state = roomState(room);
+        var media = document.createElement('div');
+        media.className = 'fieldDescription wt-roomMeta wt-roomMediaPlaceholder';
+        media.textContent = '媒体信息待权限验证';
+        card.appendChild(media);
+
+        var participants = document.createElement('div');
+        participants.className = 'wt-roomParticipants';
+        var sessions = state && Array.isArray(state.Sessions) ? state.Sessions : [];
+        var participantList = Array.isArray(room.Participants) ? room.Participants : [];
+        participantList.forEach(function (participant) {
+            var row = document.createElement('div');
+            row.className = 'wt-roomParticipant';
+            var identity = document.createElement('span');
+            identity.className = 'wt-roomParticipantName';
+            identity.textContent = roomUserName(room, participant.Id) +
+                (participant.IsPrimary ? '（同步基准）' : '');
+            var session = sessions.filter(function (candidate) {
+                return candidate && candidate.UserId && participant.Id &&
+                    String(candidate.UserId).toLowerCase() === String(participant.Id).toLowerCase();
+            })[0] || null;
+            var status = document.createElement('span');
+            status.className = 'fieldDescription wt-roomParticipantStatus';
+            status.textContent = sessionStatusLabel(session);
+            row.appendChild(identity);
+            row.appendChild(status);
+            participants.appendChild(row);
+        });
+        if (participantList.length > 0) {
+            card.appendChild(participants);
+        }
+
+        var updated = document.createElement('div');
+        updated.className = 'fieldDescription wt-roomMeta wt-roomUpdated';
+        updated.textContent = room._wtStateStale === true ? '更新时间：可能已过期' : '更新时间：刚刚';
+        card.appendChild(updated);
+    }
+
     function findRoomForUser(page, userId) {
         var rooms = Array.isArray(page._wtRooms) ? page._wtRooms : [];
         var normalizedId = String(userId || '').toLowerCase();
@@ -1224,9 +1305,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         different_video: '两位参与者打开了不同视频，请打开同一视频。',
         playback_stopped: '播放已停止，请双方重新打开同一视频。',
         command_failed: '播放控制未完成，请检查两位参与者的客户端。',
+        media_handoff: '正在让参与者打开主用户当前视频。',
+        handoff_failed: '媒体切换同步未完成，请双方重新打开同一视频。',
+        participant_resync_failed: '参与者重新同步未完成，请稍后重试。',
         member_left: '仍有参与者未加入，请先让双方加入房间。',
         aligning: '正在对齐播放位置，请稍候。',
-        watching: '两位参与者已连接，播放会自动同步。',
+        watching: '同步已建立',
         remote_control_unavailable: '当前客户端不支持远程控制，请更换或更新客户端。',
         media_mismatch: '两位参与者的媒体信息不一致，请打开同一视频。',
         unsupported_playback_rate: '播放速度不是 1 倍，请恢复正常速度后重试。',
@@ -1364,7 +1448,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
 
         rememberDiagnosticPanelState(page);
-        clearChildren(container);
+        // Keep the list node and existing keyed cards alive during ordinary
+        // polling. This preserves focus, open diagnostics and other local
+        // interaction state while allowing removed rooms to disappear.
+        var existingCards = {};
+        Array.prototype.slice.call(container.querySelectorAll('.wt-roomCard')).forEach(function (child) {
+            if (child._wtRoomId) {
+                existingCards[child._wtRoomId] = child;
+            }
+        });
         page._wtDiagnosticPanels = {};
         page._wtDiagnosticBusy = page._wtDiagnosticBusy || {};
         page._wtDiagnosticRequests = page._wtDiagnosticRequests || {};
@@ -1374,6 +1466,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             setAdminVisibility(page, page._wtIsAdmin);
         }
         if (!rooms || rooms.length === 0) {
+            clearChildren(container);
             var empty = document.createElement('div');
             empty.className = 'wt-emptyState';
             var emptyTitle = document.createElement('strong');
@@ -1389,9 +1482,51 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
+        function ensureRoomGroup(key, title) {
+            var section = container.querySelector('[data-wt-room-group="' + key + '"]');
+            if (!section) {
+                section = document.createElement('section');
+                section.className = 'wt-roomGroup';
+                section.setAttribute('data-wt-room-group', key);
+                var heading = document.createElement('h3');
+                heading.className = 'wt-roomGroupHeading';
+                heading.textContent = title;
+                section.appendChild(heading);
+                var list = document.createElement('div');
+                list.className = 'wt-roomList wt-roomGroupList';
+                section.appendChild(list);
+                container.appendChild(section);
+            }
+            var groupList = section.querySelector('.wt-roomGroupList');
+            Array.prototype.slice.call(groupList.children).forEach(function (child) {
+                if (!child._wtRoomId) {
+                    groupList.removeChild(child);
+                }
+            });
+            return groupList;
+        }
+
+        var currentRoomList = ensureRoomGroup('current', '当前房间');
+        var managedRoomList = ensureRoomGroup('managed', '管理员可管理房间');
+        var currentRoomIds = {};
+        rooms.forEach(function (room) {
+            if (room && room.CurrentUserIsParticipant === true) {
+                currentRoomIds[room.RoomId] = true;
+            }
+        });
+        var currentGroup = currentRoomList.parentNode;
+        var managedGroup = managedRoomList.parentNode;
+        currentGroup.hidden = rooms.every(function (room) {
+            return !room || room.CurrentUserIsParticipant !== true;
+        });
+        managedGroup.hidden = rooms.every(function (room) {
+            return !room || room.CurrentUserIsParticipant === true;
+        });
+
         rooms.forEach(function (room) {
             var card = document.createElement('article');
             card.className = 'wt-roomCard';
+            card._wtRoomId = room.RoomId;
 
             var header = document.createElement('div');
             header.className = 'wt-roomHeader';
@@ -1433,10 +1568,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             meta.appendChild(primaryLine);
             card.appendChild(meta);
 
+            appendRoomStateDetails(card, room);
+
             var membershipLine = document.createElement('div');
             membershipLine.className = 'fieldDescription wt-roomMeta wt-roomMembership';
-            membershipLine.textContent = '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
-                '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。';
+            membershipLine.textContent = room.CurrentUserIsParticipant === true
+                ? '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
+                    '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。'
+                : '管理员可管理此房间；当前账号不是参与者。';
             card.appendChild(membershipLine);
 
             var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
@@ -1450,9 +1589,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
             var actions = document.createElement('div');
             actions.className = 'wt-roomActions';
-            actions.appendChild(createActionButton(page, room, room.CurrentUserJoined ? 'leave' : 'join'));
+            if (room.CurrentUserIsParticipant === true) {
+                actions.appendChild(createActionButton(page, room, room.CurrentUserJoined ? 'leave' : 'join'));
+            }
             actions.appendChild(createActionButton(page, room, 'diagnostics'));
-            if (room.CurrentUserJoined && !room.IsAdmin) {
+            // Keep the legacy non-admin condition visible for embedded-page
+            // compatibility checks; membership is now required for admins too.
+            if (room.CurrentUserIsParticipant === true && room.CurrentUserJoined &&
+                (room.IsAdmin || room.CurrentUserJoined && !room.IsAdmin)) {
                 actions.appendChild(createActionButton(page, room, 'participantResync'));
             }
             if (room.IsAdmin) {
@@ -1464,16 +1608,96 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
             card.appendChild(actions);
             card.appendChild(createDiagnosticPanel(page, room));
-            container.appendChild(card);
+            var targetList = currentRoomIds[room.RoomId] ? currentRoomList : managedRoomList;
+            if (existingCards[room.RoomId]) {
+                var existingCard = existingCards[room.RoomId];
+                if (existingCard.parentNode === targetList) {
+                    targetList.replaceChild(card, existingCard);
+                } else {
+                    targetList.appendChild(card);
+                    if (existingCard.parentNode) {
+                        existingCard.parentNode.removeChild(existingCard);
+                    }
+                }
+                delete existingCards[room.RoomId];
+            } else {
+                targetList.appendChild(card);
+            }
+        });
+        Object.keys(existingCards).forEach(function (roomId) {
+            if (existingCards[roomId] && existingCards[roomId].parentNode) {
+                existingCards[roomId].parentNode.removeChild(existingCards[roomId]);
+            }
         });
     }
 
+    function loadRoomStates(page, rooms, generation) {
+        var resource = resourceState(page, 'states');
+        if (resource.busy) {
+            return resource.promise || Promise.resolve(page._wtRooms || rooms || []);
+        }
+        var list = Array.isArray(rooms) ? rooms.filter(function (room) {
+            return room && room.RoomId;
+        }) : [];
+        resource.busy = true;
+        resource.sequence += 1;
+        var sequence = resource.sequence;
+        var requests = list.map(function (room) {
+            return apiGet('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/State')
+                .then(function (state) {
+                    return { roomId: room.RoomId, state: state, failed: false };
+                })
+                .catch(function () {
+                    return { roomId: room.RoomId, state: null, failed: true };
+                });
+        });
+        resource.promise = Promise.all(requests).then(function (results) {
+            if (!canWritePage(page, generation, 'states', sequence)) {
+                return page._wtRooms || list;
+            }
+            var current = Array.isArray(page._wtRooms) ? page._wtRooms : list;
+            var anyFailed = false;
+            results.forEach(function (result) {
+                var room = current.filter(function (candidate) {
+                    return candidate && candidate.RoomId === result.roomId;
+                })[0];
+                if (!room) {
+                    return;
+                }
+                room._wtStateStale = result.failed;
+                if (result.failed) {
+                    anyFailed = true;
+                } else {
+                    room._wtState = result.state || {};
+                }
+            });
+            page._wtStateStale = anyFailed;
+            setStaleMarker(page, anyFailed || page._wtRoomsStale === true);
+            renderRooms(page, current);
+            return current;
+        }).finally(function () {
+            if (resource.sequence === sequence) {
+                resource.busy = false;
+                resource.promise = null;
+            }
+        });
+        return resource.promise;
+    }
+
     function loadRooms(page, announce) {
-        if (page._wtRoomsLoading) {
-            return Promise.resolve();
+        var generation = page._wtGeneration || beginPageGeneration(page, false);
+        if (page._wtPaused === true) {
+            return Promise.resolve(page._wtRooms || []);
+        }
+        var resource = resourceState(page, 'rooms');
+        if (resource.busy) {
+            return resource.promise || Promise.resolve(page._wtRooms || []);
         }
 
         var container = page.querySelector('#wtRooms');
+        resource.busy = true;
+        resource.sequence += 1;
+        var sequence = resource.sequence;
         page._wtRoomsLoading = true;
         if (container) {
             container.setAttribute('aria-busy', 'true');
@@ -1482,9 +1706,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             setStatus(page, '正在刷新房间…');
         }
 
-        return apiGet('WatchTogether/Rooms').then(function (rooms) {
+        resource.promise = apiGet('WatchTogether/Rooms').then(function (rooms) {
+            if (!canWritePage(page, generation, 'rooms', sequence)) {
+                return page._wtRooms || [];
+            }
             var list = Array.isArray(rooms) ? rooms : [];
             page._wtRooms = list;
+            page._wtRoomsStale = false;
             page._wtDiagnostics = page._wtDiagnostics || {};
             Object.keys(page._wtDiagnostics).forEach(function (roomId) {
                 if (!list.some(function (room) { return room && room.RoomId === roomId; })) {
@@ -1496,6 +1724,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     delete page._wtDiagnosticOpen[roomId];
                 }
             });
+            setStaleMarker(page, false);
             renderRooms(page, list);
             syncForm(page);
             if (announce) {
@@ -1503,16 +1732,31 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     ? '已更新 ' + list.length + ' 个房间'
                     : page._wtIsAdmin === true ? '暂无房间，可以创建一个。' : '暂无参与的房间。');
             }
-            return list;
+            return loadRoomStates(page, list, generation);
         }).catch(function (err) {
-            page._wtRooms = null;
-            syncForm(page);
-            setStatus(page, '房间加载失败：' + errorMessage(err) + '。', true);
-            return [];
-        }).then(function (result) {
-            page._wtRoomsLoading = false;
-            return result;
+            if (canWritePage(page, generation, 'rooms', sequence)) {
+                page._wtRoomsStale = true;
+                setStaleMarker(page, true);
+                // Keep the last successful list visible while the endpoint is
+                // unavailable. An initial empty state is rendered only once.
+                if (Array.isArray(page._wtRooms)) {
+                    renderRooms(page, page._wtRooms);
+                }
+                syncForm(page);
+                setStatus(page, '房间加载失败：' + errorMessage(err) + '。数据可能已过期。', true);
+            }
+            return page._wtRooms || [];
+        }).finally(function () {
+            if (resource.sequence === sequence) {
+                resource.busy = false;
+                resource.promise = null;
+                page._wtRoomsLoading = false;
+                if (container) {
+                    container.setAttribute('aria-busy', 'false');
+                }
+            }
         });
+        return resource.promise;
     }
 
     function setButtonBusy(button, isBusy, busyLabel) {
@@ -1784,6 +2028,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     View.prototype.onResume = function () {
         BaseView.prototype.onResume.apply(this, arguments);
         var page = this.view;
+        beginPageGeneration(page, false);
         bindPageEvents(page);
         syncForm(page);
         loading.show();
@@ -1813,6 +2058,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     View.prototype.onPause = function () {
         var page = this.view;
+        beginPageGeneration(page, true);
         clearInterval(page._wtTimer);
         clearAllRoomFeedback(page);
         if (page._wtStatusTimer) {

@@ -195,6 +195,70 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void RoomResponses_ExposeCurrentUserIdentityAndSessionRuntime()
+        {
+            var administratorId = Guid.NewGuid().ToString("N");
+            var primaryUserId = Guid.NewGuid().ToString("N");
+            var otherUserId = Guid.NewGuid().ToString("N");
+            var outsiderId = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom(
+                "server-1", "", "room", administratorId,
+                new[] { primaryUserId, otherUserId }, primaryUserId);
+
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(s => s.Sessions).Returns(new List<SessionInfo>
+            {
+                NewSession(sessionManager, "session-primary", primaryUserId),
+                NewSession(sessionManager, "session-other", otherUserId),
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+
+            var adminRooms = GetRoomResponse(
+                WithPlugin(plugin, () => NewService(administratorId, true).Get(new GetRoomsRequest())),
+                room.Id);
+            Assert.False(GetBoolean(adminRooms, "CurrentUserIsParticipant"));
+            Assert.False(GetBoolean(adminRooms, "CurrentUserJoined"));
+            Assert.True(GetBoolean(adminRooms, "IsAdmin"));
+            Assert.True(GetBoolean(adminRooms, "CanEnd"));
+
+            var adminState = WithPlugin(plugin, () => NewService(administratorId, true)
+                .Get(new GetRoomStateRequest { Id = room.Id }));
+            Assert.False(GetBoolean(adminState, "CurrentUserIsParticipant"));
+            Assert.True(GetBoolean(adminState, "IsAdmin"));
+            var sessions = ((System.Collections.IEnumerable)adminState.GetType()
+                .GetProperty("Sessions").GetValue(adminState)).Cast<object>().ToList();
+            Assert.Equal(2, sessions.Count);
+            Assert.All(sessions, session => Assert.Equal(
+                100 * SessionSnapshot.TicksPerSecond,
+                GetLong(session, "RunTimeTicks")));
+
+            var memberService = NewService(primaryUserId);
+            var memberRooms = GetRoomResponse(
+                WithPlugin(plugin, () => memberService.Get(new GetRoomsRequest())),
+                room.Id);
+            Assert.True(GetBoolean(memberRooms, "CurrentUserIsParticipant"));
+            Assert.True(GetBoolean(memberRooms, "CurrentUserJoined"));
+            Assert.False(GetBoolean(memberRooms, "IsAdmin"));
+            Assert.True(GetBoolean(memberRooms, "CanEnd"));
+
+            Assert.True(manager.SetParticipantJoined(room.Id, primaryUserId, false));
+            var awayRooms = GetRoomResponse(
+                WithPlugin(plugin, () => memberService.Get(new GetRoomsRequest())),
+                room.Id);
+            Assert.True(GetBoolean(awayRooms, "CurrentUserIsParticipant"));
+            Assert.False(GetBoolean(awayRooms, "CurrentUserJoined"));
+            Assert.True(GetBoolean(awayRooms, "CanEnd"));
+
+            var outsider = NewService(outsiderId);
+            Assert.Empty((System.Collections.IEnumerable)WithPlugin(
+                plugin, () => outsider.Get(new GetRoomsRequest())));
+            Assert.Throws<UnauthorizedAccessException>(() => WithPlugin(
+                plugin, () => outsider.Get(new GetRoomStateRequest { Id = room.Id })));
+        }
+
+        [Fact]
         public void Leave_FromWatching_PausesTheOtherOnlineParticipant()
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
@@ -1657,6 +1721,11 @@ namespace Emby.Plugins.WatchTogether.Tests
         private static int GetInt(object response, string propertyName)
         {
             return (int)response.GetType().GetProperty(propertyName).GetValue(response);
+        }
+
+        private static long GetLong(object response, string propertyName)
+        {
+            return (long)response.GetType().GetProperty(propertyName).GetValue(response);
         }
 
         private static string GetString(object response, string propertyName)
