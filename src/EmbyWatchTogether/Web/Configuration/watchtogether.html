@@ -382,6 +382,17 @@
             opacity: .55;
         }
 
+        .wt-moreMenu {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: .45em;
+            align-items: center;
+            padding: .35em;
+            border: 1px solid var(--wt-border);
+            border-radius: .35em;
+            background: var(--wt-card);
+        }
+
         .wt-roomActions button.wt-action--primary {
             border-color: #216a96 !important;
             background: var(--wt-primary) !important;
@@ -643,6 +654,41 @@
             color: var(--wt-accent) !important;
         }
 
+        .wt-confirmOverlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1em;
+            background: rgba(0, 0, 0, .45);
+        }
+
+        .wt-confirmDialog {
+            width: min(32em, 100%);
+            padding: 1.2em;
+            border: 1px solid var(--wt-border);
+            border-radius: var(--wt-radius);
+            background: var(--wt-card);
+            box-shadow: 0 8px 28px rgba(0, 0, 0, .25);
+        }
+
+        .wt-confirmDialog h2 { margin: 0 0 .55em; font-size: 1.15em; }
+        .wt-confirmDialog p { margin: 0; color: var(--wt-muted); line-height: 1.5; }
+        .wt-confirmActions { display: flex; justify-content: flex-end; gap: .6em; margin-top: 1em; }
+        .wt-confirmActions button { min-height: 2.4em; padding: .45em .9em; }
+        .wt-invitationCodeValue {
+            display: block;
+            max-width: 100%;
+            overflow-wrap: anywhere;
+            user-select: text;
+            white-space: pre-wrap;
+            letter-spacing: .08em;
+        }
+
+        .wt-viewHidden { display: none !important; }
+
         .wt-pluginNavIcon {
             display: inline-flex;
             flex: 0 0 auto;
@@ -764,7 +810,7 @@
         </div>
 
         <nav class="wt-pluginNav" aria-label="Watch Together 导航">
-            <a id="wtTabMine" class="wt-pluginNavLink" href="#wtRooms" aria-current="page">
+            <a id="wtTabMine" class="wt-pluginNavLink" href="#wtRooms" data-wt-view="mine" aria-current="page">
                 <span class="wt-pluginNavIcon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 11.5 12 5l8 6.5" /><path d="M6.5 10.5V20h11v-9.5" /><path d="M10 20v-5h4v5" />
@@ -772,7 +818,7 @@
                 </span>
                 <span>我的房间</span>
             </a>
-            <a id="wtTabManage" class="wt-pluginNavLink" href="#wtAdminSection">
+            <a id="wtTabManage" class="wt-pluginNavLink" href="#wtAdminSection" data-wt-view="manage">
                 <span class="wt-pluginNavIcon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 5h16v14H4z" /><path d="M8 9h8M8 13h5" /><path d="M17 17v4M15 19h4" />
@@ -780,7 +826,7 @@
                 </span>
                 <span>房间管理</span>
             </a>
-            <a id="wtTabSettings" class="wt-pluginNavLink" href="#wtSettingsSection">
+            <a id="wtTabSettings" class="wt-pluginNavLink" href="#wtSettingsSection" data-wt-view="settings">
                 <span class="wt-pluginNavIcon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /><circle cx="12" cy="12" r="3.5" />
@@ -790,7 +836,7 @@
             </a>
         </nav>
 
-        <div class="verticalSection wt-section" id="wtAdminSection">
+        <div class="verticalSection wt-section" id="wtAdminSection" data-wt-section="manage">
             <div class="wt-sectionHeading">
                 <div>
                     <h2>创建房间</h2>
@@ -823,7 +869,7 @@
             </div>
         </div>
 
-        <div class="verticalSection wt-section" id="wtInvitationSection">
+        <div class="verticalSection wt-section" id="wtInvitationSection" data-wt-section="mine">
             <div class="wt-sectionHeading">
                 <div>
                     <h2>邀请一起观看</h2>
@@ -845,7 +891,7 @@
 
             <div id="wtInvitationCodePanel" class="wt-invitationCode" hidden>
                 <div class="wt-roomMeta">
-                    <div>本次邀请码：<strong id="wtInvitationCode"></strong></div>
+                    <div>本次邀请码：<strong id="wtInvitationCode" class="wt-invitationCodeValue"></strong></div>
                     <div id="wtInvitationExpires"></div>
                 </div>
                 <div class="wt-formActions">
@@ -864,7 +910,7 @@
             <div id="wtInvitations" class="wt-roomList" aria-live="polite"></div>
         </div>
 
-        <div class="verticalSection wt-section">
+        <div class="verticalSection wt-section" id="wtRoomsSection" data-wt-section="mine manage">
             <div class="wt-sectionHeading">
                 <div>
                     <h2 id="wtRoomsHeading">房间</h2>
@@ -878,7 +924,7 @@
             <div id="wtRooms" class="wt-roomList" aria-live="polite" aria-busy="true"></div>
         </div>
 
-        <div class="verticalSection wt-section wt-help">
+        <div class="verticalSection wt-section wt-help" data-wt-section="mine manage">
             <h2 id="wtHelpTitle">使用方法</h2>
             <ol id="wtHelpSteps">
                 <li id="wtHelpStep1">创建房间并选择两名参与者。</li>
@@ -888,7 +934,7 @@
             <p class="fieldDescription">一方暂时不在线时，房间会等待；恢复后会继续尝试同步。</p>
         </div>
 
-        <div class="verticalSection wt-section" id="wtSettingsSection">
+        <div class="verticalSection wt-section" id="wtSettingsSection" data-wt-section="settings">
             <div class="wt-sectionHeading">
                 <div>
                     <h2>设置</h2>
@@ -946,6 +992,17 @@
                     <p class="fieldDescription wt-formHint">
                         插件更新由 Emby 计划任务自动处理（服务器 → 计划任务 → “Watch Together 更新检查”），可在那里调整检测时间或手动执行；安装后重启 Emby 生效。
                     </p>
+                </div>
+            </div>
+        </div>
+
+        <div id="wtConfirmOverlay" class="wt-confirmOverlay" role="presentation" hidden>
+            <div id="wtConfirmDialog" class="wt-confirmDialog" role="dialog" aria-modal="true" aria-labelledby="wtConfirmTitle" aria-describedby="wtConfirmMessage">
+                <h2 id="wtConfirmTitle">确认操作</h2>
+                <p id="wtConfirmMessage"></p>
+                <div class="wt-confirmActions">
+                    <button is="emby-button" id="wtConfirmCancel" type="button" class="button-flat">取消</button>
+                    <button is="emby-button" id="wtConfirmSubmit" type="button" class="raised button-submit">继续</button>
                 </div>
             </div>
         </div>

@@ -75,10 +75,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         page._wtDataStale = !!stale;
     }
 
-    function errorMessage(error) {
+    function errorMessage(error, context) {
         var status = error && (error.status || error.statusCode);
         if (status === 401 || status === 403) {
-            return '权限不足，请使用管理员账号重试。';
+            return context === 'admin' ? '权限不足，请使用管理员账号重试。' : '没有权限执行此操作。';
         }
         if (status >= 500) {
             return '服务器暂时不可用，请稍后重试。';
@@ -390,7 +390,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         toolbar.appendChild(exportButton);
         var timestamp = document.createElement('span');
         timestamp.className = 'fieldDescription';
-        timestamp.textContent = '读取时间：' + diagnosticFormatTime(diagnostic.generatedAtUtc);
+        timestamp.textContent = '读取时间：' + diagnosticFormatTime(diagnostic.generatedAtUtc) +
+            '；客户端最近成功读取：' + diagnosticFormatTime(page._wtDiagnosticLastSuccessUtc);
         toolbar.appendChild(timestamp);
         body.appendChild(toolbar);
 
@@ -505,6 +506,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             });
         }
         events.appendChild(eventList);
+
+        var cleanedDetails = document.createElement('details');
+        var cleanedSummary = document.createElement('summary');
+        cleanedSummary.textContent = '原始清洗 JSON（仅本地查看）';
+        cleanedDetails.appendChild(cleanedSummary);
+        var cleanedJson = document.createElement('pre');
+        cleanedJson.className = 'wt-diagnosticCleanedJson';
+        cleanedJson.textContent = JSON.stringify(diagnostic, null, 2);
+        cleanedDetails.appendChild(cleanedJson);
+        body.appendChild(cleanedDetails);
     }
 
     function diagnosticErrorMessage(error) {
@@ -528,6 +539,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         details.appendChild(body);
         details.addEventListener('toggle', function () {
             page._wtDiagnosticOpen[room.RoomId] = details.open;
+            if (details.open && !(page._wtDiagnostics && page._wtDiagnostics[room.RoomId]) &&
+                !(page._wtDiagnosticBusy && page._wtDiagnosticBusy[room.RoomId])) {
+                loadRoomDiagnostics(page, room.RoomId, null);
+            }
         });
         page._wtDiagnosticPanels[room.RoomId] = { details: details, body: body };
         var diagnostic = page._wtDiagnostics && page._wtDiagnostics[room.RoomId];
@@ -543,7 +558,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (!panel || (page._wtDiagnosticBusy && page._wtDiagnosticBusy[roomId])) return;
         page._wtDiagnosticBusy = page._wtDiagnosticBusy || {};
         page._wtDiagnosticRequests = page._wtDiagnosticRequests || {};
-        var requestToken = String(Date.now()) + ':' + String(Math.random());
+        var requestToken = {
+            value: String(Date.now()) + ':' + String(Math.random()),
+            generation: page._wtGeneration || 0,
+            roomId: roomId
+        };
         page._wtDiagnosticRequests[roomId] = requestToken;
         page._wtDiagnosticBusy[roomId] = true;
         panel.details.open = true;
@@ -558,19 +577,22 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             if (!diagnostic) {
                 throw { name: 'InvalidDiagnostic' };
             }
-            if (page._wtDiagnosticRequests[roomId] !== requestToken ||
+            if (page._wtPaused === true || page._wtGeneration !== requestToken.generation ||
+                page._wtDiagnosticRequests[roomId] !== requestToken || requestToken.roomId !== roomId ||
                 !page._wtDiagnosticPanels[roomId]) {
                 return;
             }
             page._wtDiagnostics = page._wtDiagnostics || {};
             page._wtDiagnostics[roomId] = diagnostic;
+            page._wtDiagnosticLastSuccessUtc = new Date().toISOString();
             page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
             page._wtDiagnosticOpen[roomId] = true;
             var currentPanel = page._wtDiagnosticPanels[roomId];
             renderDiagnosticDetails(page, roomId, diagnostic, currentPanel.body);
             currentPanel.details.open = true;
         }).catch(function (error) {
-            if (page._wtDiagnosticRequests[roomId] !== requestToken ||
+            if (page._wtPaused === true || page._wtGeneration !== requestToken.generation ||
+                page._wtDiagnosticRequests[roomId] !== requestToken || requestToken.roomId !== roomId ||
                 !page._wtDiagnosticPanels[roomId]) {
                 return;
             }
@@ -621,6 +643,68 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function closeConfirmDialog(page, restoreFocus) {
+        var state = page._wtConfirmState;
+        var overlay = page.querySelector('#wtConfirmOverlay');
+        if (!state || !overlay) return;
+        overlay.hidden = true;
+        page._wtConfirmState = null;
+        if (state.keyHandler) document.removeEventListener('keydown', state.keyHandler, true);
+        if (restoreFocus !== false && state.trigger && typeof state.trigger.focus === 'function') {
+            state.trigger.focus();
+        }
+    }
+
+    function requestConfirmation(page, title, message, onConfirm, trigger) {
+        var overlay = page.querySelector('#wtConfirmOverlay');
+        var dialog = page.querySelector('#wtConfirmDialog');
+        var titleEl = page.querySelector('#wtConfirmTitle');
+        var messageEl = page.querySelector('#wtConfirmMessage');
+        var cancel = page.querySelector('#wtConfirmCancel');
+        var submit = page.querySelector('#wtConfirmSubmit');
+        if (!overlay || !dialog || !cancel || !submit || page._wtConfirmState) return;
+        titleEl.textContent = title || '确认操作';
+        messageEl.textContent = message || '';
+        page._wtConfirmState = { trigger: trigger || document.activeElement, busy: false };
+        var state = page._wtConfirmState;
+        var close = function () { if (!state.busy) closeConfirmDialog(page, true); };
+        state.keyHandler = function (event) {
+            if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+            if (event.key === 'Tab') {
+                var focusables = [cancel, submit].filter(function (control) {
+                    return control && !control.disabled && control.offsetParent !== null;
+                });
+                if (focusables.length === 0) return;
+                var index = focusables.indexOf(document.activeElement);
+                var next = event.shiftKey ? (index <= 0 ? focusables.length - 1 : index - 1)
+                    : (index < 0 || index >= focusables.length - 1 ? 0 : index + 1);
+                event.preventDefault();
+                focusables[next].focus();
+            }
+        };
+        state.overlayHandler = function (event) {
+            if (event.target === overlay) close();
+        };
+        cancel.onclick = close;
+        submit.onclick = function () {
+            if (state.busy) return;
+            state.busy = true;
+            submit.disabled = true;
+            cancel.disabled = true;
+            Promise.resolve().then(onConfirm).then(function () {
+                closeConfirmDialog(page, true);
+            }, function () {
+                closeConfirmDialog(page, true);
+            });
+        };
+        overlay.onclick = state.overlayHandler;
+        cancel.disabled = false;
+        submit.disabled = false;
+        overlay.hidden = false;
+        document.addEventListener('keydown', state.keyHandler, true);
+        cancel.focus();
+    }
+
     function setFormHint(page, text, isError) {
         var el = page.querySelector('#wtFormHint');
         if (el) {
@@ -650,6 +734,33 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function clearInvitationDraft(page) {
+        page._wtInvitationCode = null;
+        page._wtInvitationCopied = false;
+        if (page._wtInvitationTimer) {
+            clearInterval(page._wtInvitationTimer);
+            page._wtInvitationTimer = null;
+        }
+        var acceptInput = page.querySelector('#wtInvitationAcceptCode');
+        if (acceptInput) acceptInput.value = '';
+        renderInvitationCode(page);
+    }
+
+    function startInvitationCountdown(page) {
+        if (page._wtInvitationTimer) clearInterval(page._wtInvitationTimer);
+        page._wtInvitationTimer = setInterval(function () {
+            var value = page._wtInvitationCode;
+            if (!value || !value.expiresAtUtc) return;
+            var remaining = new Date(value.expiresAtUtc).getTime() - Date.now();
+            if (!isFinite(remaining) || remaining <= 0) {
+                clearInvitationDraft(page);
+                setInvitationStatus(page, '邀请码已过期，请重新创建。', true);
+                return;
+            }
+            renderInvitationCode(page);
+        }, 1000);
+    }
+
     function renderInvitationCode(page) {
         var panel = page.querySelector('#wtInvitationCodePanel');
         var code = page.querySelector('#wtInvitationCode');
@@ -665,8 +776,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             expires.textContent = '';
             return;
         }
-        code.textContent = value.code;
-        expires.textContent = invitationDate(value.expiresAtUtc);
+        code.textContent = value.originalCode || value.code;
+        var expiry = value.expiresAtUtc ? new Date(value.expiresAtUtc).getTime() : NaN;
+        var remaining = expiry - Date.now();
+        expires.textContent = isFinite(remaining) && remaining > 0
+            ? invitationDate(value.expiresAtUtc) + '（剩余 ' + Math.ceil(remaining / 60000) + ' 分钟）'
+            : '邀请码已过期';
         if (copy) {
             copy.disabled = false;
             copy.textContent = page._wtInvitationCopied ? '已复制' : '复制邀请码';
@@ -714,20 +829,70 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         renderInvitationCode(page);
     }
 
-    function loadInvitations(page) {
-        return apiGet('WatchTogether/Invitations').then(function (list) {
+    function loadInvitations(page, force) {
+        var generation = page._wtGeneration || beginPageGeneration(page, false);
+        if (page._wtPaused === true) return Promise.resolve(page._wtInvitations || []);
+        var resource = resourceState(page, 'invitations');
+        if (resource.busy) return resource.promise || Promise.resolve(page._wtInvitations || []);
+        resource.busy = true;
+        resource.sequence += 1;
+        var sequence = resource.sequence;
+        resource.promise = apiGet('WatchTogether/Invitations').then(function (list) {
+            if (!canWritePage(page, generation, 'invitations', sequence)) return page._wtInvitations || [];
             page._wtInvitations = Array.isArray(list) ? list : [];
             page._wtInvitationsLoaded = true;
+            var disappearedDraft = null;
+            if (page._wtInvitationCode) {
+                var current = page._wtInvitationCode;
+                var stillValid = page._wtInvitations.some(function (invitation) {
+                    return invitation && invitation.InvitationId === current.invitationId &&
+                        (!invitation.ExpiresAtUtc || new Date(invitation.ExpiresAtUtc).getTime() > Date.now());
+                });
+                if (!stillValid) disappearedDraft = current;
+            }
             renderInvitations(page, page._wtInvitations);
+            if (disappearedDraft) {
+                return loadRooms(page, false).then(function (rooms) {
+                    if (!canWritePage(page, generation, 'invitations', sequence)) return page._wtInvitations;
+                    var member = page._wtRoomsStale !== true && Array.isArray(rooms) && rooms.some(function (room) {
+                        return room && room.CurrentUserIsParticipant === true;
+                    });
+                    clearInvitationDraft(page);
+                    setInvitationStatus(page, page._wtRoomsStale === true
+                        ? '邀请已不在有效列表，房间状态暂无法确认。'
+                        : member ? '房间已建立，请回到当前房间。' : '邀请码已失效或不可用。',
+                    page._wtRoomsStale !== true && !member);
+                    return page._wtInvitations;
+                });
+            }
             return page._wtInvitations;
         }).catch(function (error) {
-            page._wtInvitations = [];
-            renderInvitations(page, []);
+            if (!canWritePage(page, generation, 'invitations', sequence)) return page._wtInvitations || [];
             if (!page._wtInvitationsLoaded) {
+                page._wtInvitations = [];
+                renderInvitations(page, []);
                 setInvitationStatus(page, '邀请码列表暂时无法加载，请稍后重试。', true);
+            } else {
+                renderInvitations(page, page._wtInvitations || []);
+                setInvitationStatus(page, '邀请码列表可能已过期，保留上次成功读取的数据。', true);
             }
-            return [];
+            return page._wtInvitations || [];
+        }).finally(function () {
+            if (resource.sequence === sequence) {
+                resource.busy = false;
+                resource.promise = null;
+            }
         });
+        return resource.promise;
+    }
+
+    function shouldPollInvitations(page) {
+        if ((page._wtView || 'mine') !== 'mine') return false;
+        var rooms = Array.isArray(page._wtRooms) ? page._wtRooms : [];
+        var hasRoom = rooms.some(function (room) {
+            return room && room.CurrentUserIsParticipant === true;
+        });
+        return !hasRoom || ((page._wtInvitations && page._wtInvitations.length > 0) || !!page._wtInvitationCode);
     }
 
     function createInvitation(page) {
@@ -750,10 +915,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 throw new Error('invitation_unavailable');
             }
             page._wtInvitationCode = {
+                invitationId: result.InvitationId || null,
+                originalCode: String(result.Code),
                 code: String(result.Code),
                 expiresAtUtc: result.ExpiresAtUtc
             };
             page._wtInvitationCopied = false;
+            startInvitationCountdown(page);
             if (input) {
                 input.value = '';
             }
@@ -770,7 +938,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function copyInvitationCode(page, button) {
-        var value = page._wtInvitationCode && page._wtInvitationCode.code;
+        var value = page._wtInvitationCode && (page._wtInvitationCode.originalCode || page._wtInvitationCode.code);
         if (!value) {
             setInvitationStatus(page, '当前没有可复制的邀请码。', true);
             return;
@@ -796,11 +964,26 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
         setButtonBusy(button, true, '撤销中…');
-        apiSend('WatchTogether/Invitations/' + encodeURIComponent(invitation.InvitationId), 'DELETE').then(function () {
+        apiSend('WatchTogether/Invitations/' + encodeURIComponent(invitation.InvitationId), 'DELETE').then(function (result) {
+            if (result && result.Deleted === false) {
+                var deletedError = new Error('invitation_deleted');
+                deletedError.status = 404;
+                throw deletedError;
+            }
             setInvitationStatus(page, '邀请码已撤销。', false);
+            if (page._wtInvitationCode && page._wtInvitationCode.invitationId === invitation.InvitationId) {
+                clearInvitationDraft(page);
+            }
             return loadInvitations(page);
         }).catch(function (error) {
-            setInvitationStatus(page, '邀请码撤销失败：' + errorMessage(error), true);
+            if (error && error.message === 'invitation_deleted') {
+                setInvitationStatus(page, '邀请码可能已失效，正在刷新列表。', true);
+                if (page._wtInvitationCode && page._wtInvitationCode.invitationId === invitation.InvitationId) {
+                    clearInvitationDraft(page);
+                }
+                return loadInvitations(page);
+            }
+            setInvitationStatus(page, '邀请码撤销失败：' + errorMessage(error, 'user'), true);
         }).then(function () {
             setButtonBusy(button, false);
         });
@@ -831,16 +1014,35 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         setInvitationStatus(page, '正在接受邀请…', false);
         apiSend('WatchTogether/Invitations/' + encodeURIComponent(code) + '/Accept', 'POST').then(function (result) {
             result = result || {};
-            setInvitationStatus(page, invitationAcceptMessage(result.Status), result.Status !== 'accepted');
-            if (result.Status === 'accepted') {
+            var accepted = result.Accepted === true && result.Status === 'accepted';
+            setInvitationStatus(page, accepted ? '请求已受理，等待播放器确认。' : invitationAcceptMessage(result.Status), !accepted);
+            if (accepted) {
                 if (input) {
                     input.value = '';
                 }
-                return Promise.all([loadRooms(page, false), loadInvitations(page)]);
+                clearInvitationDraft(page);
+                return loadRooms(page, false).then(function (rooms) {
+                    var member = page._wtRoomsStale !== true && Array.isArray(rooms) && rooms.some(function (room) {
+                        return room && room.CurrentUserIsParticipant === true;
+                    });
+                    if (!member) setInvitationStatus(page, '请求已受理，等待房间确认。', false);
+                    return rooms;
+                });
             }
             return null;
         }).catch(function (error) {
-            setInvitationStatus(page, '邀请接受失败：' + errorMessage(error), true);
+            return loadRooms(page, false).then(function (rooms) {
+                var member = page._wtRoomsStale !== true && Array.isArray(rooms) && rooms.some(function (room) {
+                    return room && room.CurrentUserIsParticipant === true;
+                });
+                if (member) {
+                    clearInvitationDraft(page);
+                    setInvitationStatus(page, '房间已建立，请回到当前房间。', false);
+                } else {
+                    setInvitationStatus(page, '邀请接受失败：' + errorMessage(error, 'user') + '；房间状态尚未确认。', true);
+                }
+                return rooms;
+            });
         }).then(function () {
             setButtonBusy(button, false);
         });
@@ -902,6 +1104,30 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 step.textContent = helpText[index];
             }
         });
+        setPluginView(page, page._wtView || 'mine');
+    }
+
+    function setPluginView(page, view) {
+        view = view === 'manage' || view === 'settings' ? view : 'mine';
+        if ((view === 'manage' || view === 'settings') && page._wtIsAdmin !== true) view = 'mine';
+        page._wtView = view;
+        Array.prototype.slice.call(page.querySelectorAll('[data-wt-section]')).forEach(function (section) {
+            var views = String(section.getAttribute('data-wt-section') || '').split(/\s+/);
+            section.classList.toggle('wt-viewHidden', views.indexOf(view) < 0);
+        });
+        Array.prototype.slice.call(page.querySelectorAll('.wt-pluginNavLink')).forEach(function (tab) {
+            var active = tab.getAttribute('data-wt-view') === view;
+            if (active) tab.setAttribute('aria-current', 'page');
+            else tab.removeAttribute('aria-current');
+        });
+        document.addEventListener('click', function (event) {
+            var target = event.target;
+            if (target && target.closest && (target.closest('.wt-moreMenu') || target.closest('.wt-action--more'))) return;
+            closeMoreMenus(page, true);
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') closeMoreMenus(page, true);
+        }, true);
     }
 
     function clearChildren(element) {
@@ -929,7 +1155,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             updateChannel.disabled = isBusy;
         }
         if (saveButton) {
-            saveButton.disabled = isBusy || !page._wtConfigReady;
+            saveButton.disabled = isBusy || !page._wtConfigReady || page._wtConfigDirty !== true;
             saveButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
             saveButton.textContent = isBusy ? '保存中…' : '保存设置';
         }
@@ -942,6 +1168,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var updateChannel = page.querySelector('#wtUpdateChannel');
         page._wtPluginConfiguration = config || {};
         page._wtConfigReady = true;
+        page._wtConfigDirty = false;
         if (pauseCheckbox) {
             pauseCheckbox.checked = page._wtPluginConfiguration.PauseOtherOnPlaybackStop !== false;
             pauseCheckbox.disabled = false;
@@ -960,7 +1187,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
         var saveButton = page.querySelector('#wtSaveConfig');
         if (saveButton) {
-            saveButton.disabled = false;
+            saveButton.disabled = true;
         }
     }
 
@@ -1042,6 +1269,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }).then(function () {
             setConfigBusy(page, false);
         });
+    }
+
+    function markConfigDirty(page) {
+        if (!page._wtConfigReady) return;
+        page._wtConfigDirty = true;
+        var saveButton = page.querySelector('#wtSaveConfig');
+        if (saveButton) saveButton.disabled = false;
+        setConfigStatus(page, '有未保存的设置。', false);
     }
 
     function loadPluginInfo(page) {
@@ -1186,15 +1421,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (room.CurrentUserIsParticipant === true) {
             actions.push(room.CurrentUserJoined ? 'leave' : 'join');
         }
-        actions.push('diagnostics');
         if (room.CurrentUserIsParticipant === true && room.CurrentUserJoined) {
             actions.push('participantResync');
         }
         if (room.IsAdmin) {
-            actions.push('pause', 'resume', 'resync', 'delete');
+            actions.push('pause', 'resume', 'resync');
         } else if (room.CanEnd) {
-            actions.push('delete');
+            // Ending a self-service room is exposed inside the More menu.
         }
+        actions.push('more');
         return actions;
     }
 
@@ -1211,7 +1446,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 ? (room.CanEnd ? '结束房间' : '删除房间')
                 : action === 'leave' ? '暂离房间'
                     : action === 'join' ? '加入房间'
-                        : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
+                        : action === 'diagnostics' ? '查看诊断'
+                            : action === 'more' ? '更多' : actionLabels[action];
         }
     }
 
@@ -1224,6 +1460,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         desired.forEach(function (action) {
             var button = existing[action] || createActionButton(page, room, action);
             actions.appendChild(button);
+            if (action === 'more' && button._wtMoreMenu && button._wtMoreMenu.parentNode !== actions) {
+                actions.appendChild(button._wtMoreMenu);
+            }
+            if (action === 'more' && button._wtMoreMenu) {
+                populateMoreMenu(page, room, button._wtMoreMenu);
+                var keepOpen = page._wtMoreOpen && page._wtMoreOpen[room.RoomId] === true;
+                button._wtMoreMenu.hidden = !keepOpen;
+                button.setAttribute('aria-expanded', keepOpen ? 'true' : 'false');
+            }
             updateActionButtonState(page, button, room);
             delete existing[action];
         });
@@ -1344,6 +1589,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var participantB = page.querySelector('#wtUserB');
         var primary = page.querySelector('#wtPrimary');
         var createButton = page.querySelector('#wtCreate');
+        var inviteCreateButton = page.querySelector('#wtCreateInvitation');
+        var inviteAcceptButton = page.querySelector('#wtAcceptInvitation');
+        var activeRoom = (Array.isArray(page._wtRooms) ? page._wtRooms : []).filter(function (room) {
+            return room && room.CurrentUserIsParticipant === true;
+        })[0] || null;
+        if (inviteCreateButton) inviteCreateButton.disabled = !!activeRoom;
+        if (inviteAcceptButton) inviteAcceptButton.disabled = !!activeRoom;
+        if (activeRoom && !page._wtInvitationFeedback) {
+            setInvitationStatus(page, '你已属于房间“' + roomName(activeRoom) + '”，请先回到当前房间。', false);
+        }
         var name = nameInput ? nameInput.value.trim() : '';
         var a = participantA ? participantA.value : '';
         var b = participantB ? participantB.value : '';
@@ -1505,6 +1760,51 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function populateMoreMenu(page, room, menu) {
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-label', '房间更多操作');
+        var desired = ['diagnostics'];
+        if (room.IsAdmin || room.CanEnd) desired.push('delete');
+        var existing = {};
+        Array.prototype.slice.call(menu.querySelectorAll('[data-act]')).forEach(function (item) {
+            existing[item.dataset.act] = item;
+        });
+        desired.forEach(function (action) {
+            var item = existing[action] || createActionButton(page, room, action);
+            item.setAttribute('role', 'menuitem');
+            menu.appendChild(item);
+            updateActionButtonState(page, item, room);
+            item.setAttribute('aria-label', item.textContent);
+            delete existing[action];
+        });
+        Object.keys(existing).forEach(function (action) {
+            if (existing[action].parentNode === menu) menu.removeChild(existing[action]);
+        });
+    }
+
+    function toggleMoreMenu(page, roomId, button, menu) {
+        page._wtMoreOpen = page._wtMoreOpen || {};
+        var open = menu.hidden;
+        Object.keys(page._wtMoreOpen).forEach(function (id) {
+            if (id !== roomId) page._wtMoreOpen[id] = false;
+        });
+        page._wtMoreOpen[roomId] = open;
+        menu.hidden = !open;
+        button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (!open) button.focus();
+    }
+
+    function closeMoreMenus(page, restore) {
+        var openButtons = page.querySelectorAll('.wt-action--more[aria-expanded="true"]');
+        Array.prototype.slice.call(openButtons).forEach(function (button) {
+            var menu = button._wtMoreMenu;
+            if (menu) menu.hidden = true;
+            button.setAttribute('aria-expanded', 'false');
+            if (restore) button.focus();
+        });
+        page._wtMoreOpen = {};
+    }
+
     function createActionButton(page, room, action) {
         var button = document.createElement('button', { is: 'emby-button' });
         button.type = 'button';
@@ -1518,6 +1818,25 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         button.className = 'button-flat wt-action' + (toneClass ? ' ' + toneClass : '');
         button.dataset.act = action;
         button.dataset.action = action;
+        if (action === 'more') {
+            button.textContent = '更多';
+            button.setAttribute('aria-label', '更多房间操作');
+            button.setAttribute('aria-expanded', 'false');
+            var menuId = 'wtMoreMenu-' + String(room.RoomId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+            button.setAttribute('aria-controls', menuId);
+            button.classList.add('wt-action--more');
+            var menu = document.createElement('div');
+            menu.id = menuId;
+            menu.className = 'wt-moreMenu';
+            menu.hidden = true;
+            button._wtMoreMenu = menu;
+            button.addEventListener('click', function (event) {
+                event.stopPropagation();
+                toggleMoreMenu(page, room.RoomId, button, menu);
+            });
+            populateMoreMenu(page, room, menu);
+            return button;
+        }
         button.textContent = action === 'delete' ? (room.CanEnd ? '结束房间' : '删除房间') : action === 'leave' ? '暂离房间' : action === 'join' ? '加入房间' : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
         button.title = action === 'delete'
             ? (room.CanEnd ? '结束房间会解除双方成员关系；只删除同步关系，不删除媒体' : '删除这个房间；只删除同步关系，不删除媒体')
@@ -1730,20 +2049,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
             var actions = document.createElement('div');
             actions.className = 'wt-roomActions';
-            if (room.CurrentUserIsParticipant === true) {
-                actions.appendChild(createActionButton(page, room, room.CurrentUserJoined ? 'leave' : 'join'));
-            }
-            actions.appendChild(createActionButton(page, room, 'diagnostics'));
-            if (room.CurrentUserIsParticipant === true && room.CurrentUserJoined) {
-                actions.appendChild(createActionButton(page, room, 'participantResync'));
-            }
-            if (room.IsAdmin) {
-                ['pause', 'resume', 'resync', 'delete'].forEach(function (action) {
-                    actions.appendChild(createActionButton(page, room, action));
-                });
-            } else if (room.CanEnd) {
-                actions.appendChild(createActionButton(page, room, 'delete'));
-            }
+            desiredRoomActions(room).forEach(function (action) {
+                var actionButton = createActionButton(page, room, action);
+                actions.appendChild(actionButton);
+                if (action === 'more' && actionButton._wtMoreMenu) actions.appendChild(actionButton._wtMoreMenu);
+            });
             card.appendChild(actions);
             card._wtFields.actions = actions;
             card._wtDiagnosticPanel = createDiagnosticPanel(page, room);
@@ -1909,9 +2219,17 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function control(page, roomId, action, button) {
         var label = actionLabels[action] || '操作';
-        if (action === 'resync' && !window.confirm('重新同步会暂时暂停双方并重新对齐，确认继续吗？')) {
+        if (action === 'resync') {
+            requestConfirmation(page, '重新同步', '会暂时暂停双方并重新对齐，确认继续吗？', function () {
+                executeControl(page, roomId, action, button);
+            }, button);
             return;
         }
+        executeControl(page, roomId, action, button);
+    }
+
+    function executeControl(page, roomId, action, button) {
+        var label = actionLabels[action] || '操作';
         setRoomBusy(page, roomId, true);
         clearRoomFeedback(page, roomId);
         roomFeedback(page, roomId, label + '处理中…', false, true);
@@ -1941,6 +2259,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function participantResync(page, roomId, button) {
+        requestConfirmation(page, '请求重新同步', '会请求播放器重新对齐，播放可能短暂暂停，确认继续吗？', function () {
+            executeParticipantResync(page, roomId, button);
+        }, button);
+    }
+
+    function executeParticipantResync(page, roomId, button) {
         setRoomBusy(page, roomId, true);
         clearRoomFeedback(page, roomId);
         roomFeedback(page, roomId, '重新同步请求处理中…', false, true);
@@ -1949,11 +2273,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             .then(function (result) {
                 var status = result && result.Status;
                 if (status === 'accepted') {
-                    roomFeedback(page, roomId, '重新同步请求已受理，双方将暂时暂停并重新对齐。', false, false);
+                    roomFeedback(page, roomId, '请求已受理，等待播放器确认。', false, false);
                 } else if (status === 'busy') {
                     roomFeedback(page, roomId, result.Reason === 'resync_cooldown'
                         ? '刚刚已请求重新同步，请稍后再试。'
-                        : '同步正在进行，请等待当前同步完成。', true, true);
+                        : '同步正在进行，请等待当前同步完成。', false, false);
                 } else if (status === 'unavailable') {
                     roomFeedback(page, roomId, result.Reason === 'snapshot_unavailable'
                         ? '当前播放会话暂时不可读，请稍后再试。'
@@ -1975,18 +2299,25 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function deleteRoom(page, room, button) {
         var roomName = room.Name || '未命名房间';
         var ending = room.CanEnd === true;
-        if (!window.confirm((ending ? '确认结束“' : '确认删除“') + roomName + '”吗？' +
-            (ending ? '结束房间会解除双方成员关系，只删除同步关系，不删除媒体。' : '这只删除同步关系，不删除媒体。'))) {
-            return;
-        }
+        requestConfirmation(page, ending ? '结束房间' : '删除房间',
+            (ending ? '结束“' : '删除“') + roomName + '”吗？' +
+            (ending ? '结束房间会解除双方成员关系，只删除同步关系，不删除媒体。' : '这只删除同步关系，不删除媒体。'), function () {
+                executeDeleteRoom(page, room, button);
+            }, button);
+    }
 
+    function executeDeleteRoom(page, room, button) {
+        var roomName = room.Name || '未命名房间';
+        var ending = room.CanEnd === true;
         setRoomBusy(page, room.RoomId, true);
         roomFeedback(page, room.RoomId, '删除中…', false, true);
         renderRooms(page, page._wtRooms || []);
         apiSend('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId), 'DELETE')
             .then(function (result) {
                 if (result && result.Deleted === false) {
-                    throw new Error('房间不存在或已删除');
+                    var deletedError = new Error('room_deleted');
+                    deletedError.status = 404;
+                    throw deletedError;
                 }
                 clearRoomFeedback(page, room.RoomId);
                 setTransientStatus(page, ending
@@ -1995,7 +2326,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 return loadRooms(page, false);
             })
             .catch(function (err) {
-                roomFeedback(page, room.RoomId, '删除失败：' + errorMessage(err), true, true);
+                if (err && err.message === 'room_deleted') {
+                    roomFeedback(page, room.RoomId, '房间可能已结束，正在刷新权威房间列表。', false, true);
+                    loadRooms(page, false);
+                    return;
+                }
+                roomFeedback(page, room.RoomId, '删除失败：' + errorMessage(err, ending ? 'admin' : 'user'), true, true);
             })
             .then(function () {
                 setRoomBusy(page, room.RoomId, false);
@@ -2004,9 +2340,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function membership(page, room, action, button) {
-        if (action === 'leave' && !window.confirm('暂离“' + (room.Name || '未命名房间') + '”吗？暂离不会解除成员关系，并将尝试暂停仍在房间的一方。')) {
+        if (action === 'leave') {
+            requestConfirmation(page, '暂离房间', '暂离“' + (room.Name || '未命名房间') + '”吗？暂离不会解除成员关系，并将尝试暂停仍在房间的一方。', function () {
+                executeMembership(page, room, action, button);
+            }, button);
             return;
         }
+        executeMembership(page, room, action, button);
+    }
+
+    function executeMembership(page, room, action, button) {
         setRoomBusy(page, room.RoomId, true);
         clearRoomFeedback(page, room.RoomId);
         roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '暂离中…', false, true);
@@ -2117,6 +2460,20 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         dom.addEventListener(page.querySelector('#wtSaveConfig'), 'click', function () {
             savePluginConfiguration(page);
         });
+        Array.prototype.slice.call(page.querySelectorAll('.wt-pluginNavLink')).forEach(function (tab) {
+            dom.addEventListener(tab, 'click', function (event) {
+                event.preventDefault();
+                var view = tab.getAttribute('data-wt-view') || 'mine';
+                if (page._wtView === 'settings' && view !== 'settings' && page._wtConfigDirty === true) {
+                    requestConfirmation(page, '放弃未保存设置？', '离开设置会丢弃尚未保存的修改。', function () {
+                        applyPluginConfiguration(page, page._wtPluginConfiguration || {});
+                        setPluginView(page, view);
+                    }, tab);
+                    return;
+                }
+                setPluginView(page, view);
+            });
+        });
         dom.addEventListener(page.querySelector('#wtCreate'), 'click', function () {
             createRoom(page);
         });
@@ -2145,6 +2502,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         dom.addEventListener(page.querySelector('#wtPrimary'), 'change', function () {
             syncForm(page);
         });
+        ['#wtPauseOtherOnPlaybackStop', '#wtNotifyOtherOnPlaybackStop', '#wtNotifyOnSyncActions', '#wtUpdateChannel'].forEach(function (selector) {
+            dom.addEventListener(page.querySelector(selector), 'change', function () {
+                markConfigDirty(page);
+            });
+        });
         page._wtEventsBound = true;
     }
 
@@ -2159,6 +2521,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var page = this.view;
         beginPageGeneration(page, false);
         bindPageEvents(page);
+        setAdminVisibility(page, false);
         syncForm(page);
         loading.show();
 
@@ -2181,7 +2544,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         clearInterval(page._wtTimer);
         page._wtTimer = setInterval(function () {
             loadRooms(page, false);
-            loadInvitations(page);
+            if (shouldPollInvitations(page)) loadInvitations(page, false);
         }, 5000);
     };
 
@@ -2189,6 +2552,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var page = this.view;
         beginPageGeneration(page, true);
         clearInterval(page._wtTimer);
+        clearInvitationDraft(page);
+        closeConfirmDialog(page, false);
         clearAllRoomFeedback(page);
         if (page._wtStatusTimer) {
             clearTimeout(page._wtStatusTimer);
