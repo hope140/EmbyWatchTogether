@@ -70,7 +70,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.Contains("data-bindheader=\"true\"", html);
             Assert.Contains("data-controller=\"__plugin/WatchTogetherDiagnostics.js\"", html);
-            Assert.Contains("class=\"wt-title\">Watch Together</h1>", html);
+            Assert.DoesNotContain("class=\"wt-title\"", html);
+            Assert.DoesNotContain("<h1>Watch Together</h1>", html);
             Assert.Contains("class=\"wt-pluginNav\"", html);
             Assert.Contains("id=\"wtTabMine\"", html);
             Assert.Contains("id=\"wtTabManage\"", html);
