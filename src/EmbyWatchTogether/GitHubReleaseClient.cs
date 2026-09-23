@@ -418,11 +418,6 @@ namespace Emby.Plugins.WatchTogether
                             throw new ReleaseValidationException("测试版发布标签无效。");
                         }
 
-                        if (!HasRequiredAssets(release))
-                        {
-                            throw new ReleaseValidationException("测试版发布缺少固定资产。");
-                        }
-
                         release.Version = version;
                         if (selected == null || CompareVersions(version, selected.Version) > 0)
                         {
@@ -433,6 +428,11 @@ namespace Emby.Plugins.WatchTogether
                     if (selected == null)
                     {
                         throw new ReleaseValidationException("没有可用的测试版发布。");
+                    }
+
+                    if (!HasRequiredAssets(selected))
+                    {
+                        throw new ReleaseValidationException("测试版发布缺少固定资产。");
                     }
 
                     selected.HtmlUrl = CreateTagReleasePageUrl(selected.TagName);

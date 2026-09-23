@@ -92,6 +92,56 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task BetaCheck_IgnoresMissingAssetsOnLowerReleaseAfterSelectingHighestVersion()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var lowerRelease = CreateApiRelease("v1.2.0.1", prerelease: true, draft: false);
+                lowerRelease.assets.RemoveAt(2);
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseApiDto>
+                    {
+                        CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
+                        lowerRelease,
+                    },
+                    out _);
+
+                var verified = await client.CheckForLatestAsync(CancellationToken.None);
+
+                Assert.Equal(fixture.CurrentTag, verified.Release.TagName);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_RejectsHighestReleaseMissingAssetsWithoutFallingBack()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var highestRelease = CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false);
+                highestRelease.assets.RemoveAt(2);
+                var lowerRelease = CreateApiRelease("v1.2.0.1", prerelease: true, draft: false);
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseApiDto>
+                    {
+                        highestRelease,
+                        lowerRelease,
+                    },
+                    out _);
+
+                var exception = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+
+                Assert.Contains("缺少固定资产", exception.UserMessage);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
         public async Task BetaCheck_MapsSnakeCaseApiJsonBeforeSelectingRelease()
         {
             using (var fixture = SignedReleaseFixture.Create())
