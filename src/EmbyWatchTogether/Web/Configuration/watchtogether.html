@@ -259,9 +259,9 @@
         }
 
         .wt-roomParticipants {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: .5em;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
             margin-top: .7em;
         }
 
@@ -271,9 +271,14 @@
             justify-content: space-between;
             gap: .7em;
             padding: .55em .7em;
-            border: 1px solid var(--wt-border);
-            border-radius: .3em;
-            background: var(--wt-surface);
+            border: 0;
+            border-bottom: 1px solid var(--wt-border);
+            border-radius: 0;
+            background: transparent;
+        }
+
+        .wt-roomParticipant:last-child {
+            border-bottom: 0;
         }
 
         .wt-roomParticipantName {
@@ -637,7 +642,7 @@
             --wt-nav-muted: var(--theme-secondary-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 42%), var(--theme-secondary-text-color-alpha, 1)));
             --wt-nav-border: var(--line-background, rgba(38, 49, 58, .2));
             --wt-nav-surface: hsla(var(--card-background-hue, 0), var(--card-background-saturation, 0%), var(--card-background-lightness, 95%), .72);
-            --wt-nav-active-bg: hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), .9);
+            --wt-nav-active-bg: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), .9));
             --wt-nav-active-text: var(--theme-background-color, #fff);
             display: flex;
             flex-wrap: wrap;
@@ -942,10 +947,6 @@
 
             .wt-pluginNavIcon {
                 display: none;
-            }
-
-            .wt-roomParticipants {
-                grid-template-columns: minmax(0, 1fr);
             }
 
             .wt-roomOverview {

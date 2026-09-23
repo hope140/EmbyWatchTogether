@@ -19,6 +19,18 @@ async function calls(page) {
   return page.evaluate(() => window.__wtFixture.apiCalls.slice());
 }
 
+function relativeLuminance(rgb) {
+  const match = rgb.match(/rgba?\(\s*([\d.]+)[, ]+\s*([\d.]+)[, ]+\s*([\d.]+)/i);
+  if (!match) throw new Error(`Unexpected computed color: ${rgb}`);
+  return match.slice(1, 4).map(Number).map(value => value / 255).map(value => value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+}
+
+function contrastRatio(foreground, background) {
+  const light = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+  const dark = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+  return (light + 0.05) / (dark + 0.05);
+}
+
 test('Emby 宿主顶栏承载胶囊分页并保持原页面槽位为空', async ({ page }) => {
   await open(page, 'active', 'light', 1440, 1000);
   const host = page.locator('.skinHeader');
@@ -37,6 +49,23 @@ test('Emby 宿主顶栏承载胶囊分页并保持原页面槽位为空', async 
   expect(navStyle.background).not.toBe('rgba(0, 0, 0, 0)');
   expect(navStyle.activeBackground).not.toBe('rgba(0, 0, 0, 0)');
   expect(navStyle.radius).toBe('999px');
+});
+
+test('浅色、深色和仅 HSL 顶栏当前项均满足 4.5:1 对比度，并保留管理员三项分页截图', async ({ page }) => {
+  for (const theme of ['light', 'dark', 'hsl']) {
+    await open(page, 'admin-member', theme, 1440, 1000);
+    await expect(page.locator('#wtTabMine')).toBeVisible();
+    await expect(page.locator('#wtTabManage')).toBeVisible();
+    await expect(page.locator('#wtTabSettings')).toBeVisible();
+    const colors = await page.locator('#wtTabMine').evaluate(el => {
+      const style = getComputedStyle(el);
+      return { background: style.backgroundColor, color: style.color };
+    });
+    expect(contrastRatio(colors.color, colors.background)).toBeGreaterThanOrEqual(4.5);
+    if (theme === 'light') {
+      await page.screenshot({ path: path.join(artifactDir, 'desktop-light-admin-member.png'), fullPage: true });
+    }
+  }
 });
 
 test('管理员可在顶栏切换 mine、manage、settings，普通用户隐藏管理入口', async ({ page }) => {
@@ -76,11 +105,26 @@ test('房间桌面端媒体在左、成员和按钮在右，手机端按媒体�
     const side = card.querySelector('.wt-roomSide').getBoundingClientRect();
     const participants = card.querySelector('.wt-roomParticipants').getBoundingClientRect();
     const actions = card.querySelector('.wt-roomActions').getBoundingClientRect();
-    return { media, side, participants, actions };
+    const rows = Array.from(card.querySelectorAll('.wt-roomParticipant')).map(row => ({
+      top: row.getBoundingClientRect().top,
+      nameOverflow: row.querySelector('.wt-roomParticipantName').scrollWidth > row.querySelector('.wt-roomParticipantName').clientWidth,
+      statusOverflow: row.querySelector('.wt-roomParticipantStatus').scrollWidth > row.querySelector('.wt-roomParticipantStatus').clientWidth
+    }));
+    return { media, side, participants, actions, rows };
   });
   expect(desktop.media.left).toBeLessThan(desktop.side.left);
   expect(desktop.participants.left).toBeGreaterThanOrEqual(desktop.side.left);
   expect(desktop.actions.left).toBeGreaterThanOrEqual(desktop.side.left);
+  expect(desktop.rows).toHaveLength(2);
+  expect(desktop.rows[1].top).toBeGreaterThan(desktop.rows[0].top);
+  expect(desktop.rows.every(row => !row.nameOverflow && !row.statusOverflow)).toBe(true);
+
+  await open(page, 'active', 'light', 1024, 1000);
+  const desktopNarrowRows = await page.locator('.wt-roomCard').evaluate(card => Array.from(card.querySelectorAll('.wt-roomParticipant')).map(row => ({
+    nameOverflow: row.querySelector('.wt-roomParticipantName').scrollWidth > row.querySelector('.wt-roomParticipantName').clientWidth,
+    statusOverflow: row.querySelector('.wt-roomParticipantStatus').scrollWidth > row.querySelector('.wt-roomParticipantStatus').clientWidth
+  })));
+  expect(desktopNarrowRows.every(row => !row.nameOverflow && !row.statusOverflow)).toBe(true);
 
   await open(page, 'active', 'light', 390, 1000);
   const mobile = await page.locator('.wt-roomCard').evaluate(card => {
