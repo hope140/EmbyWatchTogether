@@ -46,9 +46,9 @@
 
 - 现象：部分 Emby 客户端在同步暂停、恢复或重建播放会话期间会短暂报告 `PlaybackStopped`，并暂时显示 `Stopped=true` 或缺失会话，随后恢复同一播放。
 - 原因：服务端停止事件和单轮 SessionInfo 是播放状态转换中的瞬时信号，不是权威终态；立即处理会错误暂停另一方并形成重新 Barrier 的循环。
-- 结论：`PlaybackStopped` 只用于唤醒轮询；停止只依据 SessionSelector 选中的当前会话判断。同一用户的旧 stopped Session 不能覆盖当前有效播放；当前会话的 `Stopped=true`、离线和缺失统一要求连续 2 秒快照异常，恢复有效快照时清除计时并保持 `Watching`。
-- 规则：任何新增停止信号或未选中的候选会话都不得绕过当前会话选择与确认窗口；位置归零仍按正常 Seek 处理。确认停止后，暂停和通知副作用只执行一次。
-- 验证：真实 Emby Theater 与 embyToLocalPlayer 日志复现了短暂停止后恢复，以及旧 stopped Session 与当前播放并存导致的误判；`SyncEngineTests` 覆盖同用户同 Item 的旧 stopped Session、短暂 stopped/缺失恢复、持续异常确认和 seek-to-zero。
+- 结论：`PlaybackStopped` 只用于唤醒轮询；停止只依据 SessionSelector 选中的当前会话判断。同一用户的旧 stopped Session 不能覆盖当前有效播放；当前会话的 `Stopped=true`、离线和缺失统一要求连续 2 秒快照异常，恢复有效快照时清除计时并保持 `Watching`。主用户缺失开始后，额外保留最多 10 秒的主用户换片候选；停止确认后若主用户以可信会话打开新 Item、参与者仍以原可信会话停留在旧 Item，则恢复既有 Media Handoff。
+- 规则：任何新增停止信号或未选中的候选会话都不得绕过当前会话选择与确认窗口；位置归零仍按正常 Seek 处理。确认停止后，暂停和通知副作用只执行一次。迟到换片候选必须绑定房间成员、用户/session identity、原 Item 和远控能力；参与者换 Item/会话、能力不可信、房间生命周期改变或候选超过 10 秒时立即失效。
+- 验证：真实 Emby Theater 与 embyToLocalPlayer 日志复现了短暂停止后恢复，以及旧 stopped Session 与当前播放并存导致的误判；`SyncEngineTests` 覆盖同用户同 Item 的旧 stopped Session、短暂 stopped/缺失恢复、持续异常确认、seek-to-zero，以及主用户换片在 2 秒同轮、停止确认后 4/7 秒恢复和 10 秒过期。
 
 ## 7. Seek 失败必须冻结原目标并有界重试
 

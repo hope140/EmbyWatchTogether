@@ -4,6 +4,23 @@ using System.Linq;
 
 namespace Emby.Plugins.WatchTogether
 {
+    internal sealed class PrimaryItemTransitionCandidate
+    {
+        public DateTimeOffset StartedAtUtc { get; set; }
+
+        public string PrimaryUserId { get; set; }
+
+        public string PrimarySessionId { get; set; }
+
+        public string SourceItemId { get; set; }
+
+        public string ParticipantUserId { get; set; }
+
+        public string ParticipantSessionId { get; set; }
+
+        public string ParticipantItemId { get; set; }
+    }
+
     /// <summary>
     /// Mutable per-room runtime state held in memory (persisted room metadata is
     /// the Room entity; runtime is rebuilt on restart).
@@ -86,6 +103,8 @@ namespace Emby.Plugins.WatchTogether
         }
 
         public DateTimeOffset? MissingSessionSinceUtc { get; set; }
+
+        internal PrimaryItemTransitionCandidate PrimaryItemTransitionCandidate { get; private set; }
 
         public int DriftRounds { get; set; }
 
@@ -249,6 +268,7 @@ namespace Emby.Plugins.WatchTogether
             SyncItemId = null;
             BarrierRetryAtUtc = null;
             Handoff = null;
+            ClearPrimaryItemTransitionCandidate();
             ParticipantResyncRequestedUserId = null;
             ClearRemoteControlRecovery();
         }
@@ -279,6 +299,16 @@ namespace Emby.Plugins.WatchTogether
 
         public void ResetToWaiting()
         {
+            ResetToWaitingCore(preservePrimaryItemTransitionCandidate: false);
+        }
+
+        internal void ResetToWaitingPreservingPrimaryItemTransitionCandidate()
+        {
+            ResetToWaitingCore(preservePrimaryItemTransitionCandidate: true);
+        }
+
+        private void ResetToWaitingCore(bool preservePrimaryItemTransitionCandidate)
+        {
             bool preserveStopIdentity = MissingSessionSinceUtc.HasValue;
             State = RoomState.Waiting;
             Error = null;
@@ -300,6 +330,10 @@ namespace Emby.Plugins.WatchTogether
             }
             BarrierRetryAtUtc = null;
             Handoff = null;
+            if (!preservePrimaryItemTransitionCandidate)
+            {
+                ClearPrimaryItemTransitionCandidate();
+            }
             ParticipantResyncRequestedUserId = null;
             ClearRemoteControlRecovery();
         }
@@ -344,6 +378,32 @@ namespace Emby.Plugins.WatchTogether
         internal void ClearMediaHandoff()
         {
             Handoff = null;
+        }
+
+        internal void BeginPrimaryItemTransitionCandidate(
+            DateTimeOffset startedAtUtc,
+            string primaryUserId,
+            string primarySessionId,
+            string sourceItemId,
+            string participantUserId,
+            string participantSessionId,
+            string participantItemId)
+        {
+            PrimaryItemTransitionCandidate = new PrimaryItemTransitionCandidate
+            {
+                StartedAtUtc = startedAtUtc,
+                PrimaryUserId = primaryUserId,
+                PrimarySessionId = primarySessionId,
+                SourceItemId = sourceItemId,
+                ParticipantUserId = participantUserId,
+                ParticipantSessionId = participantSessionId,
+                ParticipantItemId = participantItemId,
+            };
+        }
+
+        internal void ClearPrimaryItemTransitionCandidate()
+        {
+            PrimaryItemTransitionCandidate = null;
         }
 
         internal void StartRemoteControlRecovery(

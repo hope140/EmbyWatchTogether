@@ -87,6 +87,11 @@ namespace Emby.Plugins.WatchTogether
         // debounce is a media transition, not a confirmed stop.
         public const double PrimaryItemTransitionGraceSeconds = 2.0;
 
+        // A replacement primary session can arrive after the normal stop
+        // debounce. Keep the original watching identities in memory long
+        // enough to recover the media transition without delaying a real stop.
+        public const double PrimaryItemTransitionRecoveryGraceSeconds = 10.0;
+
         // A PlayItem handoff must always leave a bounded state behind for the
         // next explicit resync to recover.
         public const double MediaHandoffTimeoutSeconds = 10.0;

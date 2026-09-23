@@ -358,6 +358,17 @@ namespace Emby.Plugins.WatchTogether
                             }
                         }
 
+                        if (TryProcessLatePrimaryItemTransition(
+                                runtime,
+                                room,
+                                snapshots,
+                                eligibility,
+                                now))
+                        {
+                            results.Add(Result(room, runtime, eligible));
+                            continue;
+                        }
+
                         if (TryGetStoppedUsers(runtime, room, snapshots, now, out var stoppedUsers))
                         {
                             // SessionSelector omits stopped/offline sessions, so the
@@ -385,7 +396,7 @@ namespace Emby.Plugins.WatchTogether
                                     $"pausedOther={options.PauseOtherOnPlaybackStop}, notifiedOther={options.NotifyOtherOnPlaybackStop}");
                             }
 
-                            runtime.ResetToWaiting();
+                            runtime.ResetToWaitingPreservingPrimaryItemTransitionCandidate();
                             runtime.Previous.Clear();
                             runtime.PreviousAtUtc = null;
                             runtime.MissingSessionSinceUtc = null;
@@ -981,6 +992,100 @@ namespace Emby.Plugins.WatchTogether
                 !string.Equals(previous.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase);
         }
 
+        private bool TryProcessLatePrimaryItemTransition(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            RoomEligibilityEvaluation eligibility,
+            DateTimeOffset now)
+        {
+            var candidate = runtime?.PrimaryItemTransitionCandidate;
+            if (candidate == null)
+            {
+                return false;
+            }
+
+            if (room == null || room.JoinedParticipantUserIds == null ||
+                room.JoinedParticipantUserIds.Count != 2 ||
+                runtime.State != RoomState.Watching &&
+                !(runtime.State == RoomState.Waiting &&
+                  string.Equals(runtime.Error, StoppedPlaybackError, StringComparison.Ordinal)))
+            {
+                runtime.ClearPrimaryItemTransitionCandidate();
+                return false;
+            }
+
+            if ((now - candidate.StartedAtUtc).TotalSeconds >=
+                SyncConstants.PrimaryItemTransitionRecoveryGraceSeconds)
+            {
+                runtime.ClearPrimaryItemTransitionCandidate();
+                return false;
+            }
+
+            string participantUserId = room.JoinedParticipantUserIds.FirstOrDefault(
+                userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase));
+            if (!string.Equals(candidate.PrimaryUserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(candidate.ParticipantUserId, participantUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                runtime.ClearPrimaryItemTransitionCandidate();
+                return false;
+            }
+
+            if (!snapshots.TryGetValue(candidate.ParticipantUserId, out var participant) ||
+                participant == null || !participant.Online || participant.Stopped ||
+                !string.Equals(participant.UserId, candidate.ParticipantUserId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(participant.SessionId, candidate.ParticipantSessionId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(participant.ItemId, candidate.SourceItemId, StringComparison.OrdinalIgnoreCase) ||
+                !participant.SupportsRemoteControl)
+            {
+                // The candidate requires a current, trusted participant
+                // snapshot. A missing/stopped/offline participant, different
+                // Item/session, or lost capability invalidates it immediately.
+                runtime.ClearPrimaryItemTransitionCandidate();
+                return false;
+            }
+
+            if (!snapshots.TryGetValue(room.PrimaryUserId, out var primary) ||
+                primary == null || !primary.Online || primary.Stopped ||
+                !string.Equals(primary.UserId, candidate.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrEmpty(primary.SessionId) ||
+                string.IsNullOrEmpty(primary.ItemId) ||
+                !primary.SupportsRemoteControl)
+            {
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(candidate.SourceItemId) ||
+                string.Equals(primary.ItemId, candidate.SourceItemId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(participant.ItemId, primary.ItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(primary.ItemId, candidate.SourceItemId, StringComparison.OrdinalIgnoreCase))
+                {
+                    runtime.ClearPrimaryItemTransitionCandidate();
+                }
+                return false;
+            }
+
+            runtime.RecordDiagnosticEvent(
+                "primary_item_changed", room.PrimaryUserId, RemoteCommands.PlayItem,
+                "recovered", null, null, now);
+            StartMediaHandoff(
+                runtime,
+                room,
+                primary,
+                participant,
+                now,
+                candidate.SourceItemId,
+                isParticipantResync: false);
+            return TryProcessMediaHandoff(
+                runtime,
+                room,
+                snapshots,
+                eligibility,
+                primaryItemTransition: false,
+                now);
+        }
+
         private bool TryProcessParticipantResync(
             RoomRuntime runtime,
             Room room,
@@ -1334,6 +1439,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.SyncItemId = null;
             runtime.MissingSessionSinceUtc = null;
             runtime.ClearRemoteControlRecovery();
+            runtime.ClearPrimaryItemTransitionCandidate();
             runtime.RecordDiagnosticEvent(
                 "handoff_started", null, RemoteCommands.PlayItem, "started", null, null, now);
             _logger?.Info(
@@ -1429,10 +1535,61 @@ namespace Emby.Plugins.WatchTogether
             if (!runtime.MissingSessionSinceUtc.HasValue)
             {
                 runtime.MissingSessionSinceUtc = now;
+                if (stoppedUsers.Contains(room.PrimaryUserId))
+                {
+                    BeginPrimaryItemTransitionCandidate(runtime, room, snapshots, stoppedUsers, now);
+                }
                 return false;
             }
 
             return (now - runtime.MissingSessionSinceUtc.Value).TotalSeconds >= MissingSessionDebounceSeconds;
+        }
+
+        private static void BeginPrimaryItemTransitionCandidate(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            ISet<string> stoppedUsers,
+            DateTimeOffset now)
+        {
+            if (runtime == null || room == null || room.JoinedParticipantUserIds == null ||
+                room.JoinedParticipantUserIds.Count != 2 ||
+                stoppedUsers == null || !stoppedUsers.Contains(room.PrimaryUserId) ||
+                snapshots == null ||
+                !runtime.Previous.TryGetValue(room.PrimaryUserId, out var previousPrimary) ||
+                previousPrimary == null || !previousPrimary.Online ||
+                string.IsNullOrEmpty(previousPrimary.SessionId) ||
+                string.IsNullOrEmpty(previousPrimary.ItemId))
+            {
+                return;
+            }
+
+            string participantUserId = room.JoinedParticipantUserIds.FirstOrDefault(
+                userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(participantUserId) ||
+                !snapshots.TryGetValue(participantUserId, out var currentParticipant) ||
+                currentParticipant == null || !currentParticipant.Online || currentParticipant.Stopped ||
+                !currentParticipant.SupportsRemoteControl ||
+                !runtime.Previous.TryGetValue(participantUserId, out var previousParticipant) ||
+                previousParticipant == null || !previousParticipant.Online ||
+                string.IsNullOrEmpty(previousParticipant.SessionId) ||
+                string.IsNullOrEmpty(previousParticipant.ItemId) ||
+                !previousParticipant.SupportsRemoteControl ||
+                !string.Equals(currentParticipant.UserId, participantUserId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(currentParticipant.SessionId, previousParticipant.SessionId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(currentParticipant.ItemId, previousParticipant.ItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            runtime.BeginPrimaryItemTransitionCandidate(
+                now,
+                room.PrimaryUserId,
+                previousPrimary.SessionId,
+                previousPrimary.ItemId,
+                participantUserId,
+                previousParticipant.SessionId,
+                previousParticipant.ItemId);
         }
 
         private void PauseOtherAfterPlaybackStopped(
