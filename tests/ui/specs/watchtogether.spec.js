@@ -304,6 +304,22 @@ test('设置 dirty 保存失败后保留修改，放弃导航恢复原值', asyn
   await page.screenshot({ path: path.join(artifactDir, 'mobile-settings-390.png'), fullPage: true });
 });
 
+test('确认放弃后再次进入设置，第二次 dirty 离页仍会拦截', async ({ page }) => {
+  await open(page, 'save-fail', 'light', 390, 1000);
+  await page.locator('#wtTabSettings').click();
+  await page.locator('#wtPauseOtherOnPlaybackStop').uncheck();
+  await page.locator('#wtTabMine').click();
+  await expect(page.locator('#wtConfirmOverlay')).toBeVisible();
+  await page.locator('#wtConfirmSubmit').click();
+  await expect(page.locator('#wtConfirmOverlay')).toBeHidden();
+  await expect(page.locator('#wtTabMine')).toHaveAttribute('aria-current', 'page');
+
+  await page.locator('#wtTabSettings').click();
+  await page.locator('#wtPauseOtherOnPlaybackStop').uncheck();
+  await page.locator('#wtTabMine').click();
+  await expect(page.locator('#wtConfirmOverlay')).toBeVisible();
+});
+
 test('诊断内容经过脱敏，导出前不出现原始标识', async ({ page }) => {
   await open(page, 'active', 'light', 390, 1000);
   await page.locator('.wt-roomCard button[data-act="more"]').click();

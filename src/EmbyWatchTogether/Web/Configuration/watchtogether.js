@@ -2635,6 +2635,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         BaseView.prototype.onResume.apply(this, arguments);
         var page = this.view;
         beginPageGeneration(page, false);
+        page._wtNativeTabNavigationBypass = false;
         page._wtRouteView = currentRouteView(page);
         page._wtView = page._wtRouteView;
         bindPageEvents(page);
