@@ -19,7 +19,7 @@
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
 
-程序集目标框架为 `netstandard2.0`，当前 beta 项目版本为 `1.6.0.1`，稳定版为 `1.5.0.0`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
+程序集目标框架为 `netstandard2.0`，当前 beta 项目版本为 `1.6.0.2`，稳定版为 `1.5.0.0`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
 
 ## 2. 组件和数据流
 
@@ -151,7 +151,7 @@ else:
 只有在 `Watching` 状态才产生持久停止处理。停止判断按以下顺序执行：
 
 1. Emby 的 `PlaybackStopped` 事件只唤醒同步轮询，不直接触发停止副作用。
-2. `Watching` 开始后，当前观察按 `Previous SessionId` + `ItemId` 绑定。当前会话标记 `stopped`、离线或缺失时先记录疑似停止时间，异常状态连续达到 2 秒 debounce 后才确认；这段有限窗口也作为 Primary Item transition grace，窗口内选中新的 Primary Item 时识别为 Handoff，不执行普通停止副作用。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。
+2. `Watching` 开始后，当前观察按 `Previous SessionId` + `ItemId` 绑定。当前会话标记 `stopped`、离线或缺失时先记录疑似停止时间，异常状态连续达到 2 秒 debounce 后才确认；这段有限窗口也作为 Primary Item transition grace，窗口内选中新的 Primary Item 时识别为 Handoff，不执行普通停止副作用。若新主用户会话晚于该窗口出现，则在最长 10 秒的有界候选期内继续识别换集，只有成员、会话身份和目标 Item 条件均匹配才恢复 Handoff；候选过期或条件变化时回到安全等待。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。
 3. 位置归零不是停止条件；合法的 seek-to-zero 不会单独触发停止副作用。
 4. 仅在停止状态确认的转换上执行副作用，避免每轮重复；`PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方，`NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示。生产序列中两项副作用都必须在同一停止确认转换上执行，避免另一方遗漏暂停或提示。
 5. 清理运行时并回到 `Waiting`，要求双方重新打开同一视频。

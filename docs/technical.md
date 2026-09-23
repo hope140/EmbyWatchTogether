@@ -8,7 +8,7 @@
 - `Watching` 阶段只传播明确的暂停/继续和明显的手动 Seek，不做周期性追帧。主用户同时操作时作为冲突裁决者；命令确认、抑制窗口以及 session identity、Item、设备会话绑定用于避免回环和旧会话误控制。
 - 已绑定的 `Watching` 会话若仅出现原始远控标志短暂丢失，而同一 Session/Item 的有效能力证据仍在、双方仍为同一有效媒体且没有 Pending 命令，则最多等待 8 秒恢复。窗口内不推进 `WatchingTick`、不发命令或提示；恢复后按保留的上一轮快照处理真实暂停或 Seek，超时及身份、Item、能力或 Pending 变化立即回到现有严格路径。
 - `Watching` 中主用户切换 Item 时进入独立的 `Handoff` 状态。插件通过 `SessionBridge` 的 `PlayItem` 抽象让非 Primary 参与者打开主用户当前 Item，收到当前用户、Session 和 ItemId 均匹配的快照确认后才进入 `Barrier`；参与者自行切换 Item 仍回到安全 `Waiting`，不会让主用户跟随。两人同时播放时按安全规则暂停活跃会话，单人播放受到保护。
-- `PlaybackStopped` 事件只用于立即唤醒轮询，不直接确认停止。`Watching` 开始后，停止、离线或缺失状态持续达到 2 秒才确认停止；这段有限窗口也用于区分主用户的 Stop A → Start B 媒体交接，窗口内出现新主用户 Item 时不执行普通停止副作用。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。合法的 seek-to-zero 不单独视为停止。
+- `PlaybackStopped` 事件只用于立即唤醒轮询，不直接确认停止。`Watching` 开始后，停止、离线或缺失状态持续达到 2 秒才确认停止；原有 2 秒窗口用于区分主用户的 Stop A → Start B 媒体交接，窗口内出现新主用户 Item 时不执行普通停止副作用。若新主用户会话晚于该窗口出现，插件还会保留最长 10 秒的有界换集候选，满足房间成员、会话身份和目标 Item 条件后继续进入 Handoff；候选过期或条件变化时回到安全等待。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。合法的 seek-to-zero 不单独视为停止。
 - Session snapshot provider 连续失败达到 2 秒后进入 `Waiting` 保护，清理不可信同步状态且不向旧 session 发命令；恢复需连续成功 2 秒后使用 fresh snapshot 重新同步，弱网抖动不会频繁触发 Barrier。管理页遇到 `snapshot_unavailable` 时仅提示快照不可用，不声称播放器已暂停。
 - 多个共同 Item 候选使用对称 maximin 全局评分选出唯一共同 Item；完全同分时安全等待，不擅自选择。
 - 同一用户的多会话仅沿用唯一历史 `SessionId` + `ItemId` 关联；无历史或关联失效时保持 `Waiting`，不猜测新的会话。
@@ -33,7 +33,7 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.5.0.0`，当前测试版为 `1.6.0.1`，对应 beta 预发布候选 tag `v1.6.0.1`；本 beta 用于验证 Phase D Media Handoff。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.5.0.0`，当前测试版为 `1.6.0.2`，对应 beta 预发布候选 tag `v1.6.0.2`；本 beta 用于验证 Phase D Media Handoff 在主用户换集会话延迟场景下的有界恢复。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
