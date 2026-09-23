@@ -45,6 +45,8 @@ namespace Emby.Plugins.WatchTogether
 
         private const int MaxApiResponseBytes = 1024 * 1024;
 
+        private const int FixedAssetDownloadTimeoutMs = 60000;
+
         private readonly IHttpClient _httpClient;
         private readonly ReleaseSignatureVerifier _signatureVerifier;
         private readonly IJsonSerializer _jsonSerializer;
@@ -596,6 +598,7 @@ namespace Emby.Plugins.WatchTogether
                 Url = url,
                 UserAgent = _userAgent,
                 CancellationToken = cancellationToken,
+                TimeoutMs = FixedAssetDownloadTimeoutMs,
                 ThrowOnErrorResponse = false,
                 Progress = new Progress<double>(),
             };

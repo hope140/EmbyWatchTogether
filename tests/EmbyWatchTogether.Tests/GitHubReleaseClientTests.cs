@@ -92,6 +92,68 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task StableAssetDownloads_UseBoundedTimeoutAndCancellation()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            using (var cancellation = new CancellationTokenSource())
+            {
+                var requests = new List<HttpRequestOptions>();
+                var client = CreateClient(
+                    fixture,
+                    out _,
+                    captureRequest: requests.Add);
+
+                await client.CheckForLatestAsync(cancellation.Token);
+
+                Assert.Equal(3, requests.Count);
+                foreach (var request in requests)
+                {
+                    Assert.Equal(60000, request.TimeoutMs);
+                    Assert.True(request.EnableAutomaticTimeouts);
+                    Assert.Equal(cancellation.Token, request.CancellationToken);
+                }
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task BetaAssetDownloads_UseBoundedTimeoutWhileReleasesApiKeepsDefaultTimeout()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            using (var cancellation = new CancellationTokenSource())
+            {
+                fixture.EnableBetaPaths();
+                var downloadRequests = new List<HttpRequestOptions>();
+                var apiRequests = new List<HttpRequestOptions>();
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseApiDto>
+                    {
+                        CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
+                    },
+                    out _,
+                    captureDownloadRequest: downloadRequests.Add,
+                    captureApiRequest: apiRequests.Add);
+
+                await client.CheckForLatestAsync(cancellation.Token);
+
+                Assert.Equal(3, downloadRequests.Count);
+                foreach (var request in downloadRequests)
+                {
+                    Assert.Equal(60000, request.TimeoutMs);
+                    Assert.True(request.EnableAutomaticTimeouts);
+                    Assert.Equal(cancellation.Token, request.CancellationToken);
+                }
+
+                var apiRequest = Assert.Single(apiRequests);
+                Assert.Equal(20000, apiRequest.TimeoutMs);
+                Assert.True(apiRequest.EnableAutomaticTimeouts);
+                Assert.Equal(cancellation.Token, apiRequest.CancellationToken);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
         public async Task BetaCheck_IgnoresMissingAssetsOnLowerReleaseAfterSelectingHighestVersion()
         {
             using (var fixture = SignedReleaseFixture.Create())
@@ -493,7 +555,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             bool invalidJson = false,
             Action<string> afterResponse = null,
             HttpStatusCode apiStatusCode = HttpStatusCode.OK,
-            string apiResponseUrl = null)
+            string apiResponseUrl = null,
+            Action<HttpRequestOptions> captureDownloadRequest = null,
+            Action<HttpRequestOptions> captureApiRequest = null)
         {
             var apiUrls = new List<string>();
             requestedApiUrls = apiUrls;
@@ -502,6 +566,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 .Returns((HttpRequestOptions options) =>
                 {
                     apiUrls.Add(options.Url);
+                    captureApiRequest?.Invoke(options);
                     return Task.FromResult(new HttpResponseInfo
                     {
                         StatusCode = apiStatusCode,
@@ -513,6 +578,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 .Returns((HttpRequestOptions options) =>
                 {
                     Assert.NotNull(options.Progress);
+                    captureDownloadRequest?.Invoke(options);
                     var response = fixture.CreateResponse(options.Url);
                     afterResponse?.Invoke(options.Url);
                     return Task.FromResult(response);
@@ -540,13 +606,15 @@ namespace Emby.Plugins.WatchTogether.Tests
         private static GitHubReleaseClient CreateClient(
             SignedReleaseFixture fixture,
             out Mock<IHttpClient> httpClient,
-            Action<string> afterResponse = null)
+            Action<string> afterResponse = null,
+            Action<HttpRequestOptions> captureRequest = null)
         {
             httpClient = new Mock<IHttpClient>();
             httpClient.Setup(x => x.GetTempFileResponse(It.IsAny<HttpRequestOptions>()))
                 .Returns((HttpRequestOptions options) =>
                 {
                     Assert.NotNull(options.Progress);
+                    captureRequest?.Invoke(options);
                     var response = fixture.CreateResponse(options.Url);
                     afterResponse?.Invoke(options.Url);
                     return Task.FromResult(response);
