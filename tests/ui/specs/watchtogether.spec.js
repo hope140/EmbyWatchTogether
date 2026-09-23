@@ -5,9 +5,9 @@ const path = require('path');
 const artifactDir = path.join(__dirname, '..', 'test-results', 'ui-vnext');
 fs.mkdirSync(artifactDir, { recursive: true });
 
-async function open(page, scenario = 'active', theme = 'light', width = 1100, height = 900) {
+async function open(page, scenario = 'active', theme = 'light', width = 1100, height = 900, host = 'present') {
   await page.setViewportSize({ width, height });
-  await page.goto(`/?scenario=${scenario}&theme=${theme}`);
+  await page.goto(`/?scenario=${scenario}&theme=${theme}&host=${host}`);
   await expect(page.locator('.wt-page')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__wtFixture && window.__wtFixture.apiCalls.some(x => x.path === 'WatchTogether/Rooms'))).toBe(true);
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -18,6 +18,99 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 async function calls(page) {
   return page.evaluate(() => window.__wtFixture.apiCalls.slice());
 }
+
+test('Emby 宿主顶栏承载胶囊分页并保持原页面槽位为空', async ({ page }) => {
+  await open(page, 'active', 'light', 1440, 1000);
+  const host = page.locator('.skinHeader');
+  const middle = page.locator('.skinHeader .headerMiddle');
+  await expect(host).toHaveClass(/headerTop-withSectionTabs/);
+  await expect(middle).toHaveClass(/headerMiddle-withSectionTabs/);
+  await expect(middle.locator('#wtPluginNav')).toHaveCount(1);
+  await expect(page.locator('#wtPluginNavSlot #wtPluginNav')).toHaveCount(0);
+  await expect(page.locator('#wtPluginNav')).toHaveClass(/wt-pluginNav--host/);
+  await expect(page.locator('#wtTabMine')).toHaveAttribute('aria-current', 'page');
+  const navStyle = await page.locator('#wtPluginNav').evaluate(el => {
+    const style = getComputedStyle(el);
+    const active = getComputedStyle(el.querySelector('[aria-current="page"]'));
+    return { background: style.backgroundColor, activeBackground: active.backgroundColor, radius: style.borderRadius };
+  });
+  expect(navStyle.background).not.toBe('rgba(0, 0, 0, 0)');
+  expect(navStyle.activeBackground).not.toBe('rgba(0, 0, 0, 0)');
+  expect(navStyle.radius).toBe('999px');
+});
+
+test('管理员可在顶栏切换 mine、manage、settings，普通用户隐藏管理入口', async ({ page }) => {
+  await open(page, 'admin-manage', 'dark');
+  for (const id of ['wtTabManage', 'wtTabSettings', 'wtTabMine']) {
+    await page.locator(`#${id}`).click();
+    await expect(page.locator(`#${id}`)).toHaveAttribute('aria-current', 'page');
+  }
+  await open(page, 'active', 'light');
+  await expect(page.locator('#wtTabManage')).toBeHidden();
+  await expect(page.locator('#wtTabSettings')).toBeHidden();
+});
+
+test('反复进入离开页面只保留一份分页并清理宿主状态，缺少宿主时回退到页面槽位', async ({ page }) => {
+  await open(page, 'active', 'light', 1024, 900);
+  for (let index = 0; index < 10; index += 1) {
+    await page.evaluate(() => window.__wtFixture.view.onPause());
+    await page.evaluate(() => window.__wtFixture.view.onResume());
+  }
+  await expect.poll(() => page.locator('#wtPluginNav').count()).toBe(1);
+  await expect(page.locator('.headerMiddle #wtPluginNav')).toHaveCount(1);
+  await page.evaluate(() => window.__wtFixture.view.onPause());
+  await expect(page.locator('#wtPluginNavSlot #wtPluginNav')).toHaveCount(1);
+  await expect(page.locator('.headerMiddle #wtPluginNav')).toHaveCount(0);
+  await expect(page.locator('.skinHeader')).not.toHaveClass(/headerTop-withSectionTabs/);
+  await expect(page.locator('.headerMiddle')).not.toHaveClass(/headerMiddle-withSectionTabs/);
+
+  await open(page, 'active', 'light', 1024, 900, 'missing');
+  await expect(page.locator('#wtPluginNavSlot #wtPluginNav')).toHaveCount(1);
+  await expect(page.locator('#wtPluginNav')).not.toHaveClass(/wt-pluginNav--host/);
+});
+
+test('房间桌面端媒体在左、成员和按钮在右，手机端按媒体成员按钮排列', async ({ page }) => {
+  await open(page, 'active', 'light', 1440, 1000);
+  const desktop = await page.locator('.wt-roomCard').evaluate(card => {
+    const media = card.querySelector('.wt-roomMediaPlaceholder').getBoundingClientRect();
+    const side = card.querySelector('.wt-roomSide').getBoundingClientRect();
+    const participants = card.querySelector('.wt-roomParticipants').getBoundingClientRect();
+    const actions = card.querySelector('.wt-roomActions').getBoundingClientRect();
+    return { media, side, participants, actions };
+  });
+  expect(desktop.media.left).toBeLessThan(desktop.side.left);
+  expect(desktop.participants.left).toBeGreaterThanOrEqual(desktop.side.left);
+  expect(desktop.actions.left).toBeGreaterThanOrEqual(desktop.side.left);
+
+  await open(page, 'active', 'light', 390, 1000);
+  const mobile = await page.locator('.wt-roomCard').evaluate(card => {
+    const rect = selector => card.querySelector(selector).getBoundingClientRect();
+    return { media: rect('.wt-roomMediaPlaceholder'), participants: rect('.wt-roomParticipants'), actions: rect('.wt-roomActions') };
+  });
+  expect(mobile.media.top).toBeLessThan(mobile.participants.top);
+  expect(mobile.participants.top).toBeLessThan(mobile.actions.top);
+});
+
+test('管理员成员保留个人主动作，管理动作收纳在更多；管理员非成员没有个人按钮', async ({ page }) => {
+  await open(page, 'admin-member', 'light', 1024, 900);
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="participantResync"]')).toBeVisible();
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="leave"]')).toBeVisible();
+  await page.locator('.wt-roomCard .wt-action[data-act="more"]').click();
+  await expect(page.locator('.wt-roomCard .wt-moreMenu')).toBeVisible();
+  await expect(page.locator('.wt-roomCard .wt-moreMenu [data-act="delete"]')).toBeVisible();
+
+  await open(page, 'admin-manage', 'light', 1024, 900);
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="participantResync"]')).toHaveCount(0);
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="leave"]')).toHaveCount(0);
+});
+
+test('已有房间收起帮助，无房间保留邀请和帮助说明', async ({ page }) => {
+  await open(page, 'active', 'light');
+  await expect(page.locator('.wt-help')).toBeHidden();
+  await open(page, 'empty', 'light', 390, 900);
+  await expect(page.locator('#wtInvitationSection')).toBeVisible();
+  await expect(page.locator('.wt-help')).toBeVisible();
+});
 
 test('普通成员当前房间显示真实结构与媒体占位', async ({ page }) => {
   await open(page);
@@ -152,10 +245,13 @@ for (const width of [320, 360, 390, 430, 768, 1024, 1440, 1920]) {
     const metrics = await page.evaluate(() => ({
       width: document.documentElement.scrollWidth,
       client: document.documentElement.clientWidth,
-      controls: Array.from(document.querySelectorAll('button, input:not([type="checkbox"]), select, a.wt-pluginNavLink, label.checkboxContainer')).map(x => Math.min(x.getBoundingClientRect().width, x.getBoundingClientRect().height)).filter(Boolean)
+      controls: Array.from(document.querySelectorAll('button, input:not([type="checkbox"]), select, a.wt-pluginNavLink, label.checkboxContainer')).map(x => Math.min(x.getBoundingClientRect().width, x.getBoundingClientRect().height)).filter(Boolean),
+      headerBottom: document.querySelector('.skinHeader').getBoundingClientRect().bottom,
+      pageTop: document.querySelector('.wt-page').getBoundingClientRect().top
     }));
     expect(metrics.width).toBeLessThanOrEqual(metrics.client + 1);
     expect(Math.min(...metrics.controls)).toBeGreaterThanOrEqual(44);
+    expect(metrics.headerBottom).toBeLessThanOrEqual(metrics.pageTop + 1);
     if (width === 390) await page.screenshot({ path: path.join(artifactDir, 'mobile-active-room-390.png'), fullPage: true });
     if (width === 320) await page.screenshot({ path: path.join(artifactDir, 'mobile-long-name-code-320.png'), fullPage: true });
   });

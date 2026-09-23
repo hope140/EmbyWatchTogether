@@ -632,6 +632,7 @@
         }
 
         .wt-pluginNav {
+            --wt-control-height: 44px;
             --wt-nav-text: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)));
             --wt-nav-muted: var(--theme-secondary-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 42%), var(--theme-secondary-text-color-alpha, 1)));
             --wt-nav-border: var(--line-background, rgba(38, 49, 58, .2));
@@ -698,7 +699,7 @@
         }
 
         .wt-pluginNav--host .wt-pluginNavLink {
-            min-height: 30px;
+            min-height: var(--wt-control-height);
             padding: 4px 19px;
             border-radius: 999px;
             color: var(--wt-nav-muted) !important;
@@ -840,6 +841,7 @@
         .wt-page .wt-roomCard {
             width: 100%;
             max-width: 1120px;
+            box-sizing: border-box;
         }
 
         .wt-roomOverview {
