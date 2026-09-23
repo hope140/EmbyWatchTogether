@@ -154,7 +154,7 @@ else:
 2. `Watching` 开始后，当前观察按 `Previous SessionId` + `ItemId` 绑定。当前会话标记 `stopped`、离线或缺失时先记录疑似停止时间，异常状态连续达到 2 秒 debounce 后才确认；这段有限窗口也作为 Primary Item transition grace，窗口内选中新的 Primary Item 时识别为 Handoff，不执行普通停止副作用。若新主用户会话晚于该窗口出现，则在最长 10 秒的有界候选期内继续识别换集，只有成员、会话身份和目标 Item 条件均匹配才恢复 Handoff；候选过期或条件变化时回到安全等待。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。
 3. 位置归零不是停止条件；合法的 seek-to-zero 不会单独触发停止副作用。
 4. 仅在停止状态确认的转换上执行副作用，避免每轮重复；`PauseOtherOnPlaybackStop=true` 时暂停仍在线播放的另一方，`NotifyOtherOnPlaybackStop=true` 时向另一方发送文字提示。生产序列中两项副作用都必须在同一停止确认转换上执行，避免另一方遗漏暂停或提示。
-5. 新主用户 Item 在最初 2 秒停止观察窗口内出现时直接识别为 `Handoff`；超过 2 秒才出现时，先按停止语义执行一次副作用并进入 `Waiting`，同时保留最长 10 秒的换集候选，候选内满足成员、会话身份和目标 Item 条件即可从 `Waiting` 恢复 `Handoff`；候选过期或条件失效时清理运行时并要求双方重新打开同一视频。
+5. 停止确认之前的轮询已看见新主用户 Item 时直接识别为 `Handoff`；已确认停止并进入 `Waiting` 后新 Item 才到时，先按停止语义执行一次副作用，同时保留最长 10 秒的换集候选，候选内满足成员、会话身份和目标 Item 条件即可从 `Waiting` 恢复 `Handoff`；候选过期或条件失效时清理运行时并要求双方重新打开同一视频。
 
 Barrier 尚未完成时的离开只取消本次握手，不会被记录成持久的播放停止。
 
