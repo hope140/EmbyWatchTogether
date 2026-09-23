@@ -137,11 +137,20 @@ test('房间桌面端媒体在左、成员和按钮在右，手机端按媒体�
 
 test('管理员成员保留个人主动作，管理动作收纳在更多；管理员非成员没有个人按钮', async ({ page }) => {
   await open(page, 'admin-member', 'light', 1024, 900);
-  await expect(page.locator('.wt-roomCard .wt-action[data-act="participantResync"]')).toBeVisible();
-  await expect(page.locator('.wt-roomCard .wt-action[data-act="leave"]')).toBeVisible();
+  const participantResync = page.locator('.wt-roomCard .wt-action[data-act="participantResync"]');
+  const leave = page.locator('.wt-roomCard .wt-action[data-act="leave"]');
+  await expect(participantResync).toBeVisible();
+  await expect(participantResync).toHaveText('请求重新对齐');
+  await expect(participantResync).not.toHaveClass(/wt-action--danger/);
+  await expect(leave).toBeVisible();
+  await expect(leave).not.toHaveClass(/wt-action--danger/);
+  await participantResync.click();
+  await expect(page.locator('#wtConfirmTitle')).toHaveText('请求重新对齐');
+  await page.locator('#wtConfirmCancel').click();
   await page.locator('.wt-roomCard .wt-action[data-act="more"]').click();
   await expect(page.locator('.wt-roomCard .wt-moreMenu')).toBeVisible();
   await expect(page.locator('.wt-roomCard .wt-moreMenu [data-act="delete"]')).toBeVisible();
+  await expect(page.locator('.wt-roomCard .wt-moreMenu [data-act="delete"]')).toHaveClass(/wt-action--danger/);
 
   await open(page, 'admin-manage', 'light', 1024, 900);
   await expect(page.locator('.wt-roomCard .wt-action[data-act="participantResync"]')).toHaveCount(0);
@@ -162,7 +171,10 @@ test('普通成员当前房间显示真实结构与媒体占位', async ({ page 
   await expect(page.locator('#wtTabManage')).toBeHidden();
   await expect(page.locator('.wt-roomCard')).toContainText('周末一起看');
   await expect(page.locator('.wt-roomState')).toContainText('同步中');
+  await expect(page.locator('.wt-roomGroup[data-wt-room-group="current"] .wt-roomGroupHeading')).toHaveCount(0);
+  await expect(page.locator('.wt-roomMediaPlaceholder')).toContainText('尚未检测到播放');
   await expect(page.locator('.wt-roomMediaPlaceholder')).toContainText('媒体信息待权限验证');
+  await expect(page.locator('.wt-roomMediaPlaceholder button')).toHaveCount(0);
   await expect(page.locator('#wtInvitationSection')).toBeHidden();
   await page.screenshot({ path: path.join(artifactDir, 'desktop-light-active-room.png'), fullPage: true });
 });

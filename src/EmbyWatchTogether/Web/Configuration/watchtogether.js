@@ -21,7 +21,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         pause: '暂停播放',
         resume: '继续播放',
         resync: '重新同步',
-        participantResync: '请求重新同步'
+        participantResync: '请求重新对齐'
     };
 
     var maxDiagnosticEvents = 50;
@@ -1098,7 +1098,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         ] : [
             '加入房间后，与另一位参与者打开同一视频。',
             '播放、暂停和进度会自动同步。',
-            '需要重新对齐时，点击“请求重新同步”。'
+            '需要重新对齐时，点击“请求重新对齐”。'
         ];
         helpSteps.forEach(function (step, index) {
             if (step) {
@@ -1442,14 +1442,22 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         mediaFrame.setAttribute('height', '16');
         mediaFrame.setAttribute('rx', '2');
         var mediaLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        mediaLine.setAttribute('d', 'M3 9h18M8 4v5M16 4v5M8 13h.01M12 13h.01M16 13h.01M8 17h8');
+        mediaLine.setAttribute('d', 'M7 4v16M17 4v16M3 8h4M17 8h4M3 16h4M17 16h4');
         mediaSvg.appendChild(mediaFrame);
         mediaSvg.appendChild(mediaLine);
         mediaIcon.appendChild(mediaSvg);
+        var mediaCopy = document.createElement('span');
+        mediaCopy.className = 'wt-mediaCopy';
+        var mediaStatus = document.createElement('strong');
+        mediaStatus.className = 'wt-mediaStatus';
+        mediaStatus.textContent = '尚未检测到播放';
         var mediaLabel = document.createElement('span');
+        mediaLabel.className = 'fieldDescription wt-mediaHint';
         mediaLabel.textContent = '媒体信息待权限验证';
+        mediaCopy.appendChild(mediaStatus);
+        mediaCopy.appendChild(mediaLabel);
         media.appendChild(mediaIcon);
-        media.appendChild(mediaLabel);
+        media.appendChild(mediaCopy);
 
         var participants = document.createElement('div');
         participants.className = 'wt-roomParticipants';
@@ -1488,7 +1496,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         updated.className = 'fieldDescription wt-roomMeta wt-roomUpdated';
         updated.textContent = room._wtStateStale === true ? '更新时间：可能已过期' : '更新时间：刚刚';
         side.appendChild(updated);
-        card._wtStateDetails = { media: media, mediaLabel: mediaLabel, overview: overview, side: side, participants: participants, updated: updated };
+        card._wtStateDetails = { media: media, mediaStatus: mediaStatus, mediaLabel: mediaLabel, overview: overview, side: side, participants: participants, updated: updated };
     }
 
     function updateRoomStateDetails(card, room) {
@@ -1496,6 +1504,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (!details) {
             appendRoomStateDetails(card, room);
             return;
+        }
+        if (details.mediaStatus) {
+            details.mediaStatus.textContent = '尚未检测到播放';
         }
         if (details.mediaLabel) {
             details.mediaLabel.textContent = '媒体信息待权限验证';
@@ -1921,7 +1932,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         button.type = 'button';
         var toneClass = action === 'join'
             ? 'wt-action--primary'
-            : action === 'leave' || action === 'delete'
+            : action === 'delete'
                 ? 'wt-action--danger'
                 : action === 'resync' || action === 'participantResync'
                     ? 'wt-action--accent'
@@ -2044,10 +2055,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 section = document.createElement('section');
                 section.className = 'wt-roomGroup';
                 section.setAttribute('data-wt-room-group', key);
-                var heading = document.createElement('h3');
-                heading.className = 'wt-roomGroupHeading';
-                heading.textContent = title;
-                section.appendChild(heading);
+                if (title) {
+                    var heading = document.createElement('h3');
+                    heading.className = 'wt-roomGroupHeading';
+                    heading.textContent = title;
+                    section.appendChild(heading);
+                }
                 var list = document.createElement('div');
                 list.className = 'wt-roomList wt-roomGroupList';
                 section.appendChild(list);
@@ -2062,7 +2075,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return groupList;
         }
 
-        var currentRoomList = ensureRoomGroup('current', '当前房间');
+        var currentRoomList = ensureRoomGroup('current', null);
         var managedRoomList = ensureRoomGroup('managed', '管理员可管理房间');
         var currentRoomIds = {};
         rooms.forEach(function (room) {
@@ -2368,7 +2381,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function participantResync(page, roomId, button) {
-        requestConfirmation(page, '请求重新同步', '会请求播放器重新对齐，播放可能短暂暂停，确认继续吗？', function () {
+        requestConfirmation(page, '请求重新对齐', '会请求播放器重新对齐，播放可能短暂暂停，确认继续吗？', function () {
             executeParticipantResync(page, roomId, button);
         }, button);
     }
@@ -2376,7 +2389,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function executeParticipantResync(page, roomId, button) {
         setRoomBusy(page, roomId, true);
         clearRoomFeedback(page, roomId);
-        roomFeedback(page, roomId, '重新同步请求处理中…', false, true);
+        roomFeedback(page, roomId, '重新对齐请求处理中…', false, true);
         renderRooms(page, page._wtRooms || []);
         apiSend('WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync', 'POST')
             .then(function (result) {
@@ -2385,19 +2398,19 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     roomFeedback(page, roomId, '请求已受理，等待播放器确认。', false, false);
                 } else if (status === 'busy') {
                     roomFeedback(page, roomId, result.Reason === 'resync_cooldown'
-                        ? '刚刚已请求重新同步，请稍后再试。'
+                        ? '刚刚已请求重新对齐，请稍后再试。'
                         : '同步正在进行，请等待当前同步完成。', false, false);
                 } else if (status === 'unavailable') {
                     roomFeedback(page, roomId, result.Reason === 'snapshot_unavailable'
                         ? '当前播放会话暂时不可读，请稍后再试。'
                         : '当前房间暂时不可用，请稍后再试。', true, true);
                 } else {
-                    roomFeedback(page, roomId, '重新同步请求未完成，请稍后再试。', true, true);
+                    roomFeedback(page, roomId, '重新对齐请求未完成，请稍后再试。', true, true);
                 }
                 return loadRooms(page, false);
             })
             .catch(function (err) {
-                roomFeedback(page, roomId, '重新同步请求失败：' + errorMessage(err), true, true);
+                roomFeedback(page, roomId, '重新对齐请求失败：' + errorMessage(err), true, true);
             })
             .then(function () {
                 setRoomBusy(page, roomId, false);
