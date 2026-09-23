@@ -1099,7 +1099,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function setNativeTabs(page) {
-        if (!mainTabsManager || typeof mainTabsManager.setTabs !== 'function') return;
+        if (page._wtNativeTabsInitialized === true || !mainTabsManager || typeof mainTabsManager.setTabs !== 'function') return;
         var view = page._wtView || 'mine';
         var tabs = getNativeTabs(page);
         var index = tabs.findIndex(function (tab) {
@@ -1109,6 +1109,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         mainTabsManager.setTabs(page, index, function () {
             return getNativeTabs(page);
         });
+        page._wtNativeTabsInitialized = true;
     }
 
     function setAdminVisibility(page, isAdmin) {
@@ -1143,7 +1144,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 step.textContent = helpText[index];
             }
         });
-        setNativeTabs(page);
+        if (page._wtTabsPermissionReady === true) {
+            setNativeTabs(page);
+        }
         setPluginView(page, isAdmin ? (page._wtRouteView || 'mine') : 'mine');
     }
 
@@ -1773,6 +1776,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function loadUsers(page) {
         return apiGet('WatchTogether/Users').then(function (list) {
             page._wtIsAdmin = true;
+            page._wtTabsPermissionReady = true;
             setAdminVisibility(page, true);
             users = Array.isArray(list) ? list : [];
             page._wtRooms = null;
@@ -1781,6 +1785,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             syncForm(page);
         }).catch(function (err) {
             page._wtIsAdmin = isPermissionError(err) ? false : undefined;
+            page._wtTabsPermissionReady = true;
             page._wtRooms = null;
             users = [];
             fillSelect(page.querySelector('#wtUserA'), [], null);
@@ -2636,6 +2641,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var page = this.view;
         beginPageGeneration(page, false);
         page._wtNativeTabNavigationBypass = false;
+        page._wtNativeTabsInitialized = false;
+        page._wtTabsPermissionReady = false;
         page._wtRouteView = currentRouteView(page);
         page._wtView = page._wtRouteView;
         bindPageEvents(page);

@@ -162,12 +162,15 @@ function page() {
       history.replaceState({}, '', location.pathname + location.search + href);
       if (window.__wtFixture.view) {
         window.__wtFixture.view.onPause();
+        window.__wtFixture.view.view.__mockTabsInitialized = false;
         window.__wtFixture.view.onResume();
       }
       window.__wtFixture.route = route;
     }
     var mainTabsManager = {
       setTabs: function (page, selectedIndex, getTabs) {
+        if (page.__mockTabsInitialized === true) return;
+        page.__mockTabsInitialized = true;
         var middle = document.querySelector('.skinHeader .headerMiddle');
         if (!middle) return;
         middle.innerHTML = '';

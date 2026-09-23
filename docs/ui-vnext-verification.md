@@ -85,6 +85,8 @@
 
 S9 的 mock Playwright fixture 验证 `tabs-viewmenubar`、`emby-tabs-slider`、`emby-tab-button` 与 route-backed 切页；生产页面不再包含 `wtPluginNav`，controller 不再操作 `.skinHeader` class。设置页 dirty 状态通过捕获宿主原生 tab 点击并复用现有确认对话框拦截，取消时保留当前路由与草稿，确认后恢复配置再继续路由。
 
+实机回归发现 `mainTabsManager` 对同一页面实例的首次 tabs 初始化具有粘性：若 `onResume` 在权限请求完成前先以普通用户状态初始化，管理员后续刷新不会补出管理与设置页。修正为等待 `WatchTogether/Users` 权限结果后首次初始化，成功管理员生成三项，403 或其他失败安全生成一项；mock 同样忽略同一 page 的重复初始化并由管理员分页测试覆盖。
+
 仍待真实 Emby 收口的视觉差异：mock 顶栏无法复现真实 Emby 侧栏、账号菜单、宿主字体和缓存后的 header 尺寸；媒体名称、封面和头像继续按权限门禁使用占位；真实播放状态、双账号设备信息和移动端软键盘布局尚未验收。
 
 未执行：S8 键变更后的真实 Emby Web 页面复核、真实双账号邀请/播放同步、部署、重启、签名和发布。该 Stack 只建立本地代码与测试门禁。
