@@ -81,7 +81,9 @@
 - “暂离房间”改为中性描边，结束/删除房间继续使用危险色；参与者主操作改为“请求重新对齐”，确认、accepted、busy 和等待播放器确认反馈语义保持一致。
 - 最终浏览器测试为 27/27 PASS，新增 active / waiting / State 失败三类 State 会话语义断言；截图已重新生成，媒体状态与成员行保持一致。
 
-真实 Emby 收口时发现旧页面键会导致嵌入 HTML 与 AMD controller 继续命中客户端缓存，即使 DLL 已更新且强制刷新仍显示旧 UI。S8 将页面入口与 controller 键联动更新为 `WatchTogetherUiVNext` / `WatchTogetherUiVNext.js`，并保留原嵌入资源路径，以触发稳定的客户端缓存分流。
+真实 Emby 收口时发现旧页面键会导致嵌入 HTML 与 AMD controller 继续命中客户端缓存，即使 DLL 已更新且强制刷新仍显示旧 UI。S8 先将页面入口与 controller 键联动更新为 `WatchTogetherUiVNext` / `WatchTogetherUiVNext.js`，并保留原嵌入资源路径。S9 再轮换为 `WatchTogetherUiMineV2`、`WatchTogetherUiManageV2`、`WatchTogetherUiSettingsV2` 与 `WatchTogetherUiNativeTabsV2.js`，三页共用 HTML/JS 资源并由 Emby 原生 `mainTabsManager` 路由。
+
+S9 的 mock Playwright fixture 验证 `tabs-viewmenubar`、`emby-tabs-slider`、`emby-tab-button` 与 route-backed 切页；生产页面不再包含 `wtPluginNav`，controller 不再操作 `.skinHeader` class。设置页 dirty 状态通过捕获宿主原生 tab 点击并复用现有确认对话框拦截，取消时保留当前路由与草稿，确认后恢复配置再继续路由。
 
 仍待真实 Emby 收口的视觉差异：mock 顶栏无法复现真实 Emby 侧栏、账号菜单、宿主字体和缓存后的 header 尺寸；媒体名称、封面和头像继续按权限门禁使用占位；真实播放状态、双账号设备信息和移动端软键盘布局尚未验收。
 

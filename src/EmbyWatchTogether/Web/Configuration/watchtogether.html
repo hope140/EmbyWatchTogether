@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherUiVNext.js"
+     data-controller="__plugin/WatchTogetherUiNativeTabsV2.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -636,85 +636,6 @@
             line-height: 1.55;
         }
 
-        .wt-pluginNav {
-            --wt-control-height: 44px;
-            --wt-nav-text: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)));
-            --wt-nav-muted: var(--theme-secondary-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 42%), var(--theme-secondary-text-color-alpha, 1)));
-            --wt-nav-border: var(--line-background, rgba(38, 49, 58, .2));
-            --wt-nav-surface: hsla(var(--card-background-hue, 0), var(--card-background-saturation, 0%), var(--card-background-lightness, 95%), .72);
-            --wt-nav-active-bg: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), .9));
-            --wt-nav-active-text: var(--theme-background-color, #fff);
-            display: flex;
-            flex-wrap: wrap;
-            gap: .25em;
-            margin: 0 0 1.25em;
-            padding: .2em;
-            border: 1px solid var(--wt-nav-border);
-            border-radius: var(--wt-radius);
-            background: var(--wt-nav-surface);
-        }
-
-        .wt-pluginNavSlot:empty {
-            display: none;
-        }
-
-        .wt-pluginNav--host {
-            flex: 0 1 auto;
-            max-width: min(100%, 42em);
-            margin: 0 .75em;
-            padding: 4px;
-            border: 0;
-            border-radius: 999px;
-            background: var(--wt-nav-surface);
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-
-        .wt-pluginNav--host::-webkit-scrollbar {
-            display: none;
-        }
-
-        .wt-pluginNavLink {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: .45em;
-            min-height: var(--wt-control-height);
-            padding: .45em .9em;
-            border: 1px solid transparent;
-            border-radius: 6px;
-            color: var(--wt-muted) !important;
-            font-weight: 600;
-            line-height: 1.2;
-            text-decoration: none;
-            transition: background-color .15s ease, border-color .15s ease, color .15s ease;
-        }
-
-        .wt-pluginNavLink:hover,
-        .wt-pluginNavLink:focus-visible {
-            border-color: var(--wt-nav-border);
-            background: var(--wt-card, rgba(255, 255, 255, .75));
-            color: var(--wt-nav-text) !important;
-        }
-
-        .wt-pluginNavLink[aria-current="page"] {
-            border-color: transparent;
-            background: var(--wt-nav-active-bg);
-            color: var(--wt-nav-active-text) !important;
-        }
-
-        .wt-pluginNav--host .wt-pluginNavLink {
-            min-height: var(--wt-control-height);
-            padding: 4px 19px;
-            border-radius: 999px;
-            color: var(--wt-nav-muted) !important;
-            font-size: .92em;
-        }
-
-        .wt-pluginNav--host .wt-pluginNavLink[aria-current="page"] {
-            color: var(--wt-nav-active-text) !important;
-        }
-
         .wt-confirmOverlay {
             position: fixed;
             inset: 0;
@@ -766,18 +687,6 @@
 
         .wt-viewHidden { display: none !important; }
 
-        .wt-pluginNavIcon {
-            display: inline-flex;
-            flex: 0 0 auto;
-            width: 1.05em;
-            height: 1.05em;
-        }
-
-        .wt-pluginNavIcon svg {
-            width: 100%;
-            height: 100%;
-        }
-
         .wt-page .wt-section {
             margin-bottom: 1em;
             padding: 1.1em 1.15em 1.2em;
@@ -796,7 +705,6 @@
         }
 
         .wt-page button,
-        .wt-page a.wt-pluginNavLink,
         .wt-page .wt-roomActions button.wt-action {
             min-height: var(--wt-control-height);
         }
@@ -944,34 +852,6 @@
                 padding-right: 1em;
             }
 
-            .wt-pluginNav {
-                display: grid;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
-            }
-
-            .wt-pluginNav--host {
-                display: flex;
-                flex: 1 1 100%;
-                max-width: calc(100% - 1em);
-                order: 2;
-                margin: 0 .5em .35em;
-                justify-content: flex-start;
-            }
-
-            .wt-pluginNav--host .wt-pluginNavLink {
-                flex: 0 0 auto;
-            }
-
-            .wt-pluginNavLink {
-                padding-left: .45em;
-                padding-right: .45em;
-                text-align: center;
-            }
-
-            .wt-pluginNavIcon {
-                display: none;
-            }
-
             .wt-roomOverview {
                 grid-template-columns: minmax(0, 1fr);
             }
@@ -994,26 +874,6 @@
         }
 
         @media (max-width: 22em) {
-            .wt-pluginNav {
-                grid-template-columns: repeat(3, minmax(0, 1fr));
-            }
-
-            .wt-pluginNavLink {
-                padding-left: .25em;
-                padding-right: .25em;
-                font-size: .9em;
-                text-align: center;
-            }
-
-            .wt-pluginNav--host {
-                display: flex;
-                grid-template-columns: none;
-            }
-
-            .wt-pluginNav--host .wt-pluginNavLink {
-                padding-left: .65em;
-                padding-right: .65em;
-            }
         }
     </style>
 
@@ -1023,35 +883,6 @@
                 创建房间后，两位参与者打开同一视频，播放、暂停和进度会自动同步。
             </p>
             <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite">正在加载…</p>
-        </div>
-
-        <div id="wtPluginNavSlot" class="wt-pluginNavSlot">
-        <nav id="wtPluginNav" class="wt-pluginNav" aria-label="Watch Together 导航">
-            <a id="wtTabMine" class="wt-pluginNavLink" href="#wtRooms" data-wt-view="mine" aria-current="page">
-                <span class="wt-pluginNavIcon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 11.5 12 5l8 6.5" /><path d="M6.5 10.5V20h11v-9.5" /><path d="M10 20v-5h4v5" />
-                    </svg>
-                </span>
-                <span>我的房间</span>
-            </a>
-            <a id="wtTabManage" class="wt-pluginNavLink" href="#wtAdminSection" data-wt-view="manage">
-                <span class="wt-pluginNavIcon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 5h16v14H4z" /><path d="M8 9h8M8 13h5" /><path d="M17 17v4M15 19h4" />
-                    </svg>
-                </span>
-                <span>房间管理</span>
-            </a>
-            <a id="wtTabSettings" class="wt-pluginNavLink" href="#wtSettingsSection" data-wt-view="settings">
-                <span class="wt-pluginNavIcon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /><circle cx="12" cy="12" r="3.5" />
-                    </svg>
-                </span>
-                <span>设置</span>
-            </a>
-        </nav>
         </div>
 
         <div class="verticalSection wt-section" id="wtAdminSection" data-wt-section="manage">

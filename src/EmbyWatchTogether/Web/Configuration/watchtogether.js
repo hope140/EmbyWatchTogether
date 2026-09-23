@@ -1,4 +1,4 @@
-define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 'emby-button'], function (BaseView, dom, loading) {
+define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 'emby-button', 'mainTabsManager'], function (BaseView, dom, loading, globalize, embyInput, embySelect, embyButton, mainTabsManager) {
     'use strict';
 
     var users = [];
@@ -1061,15 +1061,60 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             error.statusCode === 401 || error.statusCode === 403));
     }
 
+    var routePageNames = {
+        mine: 'WatchTogetherUiMineV2',
+        manage: 'WatchTogetherUiManageV2',
+        settings: 'WatchTogetherUiSettingsV2'
+    };
+
+    function routeViewFromUrl(url) {
+        var value = String(url || '');
+        if (value.indexOf(routePageNames.settings) >= 0) return 'settings';
+        if (value.indexOf(routePageNames.manage) >= 0) return 'manage';
+        if (value.indexOf(routePageNames.mine) >= 0) return 'mine';
+        return null;
+    }
+
+    function currentRouteView(page) {
+        var locationValue = '';
+        try {
+            locationValue = String((page.ownerDocument.defaultView || window).location.href || '');
+        } catch (error) {
+            locationValue = '';
+        }
+        return routeViewFromUrl(locationValue) || 'mine';
+    }
+
+    function configurationPageUrl(view) {
+        return Dashboard.getConfigurationPageUrl(routePageNames[view]);
+    }
+
+    function getNativeTabs(page) {
+        var tabs = [{ href: configurationPageUrl('mine'), name: '我的房间' }];
+        if (page._wtIsAdmin === true) {
+            tabs.push({ href: configurationPageUrl('manage'), name: '房间管理' });
+            tabs.push({ href: configurationPageUrl('settings'), name: '设置' });
+        }
+        return tabs;
+    }
+
+    function setNativeTabs(page) {
+        if (!mainTabsManager || typeof mainTabsManager.setTabs !== 'function') return;
+        var view = page._wtView || 'mine';
+        var tabs = getNativeTabs(page);
+        var index = tabs.findIndex(function (tab) {
+            return routeViewFromUrl(tab.href) === view;
+        });
+        if (index < 0) index = 0;
+        mainTabsManager.setTabs(page, index, function () {
+            return getNativeTabs(page);
+        });
+    }
+
     function setAdminVisibility(page, isAdmin) {
         var adminSection = page.querySelector('#wtAdminSection');
         var settingsSection = page.querySelector('#wtSettingsSection');
         var roomsHeading = page.querySelector('#wtRoomsHeading');
-        var pluginNav = page._wtPluginNav || page.querySelector('.wt-pluginNav');
-        var adminTabs = [
-            pluginNav && pluginNav.querySelector('#wtTabManage'),
-            pluginNav && pluginNav.querySelector('#wtTabSettings')
-        ];
         var helpSteps = [
             page.querySelector('#wtHelpStep1'),
             page.querySelector('#wtHelpStep2'),
@@ -1081,13 +1126,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (settingsSection) {
             settingsSection.style.display = isAdmin ? '' : 'none';
         }
-        adminTabs.forEach(function (tab) {
-            if (tab) {
-                tab.style.display = isAdmin ? '' : 'none';
-                tab.setAttribute('aria-hidden', isAdmin ? 'false' : 'true');
-                tab.tabIndex = isAdmin ? 0 : -1;
-            }
-        });
         if (roomsHeading) {
             roomsHeading.textContent = isAdmin ? '房间' : '我的房间';
         }
@@ -1105,7 +1143,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 step.textContent = helpText[index];
             }
         });
-        setPluginView(page, page._wtView || 'mine');
+        setNativeTabs(page);
+        setPluginView(page, isAdmin ? (page._wtRouteView || 'mine') : 'mine');
     }
 
     function setPluginView(page, view) {
@@ -1115,12 +1154,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         Array.prototype.slice.call(page.querySelectorAll('[data-wt-section]')).forEach(function (section) {
             var views = String(section.getAttribute('data-wt-section') || '').split(/\s+/);
             section.classList.toggle('wt-viewHidden', views.indexOf(view) < 0);
-        });
-        var pluginNav = page._wtPluginNav || page.querySelector('.wt-pluginNav');
-        Array.prototype.slice.call(pluginNav ? pluginNav.querySelectorAll('.wt-pluginNavLink') : []).forEach(function (tab) {
-            var active = tab.getAttribute('data-wt-view') === view;
-            if (active) tab.setAttribute('aria-current', 'page');
-            else tab.removeAttribute('aria-current');
         });
         document.addEventListener('click', function (event) {
             var target = event.target;
@@ -1132,82 +1165,35 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }, true);
     }
 
-    function mountPluginNav(page) {
-        var nav = page._wtPluginNav || page.querySelector('#wtPluginNav');
-        var slot = page.querySelector('#wtPluginNavSlot');
-        if (!nav || !slot) {
-            return;
-        }
-        page._wtPluginNav = nav;
-        page._wtPluginNavHome = slot;
+    function bindNativeTabGuard(page) {
+        if (page._wtNativeTabGuard) return;
         var doc = page.ownerDocument || document;
-        var host = doc.querySelector('.skinHeader .headerMiddle');
-        if (host) {
-            var skinHeader = host.closest ? host.closest('.skinHeader') : null;
-            var hostState = page._wtPluginNavHostState;
-            if (hostState && (hostState.headerMiddle !== host || hostState.skinHeader !== skinHeader)) {
-                clearPluginNavHostClasses(page);
-                hostState = null;
+        var guard = function (event) {
+            var target = event.target;
+            var link = target && target.closest ? target.closest('a') : null;
+            var nextView = link && routeViewFromUrl(link.getAttribute('href'));
+            if (!nextView || page._wtNativeTabNavigationBypass === true ||
+                page._wtView !== 'settings' || page._wtConfigDirty !== true || nextView === 'settings') {
+                return;
             }
-            if (!hostState) {
-                hostState = {
-                    headerMiddle: host,
-                    skinHeader: skinHeader,
-                    addedHeaderTopClass: !!(skinHeader && !skinHeader.classList.contains('headerTop-withSectionTabs')),
-                    addedHeaderMiddleClass: !host.classList.contains('headerMiddle-withSectionTabs')
-                };
-                page._wtPluginNavHostState = hostState;
-            }
-            if (nav.parentNode !== host) {
-                host.appendChild(nav);
-            }
-            if (hostState.addedHeaderMiddleClass) {
-                host.classList.add('headerMiddle-withSectionTabs');
-            }
-            if (hostState.skinHeader && hostState.addedHeaderTopClass) {
-                hostState.skinHeader.classList.add('headerTop-withSectionTabs');
-            }
-            nav.classList.add('wt-pluginNav--host');
-            page._wtPluginNavHost = host;
-            page._wtPluginNavMounted = true;
-            return;
-        }
-        if (nav.parentNode !== slot) {
-            slot.appendChild(nav);
-        }
-        nav.classList.remove('wt-pluginNav--host');
-        clearPluginNavHostClasses(page);
-        page._wtPluginNavHost = null;
-        page._wtPluginNavMounted = false;
+            event.preventDefault();
+            event.stopPropagation();
+            requestConfirmation(page, '放弃未保存设置？', '离开设置会丢弃尚未保存的修改。', function () {
+                applyPluginConfiguration(page, page._wtPluginConfiguration || {});
+                page._wtConfigDirty = false;
+                page._wtNativeTabNavigationBypass = true;
+                link.click();
+            }, link);
+        };
+        doc.addEventListener('click', guard, true);
+        page._wtNativeTabGuard = guard;
     }
 
-    function clearPluginNavHostClasses(page) {
-        var state = page._wtPluginNavHostState;
-        if (!state) {
-            return;
-        }
-        if (state.headerMiddle && state.addedHeaderMiddleClass) {
-            state.headerMiddle.classList.remove('headerMiddle-withSectionTabs');
-        }
-        if (state.skinHeader && state.addedHeaderTopClass) {
-            state.skinHeader.classList.remove('headerTop-withSectionTabs');
-        }
-        page._wtPluginNavHostState = null;
-    }
-
-    function unmountPluginNav(page) {
-        var nav = page._wtPluginNav || page.querySelector('#wtPluginNav');
-        var slot = page._wtPluginNavHome || page.querySelector('#wtPluginNavSlot');
-        if (!nav || !slot) {
-            return;
-        }
-        if (nav.parentNode !== slot) {
-            slot.appendChild(nav);
-        }
-        nav.classList.remove('wt-pluginNav--host');
-        clearPluginNavHostClasses(page);
-        page._wtPluginNavHost = null;
-        page._wtPluginNavMounted = false;
+    function unbindNativeTabGuard(page) {
+        if (!page._wtNativeTabGuard) return;
+        var doc = page.ownerDocument || document;
+        doc.removeEventListener('click', page._wtNativeTabGuard, true);
+        page._wtNativeTabGuard = null;
     }
 
     function clearChildren(element) {
@@ -2603,21 +2589,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         dom.addEventListener(page.querySelector('#wtSaveConfig'), 'click', function () {
             savePluginConfiguration(page);
         });
-        var pluginNav = page._wtPluginNav || page.querySelector('.wt-pluginNav');
-        Array.prototype.slice.call(pluginNav ? pluginNav.querySelectorAll('.wt-pluginNavLink') : []).forEach(function (tab) {
-            dom.addEventListener(tab, 'click', function (event) {
-                event.preventDefault();
-                var view = tab.getAttribute('data-wt-view') || 'mine';
-                if (page._wtView === 'settings' && view !== 'settings' && page._wtConfigDirty === true) {
-                    requestConfirmation(page, '放弃未保存设置？', '离开设置会丢弃尚未保存的修改。', function () {
-                        applyPluginConfiguration(page, page._wtPluginConfiguration || {});
-                        setPluginView(page, view);
-                    }, tab);
-                    return;
-                }
-                setPluginView(page, view);
-            });
-        });
         dom.addEventListener(page.querySelector('#wtCreate'), 'click', function () {
             createRoom(page);
         });
@@ -2664,8 +2635,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         BaseView.prototype.onResume.apply(this, arguments);
         var page = this.view;
         beginPageGeneration(page, false);
+        page._wtRouteView = currentRouteView(page);
+        page._wtView = page._wtRouteView;
         bindPageEvents(page);
-        mountPluginNav(page);
+        bindNativeTabGuard(page);
         setAdminVisibility(page, false);
         syncForm(page);
         loading.show();
@@ -2696,7 +2669,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     View.prototype.onPause = function () {
         var page = this.view;
         beginPageGeneration(page, true);
-        unmountPluginNav(page);
+        unbindNativeTabGuard(page);
         clearInterval(page._wtTimer);
         clearInvitationDraft(page);
         closeConfirmDialog(page, false);

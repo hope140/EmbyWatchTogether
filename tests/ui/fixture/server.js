@@ -77,6 +77,10 @@ function page() {
     .headerMiddle { min-width: 0; display: flex; align-items: center; justify-content: flex-end; }
     .headerMiddle.headerMiddle-withSectionTabs { justify-content: center; }
     .skinHeader.headerTop-withSectionTabs { grid-template-columns: minmax(160px, 1fr) minmax(0, auto) minmax(160px, 1fr); }
+    .tabs-viewmenubar { display: flex; max-width: min(100%, 42em); padding: 4px; border: 1px solid var(--line-background, rgba(38,49,58,.2)); border-radius: 999px; background: var(--button-background-color, rgba(128,128,128,.12)); overflow-x: auto; }
+    .tabs-viewmenubar-slider { display: flex; gap: 2px; }
+    .emby-tab-button { min-height: 44px; padding: 4px 19px; border: 0; border-radius: 999px; color: var(--theme-secondary-text-color, #667789); background: transparent; font: inherit; font-size: .92em; font-weight: 600; white-space: nowrap; }
+    .emby-tab-button-active { color: var(--theme-background-color, #fff); background: var(--theme-text-color, #1e2933); }
     @media (max-width: 40em) {
       .skinHeader, .skinHeader.headerTop-withSectionTabs { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 44px auto; padding: 0 8px 6px; }
       .headerLeft { grid-column: 1; grid-row: 1; font-size: 0; }
@@ -143,7 +147,49 @@ function page() {
       });
     };
     window.ApiClient = { getUrl: function (path) { return path; }, getJSON: get, fetch: function (o) { return send(o.url, o.type, o.data); }, getPluginConfiguration: function () { apiCalls.push({ method: 'GET', path: 'configuration' }); return (scenario === 'admin-manage' || scenario === 'admin-member' || scenario === 'save-fail') ? delay(JSON.parse(JSON.stringify(config))) : fail(403); }, updatePluginConfiguration: function (id, value) { apiCalls.push({ method: 'POST', path: 'configuration', body: value }); if (scenario === 'save-fail') return fail(500); config = JSON.parse(JSON.stringify(value)); return delay(JSON.parse(JSON.stringify(config))); } };
-    window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }); };
+    window.Dashboard = { getConfigurationPageUrl: function (name) { return '#!/configurationpage?name=' + encodeURIComponent(name); } };
+    function routeView(href) {
+      var match = String(href || '').match(/name=([^&]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+    function navigate(href) {
+      var route = routeView(href);
+      history.replaceState({}, '', location.pathname + location.search + href);
+      if (window.__wtFixture.view) {
+        window.__wtFixture.view.onPause();
+        window.__wtFixture.view.onResume();
+      }
+      window.__wtFixture.route = route;
+    }
+    var mainTabsManager = {
+      setTabs: function (page, selectedIndex, getTabs) {
+        var middle = document.querySelector('.skinHeader .headerMiddle');
+        if (!middle) return;
+        middle.innerHTML = '';
+        var menubar = document.createElement('div');
+        menubar.className = 'tabs-viewmenubar tabs-viewmenubar-backgroundcontainer emby-tabs';
+        var slider = document.createElement('div');
+        slider.className = 'tabs-viewmenubar-slider emby-tabs-slider';
+        (getTabs() || []).forEach(function (tab, index) {
+          var link = document.createElement('a');
+          var viewName = routeView(tab.href);
+          link.id = viewName.indexOf('Manage') >= 0 ? 'wtTabManage' : viewName.indexOf('Settings') >= 0 ? 'wtTabSettings' : 'wtTabMine';
+          link.setAttribute('is', 'emby-linkbutton');
+          link.className = 'emby-button emby-tab-button main-tab-button' + (index === selectedIndex ? ' emby-tab-button-active' : '');
+          link.href = tab.href;
+          link.textContent = tab.name;
+          link.setAttribute('aria-current', index === selectedIndex ? 'page' : 'false');
+          link.addEventListener('click', function (event) {
+            event.preventDefault();
+            navigate(tab.href);
+          });
+          slider.appendChild(link);
+        });
+        menubar.appendChild(slider);
+        middle.appendChild(menubar);
+      }
+    };
+    window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }, {}, {}, {}, {}, mainTabsManager); };
     var hostHeader = hasHostHeader ? '<header class="skinHeader" data-mock-host="true"><div class="headerLeft">emby</div><div class="headerMiddle headerSection sectionTabs"></div><div class="headerRight">mock host</div></header>' : '';
     document.querySelector('.fixture-host').innerHTML = hostHeader + '<div class="fixture-main"><div class="fixture-label" data-mock="true">模拟宿主 / mock Emby host + API · 不连接真实 Emby</div>' + sourceHtml + '</div>';
     var page = document.querySelector('.wt-page');

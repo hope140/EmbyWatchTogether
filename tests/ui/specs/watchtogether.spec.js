@@ -31,19 +31,17 @@ function contrastRatio(foreground, background) {
   return (light + 0.05) / (dark + 0.05);
 }
 
-test('Emby 宿主顶栏承载胶囊分页并保持原页面槽位为空', async ({ page }) => {
+test('Emby 原生 mainTabsManager 生成宿主分页并保持页面无自绘导航', async ({ page }) => {
   await open(page, 'active', 'light', 1440, 1000);
-  const host = page.locator('.skinHeader');
   const middle = page.locator('.skinHeader .headerMiddle');
-  await expect(host).toHaveClass(/headerTop-withSectionTabs/);
-  await expect(middle).toHaveClass(/headerMiddle-withSectionTabs/);
-  await expect(middle.locator('#wtPluginNav')).toHaveCount(1);
-  await expect(page.locator('#wtPluginNavSlot #wtPluginNav')).toHaveCount(0);
-  await expect(page.locator('#wtPluginNav')).toHaveClass(/wt-pluginNav--host/);
+  await expect(middle.locator('.tabs-viewmenubar')).toHaveCount(1);
+  await expect(middle.locator('.emby-tab-button')).toHaveCount(1);
+  await expect(page.locator('#wtPluginNav, #wtPluginNavSlot')).toHaveCount(0);
   await expect(page.locator('#wtTabMine')).toHaveAttribute('aria-current', 'page');
-  const navStyle = await page.locator('#wtPluginNav').evaluate(el => {
+  await expect(page.locator('#wtTabMine')).toHaveClass(/emby-tab-button-active/);
+  const navStyle = await page.locator('.tabs-viewmenubar').evaluate(el => {
     const style = getComputedStyle(el);
-    const active = getComputedStyle(el.querySelector('[aria-current="page"]'));
+    const active = getComputedStyle(el.querySelector('.emby-tab-button-active'));
     return { background: style.backgroundColor, activeBackground: active.backgroundColor, radius: style.borderRadius };
   });
   expect(navStyle.background).not.toBe('rgba(0, 0, 0, 0)');
@@ -73,29 +71,38 @@ test('管理员可在顶栏切换 mine、manage、settings，普通用户隐藏�
   for (const id of ['wtTabManage', 'wtTabSettings', 'wtTabMine']) {
     await page.locator(`#${id}`).click();
     await expect(page.locator(`#${id}`)).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator(`#${id}`)).toHaveClass(/emby-tab-button-active/);
+    await expect.poll(() => page.evaluate(() => location.hash)).toContain(id === 'wtTabManage' ? 'WatchTogetherUiManageV2' : id === 'wtTabSettings' ? 'WatchTogetherUiSettingsV2' : 'WatchTogetherUiMineV2');
   }
   await open(page, 'active', 'light');
   await expect(page.locator('#wtTabManage')).toBeHidden();
   await expect(page.locator('#wtTabSettings')).toBeHidden();
 });
 
-test('反复进入离开页面只保留一份分页并清理宿主状态，缺少宿主时回退到页面槽位', async ({ page }) => {
+test('普通用户直达管理员 route 仍只获得我的房间', async ({ page }) => {
+  await page.goto('/?scenario=active&theme=light#!/configurationpage?name=WatchTogetherUiManageV2');
+  await expect(page.locator('.wt-page')).toBeVisible();
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('#wtAdminSection')).toBeHidden();
+  await expect(page.locator('#wtSettingsSection')).toBeHidden();
+  await expect(page.locator('.headerMiddle .emby-tab-button')).toHaveCount(1);
+  await expect(page.locator('#wtTabMine')).toBeVisible();
+});
+
+test('反复进入离开页面只保留一份原生分页，缺少宿主容器时不创建备用导航', async ({ page }) => {
   await open(page, 'active', 'light', 1024, 900);
   for (let index = 0; index < 10; index += 1) {
     await page.evaluate(() => window.__wtFixture.view.onPause());
     await page.evaluate(() => window.__wtFixture.view.onResume());
   }
-  await expect.poll(() => page.locator('#wtPluginNav').count()).toBe(1);
-  await expect(page.locator('.headerMiddle #wtPluginNav')).toHaveCount(1);
+  await expect.poll(() => page.locator('.headerMiddle .tabs-viewmenubar').count()).toBe(1);
+  await expect(page.locator('.headerMiddle .emby-tab-button')).toHaveCount(1);
   await page.evaluate(() => window.__wtFixture.view.onPause());
-  await expect(page.locator('#wtPluginNavSlot #wtPluginNav')).toHaveCount(1);
-  await expect(page.locator('.headerMiddle #wtPluginNav')).toHaveCount(0);
-  await expect(page.locator('.skinHeader')).not.toHaveClass(/headerTop-withSectionTabs/);
-  await expect(page.locator('.headerMiddle')).not.toHaveClass(/headerMiddle-withSectionTabs/);
+  await expect(page.locator('#wtPluginNav, #wtPluginNavSlot')).toHaveCount(0);
 
   await open(page, 'active', 'light', 1024, 900, 'missing');
-  await expect(page.locator('#wtPluginNavSlot #wtPluginNav')).toHaveCount(1);
-  await expect(page.locator('#wtPluginNav')).not.toHaveClass(/wt-pluginNav--host/);
+  await expect(page.locator('.headerMiddle')).toHaveCount(0);
+  await expect(page.locator('#wtPluginNav, #wtPluginNavSlot')).toHaveCount(0);
 });
 
 test('房间桌面端媒体在左、成员和按钮在右，手机端按媒体成员按钮排列', async ({ page }) => {
@@ -315,7 +322,7 @@ for (const width of [320, 360, 390, 430, 768, 1024, 1440, 1920]) {
     const metrics = await page.evaluate(() => ({
       width: document.documentElement.scrollWidth,
       client: document.documentElement.clientWidth,
-      controls: Array.from(document.querySelectorAll('button, input:not([type="checkbox"]), select, a.wt-pluginNavLink, label.checkboxContainer')).map(x => Math.min(x.getBoundingClientRect().width, x.getBoundingClientRect().height)).filter(Boolean),
+      controls: Array.from(document.querySelectorAll('button, input:not([type="checkbox"]), select, .emby-tab-button, label.checkboxContainer')).map(x => Math.min(x.getBoundingClientRect().width, x.getBoundingClientRect().height)).filter(Boolean),
       headerBottom: document.querySelector('.skinHeader').getBoundingClientRect().bottom,
       pageTop: document.querySelector('.wt-page').getBoundingClientRect().top
     }));
