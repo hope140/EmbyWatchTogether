@@ -47,6 +47,8 @@ function stateForScenario(scenario) {
   if (scenario === 'empty') return [];
   if (scenario === 'admin-manage') return [room({ RoomId: 'managed-1', Name: '管理员长列表房间', CurrentUserIsParticipant: false, CurrentUserJoined: false, CanEnd: false, IsAdmin: true })];
   if (scenario === 'admin-member') return [room({ RoomId: 'admin-member-1', Name: '管理员成员房间', IsAdmin: true })];
+  if (scenario === 'waiting') return [room({ RoomId: 'waiting-1', Name: '等待播放房间', State: 'Waiting', StatusReason: 'waiting_for_playback', _wtState: { Sessions: [] } })];
+  if (scenario === 'state-fail') return [room({ RoomId: 'state-fail-1', Name: '状态读取失败房间' })];
   if (scenario === 'long') return [room({ Name: '这是一个很长很长很长的房间名称用于窄屏测试', Participants: [
     { Id: 'user-a', Name: '这是一个非常长的用户名称 A', Joined: true, IsPrimary: true },
     { Id: 'user-c', Name: '这是一个非常长的用户名称 B', Joined: true, IsPrimary: false }
@@ -98,7 +100,7 @@ function page() {
     var sourceHtml = ${JSON.stringify(html)}; var sourceJs = ${JSON.stringify(javascript)};
     var diagnosticData = ${JSON.stringify(diagnostic())};
     var apiCalls = []; var config = { PauseOtherOnPlaybackStop: true, NotifyOtherOnPlaybackStop: true, NotifyOnSyncActions: true, UpdateChannel: 'stable' };
-    var rooms = (scenario === 'empty' || scenario === 'accept-fail' || scenario === 'accept-network' ? [] : scenario === 'admin-manage' ? ${JSON.stringify(stateForScenario('admin-manage'))} : scenario === 'admin-member' ? ${JSON.stringify(stateForScenario('admin-member'))} : scenario === 'long' ? ${JSON.stringify(stateForScenario('long'))} : ${JSON.stringify(stateForScenario('active'))});
+    var rooms = (scenario === 'empty' || scenario === 'accept-fail' || scenario === 'accept-network' ? [] : scenario === 'admin-manage' ? ${JSON.stringify(stateForScenario('admin-manage'))} : scenario === 'admin-member' ? ${JSON.stringify(stateForScenario('admin-member'))} : scenario === 'waiting' ? ${JSON.stringify(stateForScenario('waiting'))} : scenario === 'state-fail' ? ${JSON.stringify(stateForScenario('state-fail'))} : scenario === 'long' ? ${JSON.stringify(stateForScenario('long'))} : ${JSON.stringify(stateForScenario('active'))});
     var invitations = [];
     function delay(value) { return new Promise(function (resolve) { setTimeout(function () { resolve(value); }, scenario === 'late' ? 900 : 0); }); }
     function fail(status) { var e = new Error('mock'); e.status = status; return Promise.reject(e); }
@@ -107,6 +109,7 @@ function page() {
       if (path === 'WatchTogether/Users') return (scenario === 'admin-manage' || scenario === 'admin-member' || scenario === 'save-fail') ? delay(${JSON.stringify(users)}) : fail(403);
       if (path === 'WatchTogether/Rooms') return delay(rooms);
       if (path.indexOf('/State') >= 0) {
+        if (scenario === 'state-fail') return fail(503);
         var stateRoom = rooms.filter(function (candidate) { return path.indexOf(candidate.RoomId) >= 0; })[0];
         return delay(stateRoom && stateRoom._wtState ? stateRoom._wtState : { Sessions: [] });
       }

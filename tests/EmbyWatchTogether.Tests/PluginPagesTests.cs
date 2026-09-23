@@ -192,6 +192,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(">1. 创建房间</h2>", html);
             Assert.DoesNotContain("'2. 房间'", javascript);
             Assert.Contains("尚未检测到播放", javascript);
+            Assert.Contains("mediaStatusLabel", javascript);
+            Assert.Contains("播放状态暂无法确认", javascript);
+            Assert.Contains("已检测到播放", javascript);
             Assert.Contains("wt-mediaCopy", javascript);
             Assert.Contains("wt-roomOverview .wt-roomMediaPlaceholder", html);
             Assert.Contains("我的房间", javascript);

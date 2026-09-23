@@ -69,7 +69,7 @@
 
 `tests/ui` fixture 继续读取生产 `watchtogether.html` / `watchtogether.js`，并加入最小 mock Emby 宿主 DOM：`.skinHeader` 下的 `.headerLeft`、空的 `.headerMiddle.headerSection.sectionTabs` 和 `.headerRight`。mock 顶栏使用与已核验宿主布局一致的三列桌面布局及小屏第二行分页布局，截图带有 `mock Emby host` 标记；`host=missing` 覆盖页面槽位回退。
 
-- Playwright Chromium 测试 26/26 PASS，包含顶栏胶囊导航挂载、原页面槽位为空、admin mine/manage/settings 与 `aria-current`、普通用户隐藏管理入口、浅色/深色/HSL-only 当前项 4.5:1 对比度、10 次 pause/resume 单实例、离页清理宿主 class、宿主缺失回退、桌面媒体左/成员纵向行和按钮右、手机媒体→成员→按钮顺序、管理员成员个人动作与管理动作收纳、已有房间收起帮助、无房间保留邀请和帮助。
+- Playwright Chromium 测试 27/27 PASS，包含顶栏胶囊导航挂载、原页面槽位为空、admin mine/manage/settings 与 `aria-current`、普通用户隐藏管理入口、浅色/深色/HSL-only 当前项 4.5:1 对比度、10 次 pause/resume 单实例、离页清理宿主 class、宿主缺失回退、桌面媒体左/成员纵向行和按钮右、手机媒体→成员→按钮顺序、管理员成员个人动作与管理动作收纳、已有房间收起帮助、无房间保留邀请和帮助，以及 active / waiting / State 失败三类媒体状态与成员行一致性。
 - 320、360、390、430、768、1024、1440、1920px 均无页面横向溢出、头部遮挡或可见控件小于 44px；浅色、深色和仅 HSL 变量仍通过。
 - 浏览器实证发现并修复三项生产 UI 缺陷：房间卡 `width:100%` 与 padding 叠加导致 768/1024px 横向溢出；分页导航移入 Emby header 后脱离 `.wt-page` 变量作用域，导致胶囊链接触控高度降至约 28px；active capsule 只使用 HSL fallback，深色宿主完整文字变量下出现深底深字。修复为房间卡 `box-sizing:border-box`，分页组件自身声明 44px 控件高度，active 背景优先使用宿主完整文字色；成员区改为右栏两条纵向分隔行，避免桌面双列小卡挤压。
 - S7 截图位于忽略目录 `tests/ui/test-results/ui-vnext/`，包含 desktop light/dark active room、desktop light admin-member（三项顶栏分页、我的房间当前项）、390px mobile active room 和 320px long text；均为真实生产 HTML/JS 的 mock 渲染。
@@ -79,7 +79,7 @@
 - 当前房间媒体区使用居中的中性胶片图标，并按“尚未检测到播放 / 媒体信息待权限验证”上下排版；该区仍是只读占位，State 无媒体时不显示可点播放入口。
 - 当前房间列表移除“当前房间”三级分组标题，保留页面“我的房间”、房间名和状态；刷新按钮降低强调。无房间场景继续显示邀请入口和使用说明。
 - “暂离房间”改为中性描边，结束/删除房间继续使用危险色；参与者主操作改为“请求重新对齐”，确认、accepted、busy 和等待播放器确认反馈语义保持一致。
-- 最终浏览器测试仍为 26/26 PASS，截图已重新生成，新增媒体占位、标题层级和中性暂离按钮状态。
+- 最终浏览器测试为 27/27 PASS，新增 active / waiting / State 失败三类 State 会话语义断言；截图已重新生成，媒体状态与成员行保持一致。
 
 仍待真实 Emby 收口的视觉差异：mock 顶栏无法复现真实 Emby 侧栏、账号菜单、宿主字体和缓存后的 header 尺寸；媒体名称、封面和头像继续按权限门禁使用占位；真实播放状态、双账号设备信息和移动端软键盘布局尚未验收。
 

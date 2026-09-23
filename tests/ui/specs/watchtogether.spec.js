@@ -172,11 +172,25 @@ test('普通成员当前房间显示真实结构与媒体占位', async ({ page 
   await expect(page.locator('.wt-roomCard')).toContainText('周末一起看');
   await expect(page.locator('.wt-roomState')).toContainText('同步中');
   await expect(page.locator('.wt-roomGroup[data-wt-room-group="current"] .wt-roomGroupHeading')).toHaveCount(0);
-  await expect(page.locator('.wt-roomMediaPlaceholder')).toContainText('尚未检测到播放');
+  await expect(page.locator('.wt-roomMediaPlaceholder')).toContainText('已检测到播放');
   await expect(page.locator('.wt-roomMediaPlaceholder')).toContainText('媒体信息待权限验证');
+  await expect(page.locator('.wt-roomParticipant')).toHaveCount(2);
+  await expect(page.locator('.wt-roomParticipant').first()).toContainText('播放中');
   await expect(page.locator('.wt-roomMediaPlaceholder button')).toHaveCount(0);
   await expect(page.locator('#wtInvitationSection')).toBeHidden();
   await page.screenshot({ path: path.join(artifactDir, 'desktop-light-active-room.png'), fullPage: true });
+});
+
+test('媒体状态只依据匹配参与者的 State 会话，等待和 State 失败不与成员行矛盾', async ({ page }) => {
+  await open(page, 'waiting', 'light', 1024, 900);
+  await expect(page.locator('.wt-roomMediaPlaceholder')).toContainText('尚未检测到播放');
+  await expect(page.locator('.wt-roomMediaPlaceholder')).toContainText('媒体信息待权限验证');
+  await expect(page.locator('.wt-roomParticipant').first()).toContainText('未检测到播放');
+
+  await open(page, 'state-fail', 'dark', 1024, 900);
+  await expect(page.locator('.wt-roomMediaPlaceholder')).toContainText('播放状态暂无法确认');
+  await expect(page.locator('.wt-roomParticipant').first()).toContainText('播放状态暂无法确认');
+  await expect(page.locator('.wt-roomMediaPlaceholder')).not.toContainText('已检测到播放');
 });
 
 test('管理员可查看非成员管理列表，并可在 mine/manage/settings 导航', async ({ page }) => {

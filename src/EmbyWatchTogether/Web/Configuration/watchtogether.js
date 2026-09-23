@@ -1414,11 +1414,32 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return room && room._wtState && typeof room._wtState === 'object' ? room._wtState : null;
     }
 
-    function sessionStatusLabel(session) {
+    function sessionStatusLabel(session, stateUnknown) {
+        if (stateUnknown === true) {
+            return '播放状态暂无法确认';
+        }
         if (!session || session.Online !== true) {
             return '未检测到播放';
         }
         return session.IsPaused === true ? '已暂停' : '播放中';
+    }
+
+    function mediaStatusLabel(room) {
+        var state = roomState(room);
+        if (!state || room._wtStateStale === true) {
+            return '播放状态暂无法确认';
+        }
+        var participantIds = Array.isArray(room.Participants)
+            ? room.Participants.map(function (participant) {
+                return participant && participant.Id ? String(participant.Id).toLowerCase() : '';
+            }).filter(function (id) { return !!id; })
+            : [];
+        var sessions = Array.isArray(state.Sessions) ? state.Sessions : [];
+        var detected = sessions.some(function (session) {
+            return session && session.Online === true && session.UserId &&
+                participantIds.indexOf(String(session.UserId).toLowerCase()) >= 0;
+        });
+        return detected ? '已检测到播放' : '尚未检测到播放';
     }
 
     function appendRoomStateDetails(card, room) {
@@ -1450,7 +1471,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         mediaCopy.className = 'wt-mediaCopy';
         var mediaStatus = document.createElement('strong');
         mediaStatus.className = 'wt-mediaStatus';
-        mediaStatus.textContent = '尚未检测到播放';
+        mediaStatus.textContent = mediaStatusLabel(room);
         var mediaLabel = document.createElement('span');
         mediaLabel.className = 'fieldDescription wt-mediaHint';
         mediaLabel.textContent = '媒体信息待权限验证';
@@ -1477,7 +1498,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var status = document.createElement('span');
             status.className = 'fieldDescription wt-roomParticipantStatus';
             status.textContent = (participant.Joined === true ? '已加入同步' : '已暂离同步') +
-                ' · ' + sessionStatusLabel(session);
+                ' · ' + sessionStatusLabel(session, !state || room._wtStateStale === true);
             row.appendChild(identity);
             row.appendChild(status);
             participants.appendChild(row);
@@ -1506,7 +1527,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
         if (details.mediaStatus) {
-            details.mediaStatus.textContent = '尚未检测到播放';
+            details.mediaStatus.textContent = mediaStatusLabel(room);
         }
         if (details.mediaLabel) {
             details.mediaLabel.textContent = '媒体信息待权限验证';
@@ -1531,7 +1552,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var status = document.createElement('span');
             status.className = 'fieldDescription wt-roomParticipantStatus';
             status.textContent = (participant.Joined === true ? '已加入同步' : '已暂离同步') +
-                ' · ' + sessionStatusLabel(session);
+                ' · ' + sessionStatusLabel(session, !state || room._wtStateStale === true);
             row.appendChild(identity);
             row.appendChild(status);
             details.participants.appendChild(row);
