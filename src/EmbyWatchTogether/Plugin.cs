@@ -124,7 +124,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Each route has its own page key so Emby Web can resolve
                     // the tab URL through the normal configuration-page router.
-                    Name = "WatchTogetherUiMineV2",
+                    Name = "WatchTogetherUiMineV3",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
@@ -134,7 +134,7 @@ namespace Emby.Plugins.WatchTogether
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherUiManageV2",
+                    Name = "WatchTogetherUiManageV3",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
@@ -144,7 +144,7 @@ namespace Emby.Plugins.WatchTogether
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherUiSettingsV2",
+                    Name = "WatchTogetherUiSettingsV3",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
@@ -156,7 +156,7 @@ namespace Emby.Plugins.WatchTogether
                 // controller module must be declared as its own page entry.
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherUiNativeTabsV2.js",
+                    Name = "WatchTogetherUiNativeTabsV3.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };

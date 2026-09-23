@@ -72,7 +72,7 @@ test('管理员可在顶栏切换 mine、manage、settings，普通用户隐藏�
     await page.locator(`#${id}`).click();
     await expect(page.locator(`#${id}`)).toHaveAttribute('aria-current', 'page');
     await expect(page.locator(`#${id}`)).toHaveClass(/emby-tab-button-active/);
-    await expect.poll(() => page.evaluate(() => location.hash)).toContain(id === 'wtTabManage' ? 'WatchTogetherUiManageV2' : id === 'wtTabSettings' ? 'WatchTogetherUiSettingsV2' : 'WatchTogetherUiMineV2');
+    await expect.poll(() => page.evaluate(() => location.hash)).toContain(id === 'wtTabManage' ? 'WatchTogetherUiManageV3' : id === 'wtTabSettings' ? 'WatchTogetherUiSettingsV3' : 'WatchTogetherUiMineV3');
   }
   await open(page, 'active', 'light');
   await expect(page.locator('#wtTabManage')).toBeHidden();
@@ -80,7 +80,7 @@ test('管理员可在顶栏切换 mine、manage、settings，普通用户隐藏�
 });
 
 test('普通用户直达管理员 route 仍只获得我的房间', async ({ page }) => {
-  await page.goto('/?scenario=active&theme=light#!/configurationpage?name=WatchTogetherUiManageV2');
+  await page.goto('/?scenario=active&theme=light#!/configurationpage?name=WatchTogetherUiManageV3');
   await expect(page.locator('.wt-page')).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('#wtAdminSection')).toBeHidden();

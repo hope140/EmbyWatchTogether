@@ -1062,9 +1062,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        mine: 'WatchTogetherUiMineV2',
-        manage: 'WatchTogetherUiManageV2',
-        settings: 'WatchTogetherUiSettingsV2'
+        mine: 'WatchTogetherUiMineV3',
+        manage: 'WatchTogetherUiManageV3',
+        settings: 'WatchTogetherUiSettingsV3'
     };
 
     function routeViewFromUrl(url) {

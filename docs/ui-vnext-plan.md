@@ -13,7 +13,7 @@
 ## 当前实现事实
 
 - UI 是嵌入 DLL 的单个 HTML 与 AMD JavaScript 页面，不引入生产 SPA、Node 服务或额外部署目录。
-- 页面入口使用三个新的 route-backed 缓存键 `WatchTogetherUiMineV2`、`WatchTogetherUiManageV2`、`WatchTogetherUiSettingsV2`，共用嵌入 HTML；仅“我的房间”进入用户菜单。共享 controller 使用 `WatchTogetherUiNativeTabsV2.js`，HTML 与 controller 键必须联动。
+- 页面入口使用三个 route-backed 缓存键 `WatchTogetherUiMineV3`、`WatchTogetherUiManageV3`、`WatchTogetherUiSettingsV3`，共用嵌入 HTML；仅“我的房间”进入用户菜单。共享 controller 使用 `WatchTogetherUiNativeTabsV3.js`，HTML 与 controller 键必须联动。
 - 插件分页由 Emby `mainTabsManager.setTabs` 与 `Dashboard.getConfigurationPageUrl` 提供，使用宿主原生 `emby-tabs` 结构；业务页面不创建自绘导航，也不修改 `.skinHeader` class。管理员路由在权限确认后显示，非管理员只能保留“我的房间”。
 - `/Rooms` 已返回 `IsAdmin`、`CurrentUserJoined` 和 `CanEnd`，但 `CurrentUserJoined=false` 无法区分暂离成员与管理员非成员。
 - 当前页面不读取 `/Rooms/{Id}/State`，因此无法可靠展示逐成员播放状态和只读进度。
