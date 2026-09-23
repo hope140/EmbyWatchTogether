@@ -33,7 +33,7 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.5.0.0`，当前测试版为 `1.6.0.2`，对应 beta 预发布候选 tag `v1.6.0.2`；本 beta 用于验证 Phase D Media Handoff 在主用户换集会话延迟场景下的有界恢复。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.5.0.0`，当前测试版为 `1.6.0.3`，对应 beta 预发布候选 tag `v1.6.0.3`；`v1.6.0.2` 是已发布的历史 beta，资产本身齐全且不可变；本修订用于修正 beta 更新检查的历史 Release 资产选择，不声称已完成本修正的真实 Emby UI 验收。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
@@ -77,7 +77,7 @@ ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步�
 - `EmbyWatchTogether.release.manifest`
 - `EmbyWatchTogether.release.manifest.sig`
 
-stable 检查入口使用这三个资产的 `releases/latest/download/<asset>` 地址，不调用 GitHub REST API，因此只获取正式 stable Release；管理员选择 beta 后，更新器通过 GitHub Releases API 在非 draft stable 与 prerelease 中选择最高规范版本，再使用对应规范数字 tag 的固定资产地址。两种通道都不能把 API 返回的下载地址直接作为安装来源，且都必须通过同一套签名校验；不能将静态测试描述为真实客户端验收。发布清单必须是严格 UTF-8、LF 换行的 canonical 字段序列（`schema`、`keyId`、`tag`、`version`、`assetName`、`size`、`sha256`）；签名使用 RSA PKCS#1 v1.5 + SHA-256。插件会校验 `keyId` 是否受信任，再以流式 SHA-256、文件大小、程序集名和程序集版本验证 DLL。只有清单验证通过后，安装器的 `sourceUrl` 才使用清单 `tag` 对应的精确地址：`https://github.com/hope140/EmbyWatchTogether/releases/download/<tag>/Emby.Plugins.WatchTogether.dll`；GitHub 资产下载允许官方 CDN 重定向，MD5 仅作为 Emby installer 的二次校验，不是发布信任根。
+stable 检查入口使用这三个资产的 `releases/latest/download/<asset>` 地址，不调用 GitHub REST API，因此只获取正式 stable Release；管理员选择 beta 后，更新器通过 GitHub Releases API 在非 draft stable 与 prerelease 中先选择最高规范版本，再只验证该版本的固定资产，随后使用对应规范数字 tag 的固定资产地址。历史低版本资产缺失不会阻断最高版本选择，最高版本自身缺少资产仍 fail closed。两种通道都不能把 API 返回的下载地址直接作为安装来源，且都必须通过同一套签名校验；不能将静态测试描述为真实客户端验收。发布清单必须是严格 UTF-8、LF 换行的 canonical 字段序列（`schema`、`keyId`、`tag`、`version`、`assetName`、`size`、`sha256`）；签名使用 RSA PKCS#1 v1.5 + SHA-256。插件会校验 `keyId` 是否受信任，再以流式 SHA-256、文件大小、程序集名和程序集版本验证 DLL。只有清单验证通过后，安装器的 `sourceUrl` 才使用清单 `tag` 对应的精确地址：`https://github.com/hope140/EmbyWatchTogether/releases/download/<tag>/Emby.Plugins.WatchTogether.dll`；GitHub 资产下载允许官方 CDN 重定向，MD5 仅作为 Emby installer 的二次校验，不是发布信任根。
 
 安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示；重启前同一版本不会重复安装。正式版 Release 必须包含固定的四个资产：DLL、`EmbyWatchTogether.zip`、发布清单和 detached signature，并且 tag 与三项程序集版本一致。
 
