@@ -1795,6 +1795,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 setAdminVisibility(page, false);
                 setFormHint(page, '管理员功能已隐藏。', false);
             } else {
+                setAdminVisibility(page, false);
                 setFormHint(page, '用户列表暂时无法加载，请稍后重试。', true);
                 setStatus(page, '用户列表加载失败：' + errorMessage(err), true);
             }

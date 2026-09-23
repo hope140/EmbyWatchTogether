@@ -89,6 +89,16 @@ test('普通用户直达管理员 route 仍只获得我的房间', async ({ page
   await expect(page.locator('#wtTabMine')).toBeVisible();
 });
 
+test('Users 权限请求出现其他错误时安全回退为一个原生 tab并隐藏管理员内容', async ({ page }) => {
+  await page.goto('/?scenario=users-fail&theme=light');
+  await expect(page.locator('.wt-page')).toBeVisible();
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.headerMiddle .emby-tab-button')).toHaveCount(1);
+  await expect(page.locator('#wtTabMine')).toBeVisible();
+  await expect(page.locator('#wtAdminSection')).toBeHidden();
+  await expect(page.locator('#wtSettingsSection')).toBeHidden();
+});
+
 test('反复进入离开页面只保留一份原生分页，缺少宿主容器时不创建备用导航', async ({ page }) => {
   await open(page, 'active', 'light', 1024, 900);
   for (let index = 0; index < 10; index += 1) {

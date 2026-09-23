@@ -115,7 +115,7 @@ function page() {
     function fail(status) { var e = new Error('mock'); e.status = status; return Promise.reject(e); }
     function get(path) {
       apiCalls.push({ method: 'GET', path: path });
-      if (path === 'WatchTogether/Users') return (scenario === 'admin-manage' || scenario === 'admin-member' || scenario === 'save-fail') ? delay(${JSON.stringify(users)}) : fail(403);
+      if (path === 'WatchTogether/Users') return (scenario === 'admin-manage' || scenario === 'admin-member' || scenario === 'save-fail') ? delay(${JSON.stringify(users)}) : scenario === 'users-fail' ? fail(500) : fail(403);
       if (path === 'WatchTogether/Rooms') return delay(rooms);
       if (path.indexOf('/State') >= 0) {
         if (scenario === 'state-fail') return fail(503);
