@@ -101,6 +101,13 @@ S9 的 mock Playwright fixture 验证 `tabs-viewmenubar`、`emby-tabs-slider`、
 - 附件：`SHA256.txt`、`PROVENANCE.txt`。
 - 禁止：manifest、signature、tag、Release、上传、部署、Emby 重启。
 
+### S10 Emby 原生主体组件收口（2026-09-23）
+
+- 主体内容宽度收敛到约 727px；表单继续使用宿主 `emby-input` / `emby-select`，设置三项改为 `emby-toggle-label`、`emby-toggle`、`toggleSwitch` 结构，保存按钮保留 `raised button-submit block` 语义。
+- 房间与邀请码列表使用 `paperList visualCardBox vertical-list` 和 `listItem listItem-border` 语义；删除创建、保存、动作和诊断按钮的自绘背景、边框、圆角与 hover 覆写，保留媒体左右布局、移动端单列和必要状态布局。
+- Playwright Chromium 测试 30/30 PASS；覆盖原生组件 DOM 证据、浅色/深色/HSL-only、320–1920px 无横向溢出和 44px 触达；`node --check` 与 `git diff --check` PASS。
+- 未执行：真实 Emby 宿主 CSS 计算样式、真实部署和双账号播放同步验收。
+
 ## Knowledge Review
 
 新增稳定约束：插件自有 fixed overlay 必须显式声明 `[hidden] { display: none !important; }`，不能只依赖宿主/UA 默认样式；RoomId keyed 卡片必须保留实际诊断节点对象而不是把 DOM 节点误当作 panel 记录。两项均由真实 Chromium 复现并已加入浏览器门禁。无需更新 `architecture.md` 或新增 ADR。

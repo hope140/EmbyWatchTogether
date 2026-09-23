@@ -809,7 +809,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         container.appendChild(title);
         list.forEach(function (invitation) {
             var item = document.createElement('div');
-            item.className = 'wt-roomMeta';
+            item.className = 'listItem listItem-border wt-invitationItem';
             var name = document.createElement('div');
             name.textContent = invitation.Name || '未命名房间';
             var expiry = document.createElement('div');
@@ -2069,7 +2069,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     section.appendChild(heading);
                 }
                 var list = document.createElement('div');
-                list.className = 'wt-roomList wt-roomGroupList';
+                list.className = 'paperList visualCardBox vertical-list wt-roomList wt-roomGroupList';
                 section.appendChild(list);
                 container.appendChild(section);
             }
@@ -2109,7 +2109,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 return;
             }
             var card = document.createElement('article');
-            card.className = 'wt-roomCard';
+            card.className = 'listItem listItem-border wt-roomCard';
             card._wtRoomId = room.RoomId;
 
             var header = document.createElement('div');

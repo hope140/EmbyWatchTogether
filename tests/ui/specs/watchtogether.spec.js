@@ -290,7 +290,9 @@ test('设置 dirty 保存失败后保留修改，放弃导航恢复原值', asyn
   await open(page, 'save-fail', 'light', 390, 1000);
   await page.locator('#wtTabSettings').click();
   const checkbox = page.locator('#wtPauseOtherOnPlaybackStop');
-  await checkbox.uncheck();
+  await expect(checkbox).toBeEnabled();
+  await page.locator('label.emby-toggle-label:has(#wtPauseOtherOnPlaybackStop)').click();
+  await expect(checkbox).not.toBeChecked();
   await expect(page.locator('#wtSaveConfig')).toBeEnabled();
   await page.locator('#wtSaveConfig').click();
   await expect(page.locator('#wtConfigStatus')).toContainText('配置保存失败');
@@ -304,10 +306,32 @@ test('设置 dirty 保存失败后保留修改，放弃导航恢复原值', asyn
   await page.screenshot({ path: path.join(artifactDir, 'mobile-settings-390.png'), fullPage: true });
 });
 
+test('主体复用 Emby 原生表单、开关和 paperList 语义', async ({ page }) => {
+  await open(page, 'admin-member', 'light', 1024, 900);
+  await page.locator('#wtTabSettings').click();
+  await expect(page.locator('input[is="emby-toggle"]')).toHaveCount(3);
+  await expect(page.locator('label.emby-toggle-label .toggleSwitch')).toHaveCount(3);
+  await expect(page.locator('input[is="emby-checkbox"]')).toHaveCount(0);
+  await expect(page.locator('#wtUpdateChannel[is="emby-select"]')).toHaveCount(1);
+  await expect(page.locator('#wtSaveConfig[is="emby-button"]')).toHaveClass(/raised/);
+  await page.locator('#wtTabMine').click();
+  await expect(page.locator('#wtRooms .wt-roomGroup:not([hidden]) .wt-roomList.paperList.visualCardBox.vertical-list')).toHaveCount(1);
+  await expect(page.locator('.wt-roomCard.listItem.listItem-border')).toHaveCount(1);
+  const surface = await page.locator('.wt-roomCard').evaluate(el => {
+    const style = getComputedStyle(el);
+    return { background: style.backgroundColor, border: style.borderTopWidth, padding: style.paddingTop };
+  });
+  expect(surface.background).toBe('rgba(0, 0, 0, 0)');
+  expect(surface.border).toBe('1px');
+});
+
 test('确认放弃后再次进入设置，第二次 dirty 离页仍会拦截', async ({ page }) => {
   await open(page, 'save-fail', 'light', 390, 1000);
   await page.locator('#wtTabSettings').click();
-  await page.locator('#wtPauseOtherOnPlaybackStop').uncheck();
+  const checkbox = page.locator('#wtPauseOtherOnPlaybackStop');
+  await expect(checkbox).toBeEnabled();
+  await page.locator('label.emby-toggle-label:has(#wtPauseOtherOnPlaybackStop)').click();
+  await expect(checkbox).not.toBeChecked();
   await page.locator('#wtTabMine').click();
   await expect(page.locator('#wtConfirmOverlay')).toBeVisible();
   await page.locator('#wtConfirmSubmit').click();
@@ -315,7 +339,9 @@ test('确认放弃后再次进入设置，第二次 dirty 离页仍会拦截', a
   await expect(page.locator('#wtTabMine')).toHaveAttribute('aria-current', 'page');
 
   await page.locator('#wtTabSettings').click();
-  await page.locator('#wtPauseOtherOnPlaybackStop').uncheck();
+  await expect(checkbox).toBeEnabled();
+  await page.locator('label.emby-toggle-label:has(#wtPauseOtherOnPlaybackStop)').click();
+  await expect(checkbox).not.toBeChecked();
   await page.locator('#wtTabMine').click();
   await expect(page.locator('#wtConfirmOverlay')).toBeVisible();
 });
@@ -338,7 +364,7 @@ for (const width of [320, 360, 390, 430, 768, 1024, 1440, 1920]) {
     const metrics = await page.evaluate(() => ({
       width: document.documentElement.scrollWidth,
       client: document.documentElement.clientWidth,
-      controls: Array.from(document.querySelectorAll('button, input:not([type="checkbox"]), select, .emby-tab-button, label.checkboxContainer')).map(x => Math.min(x.getBoundingClientRect().width, x.getBoundingClientRect().height)).filter(Boolean),
+      controls: Array.from(document.querySelectorAll('button, input:not([type="checkbox"]), select, .emby-tab-button, .emby-toggle-label')).map(x => Math.min(x.getBoundingClientRect().width, x.getBoundingClientRect().height)).filter(Boolean),
       headerBottom: document.querySelector('.skinHeader').getBoundingClientRect().bottom,
       pageTop: document.querySelector('.wt-page').getBoundingClientRect().top
     }));
@@ -357,7 +383,7 @@ test('浅色、深色和仅 HSL 主题均保持可读且无外部字体', async 
       const card = getComputedStyle(el); const text = getComputedStyle(el.querySelector('.wt-roomName'));
       return { background: card.backgroundColor, color: text.color };
     });
-    expect(values.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(values.background).toBe('rgba(0, 0, 0, 0)');
     expect(values.color).not.toBe('');
     expect(await page.locator('link[rel="stylesheet"][href*="http"]').count()).toBe(0);
     if (theme === 'dark') await page.screenshot({ path: path.join(artifactDir, 'desktop-dark-active-room.png'), fullPage: true });

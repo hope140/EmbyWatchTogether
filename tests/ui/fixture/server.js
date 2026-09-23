@@ -95,6 +95,11 @@ function page() {
     button.raised.button-submit { border-color: var(--theme-primary-color, #20a956); color: #fff; background: var(--theme-primary-color, #20a956); }
     button:disabled { cursor: default; opacity: .55; }
     input:not([type="checkbox"]),select { width: min(100%, 32rem); min-height: 44px; padding: 0 12px; border: 1px solid var(--line-background, #c8d0d8); border-radius: 5px; color: var(--theme-text-color, #1e2933); background: var(--wt-card, #fff); }
+    .emby-toggle-label { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--theme-text-color, #1e2933); cursor: pointer; }
+    .emby-toggle-label input { position: absolute; opacity: 0; pointer-events: none; }
+    .toggleLabel { flex: 1 1 auto; }
+    .toggleSwitch { flex: 0 0 auto; width: 38px; height: 22px; border-radius: 999px; background: var(--button-background-color, #d7dde3); pointer-events: none; }
+    .emby-toggle-label input:checked ~ .toggleSwitch { background: var(--theme-primary-color, #20a956); }
     .fieldDescription,.sectionDescription { line-height: 1.45; }
   </style></head><body><main class="fixture-host"></main><script>
   (function () {
