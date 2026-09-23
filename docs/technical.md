@@ -33,7 +33,7 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.5.0.0`，当前测试版为 `1.6.0.3`，对应 beta 预发布候选 tag `v1.6.0.3`；`v1.6.0.2` 是已发布的历史 beta，资产本身齐全且不可变；本修订用于修正 beta 更新检查的历史 Release 资产选择，不声称已完成本修正的真实 Emby UI 验收。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.5.0.0`，当前测试版为 `1.6.0.4`，对应 beta 预发布候选 tag `v1.6.0.4`；`v1.6.0.3` 与更早版本保留为历史 beta；本修订调整较慢 GitHub/CDN 网络下的固定资产下载等待时间，不声称已完成新版自动安装或广泛客户端/网络兼容验收。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
@@ -82,6 +82,8 @@ stable 检查入口使用这三个资产的 `releases/latest/download/<asset>` �
 安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示；重启前同一版本不会重复安装。正式版 Release 必须包含固定的四个资产：DLL、`EmbyWatchTogether.zip`、发布清单和 detached signature，并且 tag 与三项程序集版本一致。
 
 当前 `ReleaseTrustStore` 已完成生产 bootstrap，包含已审核的公开 `keyId` `prod-2026-08`，并通过不可变的 Ordinal 映射提供验签信任根。匹配 Secret 缺失或错误、未知 key 或签名失败时仍然 fail closed。首次信任引导版本 `1.2.0.9` 必须由运营人工部署；完成后版本方可使用签名自动更新。禁止在文档或仓库写入或提交真实生产私钥、GitHub secret 值、token、本机服务器信息或私人路径；示例不得包含真实生产私钥或 secret 值。
+
+Releases API 查询仍使用 20 秒有界超时；DLL、manifest 和 detached signature 三项固定资产下载使用 60 秒有界超时，以覆盖较慢的 GitHub/CDN 网络。超时调整不改变资产来源、签名、哈希、程序集身份和版本校验，也不改变失败清理与 fail closed 行为。
 
 ## 项目结构
 
