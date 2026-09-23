@@ -879,6 +879,31 @@
             align-content: start;
         }
 
+        .wt-roomSide {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .wt-roomSide .wt-roomUpdated {
+            margin-top: .65em;
+        }
+
+        .wt-roomSide .wt-roomActions {
+            margin-top: .8em;
+        }
+
+        .wt-roomSide .wt-roomMembership {
+            margin-top: .65em;
+        }
+
+        .wt-roomIdentityMeta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .25em 1em;
+        }
+
         .wt-roomOverview + .wt-roomMeta {
             margin-top: .85em;
         }
@@ -944,13 +969,24 @@
 
         @media (max-width: 22em) {
             .wt-pluginNav {
-                grid-template-columns: 1fr;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
             }
 
             .wt-pluginNavLink {
-                justify-content: flex-start;
-                padding-left: .8em;
-                text-align: left;
+                padding-left: .25em;
+                padding-right: .25em;
+                font-size: .9em;
+                text-align: center;
+            }
+
+            .wt-pluginNav--host {
+                display: flex;
+                grid-template-columns: none;
+            }
+
+            .wt-pluginNav--host .wt-pluginNavLink {
+                padding-left: .65em;
+                padding-right: .65em;
             }
         }
     </style>

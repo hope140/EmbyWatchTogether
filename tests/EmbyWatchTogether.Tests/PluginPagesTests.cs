@@ -91,10 +91,15 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("id=\"wtPluginNav\"", html);
             Assert.Contains(".wt-pluginNav--host", html);
             Assert.Contains(".skinHeader .headerMiddle", javascript);
+            Assert.Contains("headerTop-withSectionTabs", javascript);
+            Assert.Contains("headerMiddle-withSectionTabs", javascript);
+            Assert.Contains("clearPluginNavHostClasses(page)", javascript);
             Assert.Contains("mountPluginNav(page)", javascript);
             Assert.Contains("unmountPluginNav(page)", javascript);
             Assert.Contains("grid-template-columns: minmax(13em, .85fr)", html);
             Assert.Contains("wt-roomOverview", html);
+            Assert.Contains("wt-roomSide", html);
+            Assert.Contains(".wt-roomSide .wt-roomActions", html);
             Assert.DoesNotContain("border-bottom: 2px solid var(--wt-accent)", html);
             Assert.Contains("--wt-accent: var(--theme-primary-color", html);
             Assert.Contains("tab.style.display = isAdmin ? '' : 'none'", javascript);

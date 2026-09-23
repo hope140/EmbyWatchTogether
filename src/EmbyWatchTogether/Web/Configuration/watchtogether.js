@@ -1143,8 +1143,29 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var doc = page.ownerDocument || document;
         var host = doc.querySelector('.skinHeader .headerMiddle');
         if (host) {
+            var skinHeader = host.closest ? host.closest('.skinHeader') : null;
+            var hostState = page._wtPluginNavHostState;
+            if (hostState && (hostState.headerMiddle !== host || hostState.skinHeader !== skinHeader)) {
+                clearPluginNavHostClasses(page);
+                hostState = null;
+            }
+            if (!hostState) {
+                hostState = {
+                    headerMiddle: host,
+                    skinHeader: skinHeader,
+                    addedHeaderTopClass: !!(skinHeader && !skinHeader.classList.contains('headerTop-withSectionTabs')),
+                    addedHeaderMiddleClass: !host.classList.contains('headerMiddle-withSectionTabs')
+                };
+                page._wtPluginNavHostState = hostState;
+            }
             if (nav.parentNode !== host) {
                 host.appendChild(nav);
+            }
+            if (hostState.addedHeaderMiddleClass) {
+                host.classList.add('headerMiddle-withSectionTabs');
+            }
+            if (hostState.skinHeader && hostState.addedHeaderTopClass) {
+                hostState.skinHeader.classList.add('headerTop-withSectionTabs');
             }
             nav.classList.add('wt-pluginNav--host');
             page._wtPluginNavHost = host;
@@ -1155,8 +1176,23 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             slot.appendChild(nav);
         }
         nav.classList.remove('wt-pluginNav--host');
+        clearPluginNavHostClasses(page);
         page._wtPluginNavHost = null;
         page._wtPluginNavMounted = false;
+    }
+
+    function clearPluginNavHostClasses(page) {
+        var state = page._wtPluginNavHostState;
+        if (!state) {
+            return;
+        }
+        if (state.headerMiddle && state.addedHeaderMiddleClass) {
+            state.headerMiddle.classList.remove('headerMiddle-withSectionTabs');
+        }
+        if (state.skinHeader && state.addedHeaderTopClass) {
+            state.skinHeader.classList.remove('headerTop-withSectionTabs');
+        }
+        page._wtPluginNavHostState = null;
     }
 
     function unmountPluginNav(page) {
@@ -1169,6 +1205,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             slot.appendChild(nav);
         }
         nav.classList.remove('wt-pluginNav--host');
+        clearPluginNavHostClasses(page);
         page._wtPluginNavHost = null;
         page._wtPluginNavMounted = false;
     }
@@ -1438,17 +1475,20 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             participants.appendChild(row);
         });
         participants.hidden = participantList.length === 0;
+        var side = document.createElement('div');
+        side.className = 'wt-roomSide';
+        side.appendChild(participants);
         var overview = document.createElement('div');
         overview.className = 'wt-roomOverview';
         overview.appendChild(media);
-        overview.appendChild(participants);
+        overview.appendChild(side);
         card.appendChild(overview);
 
         var updated = document.createElement('div');
         updated.className = 'fieldDescription wt-roomMeta wt-roomUpdated';
         updated.textContent = room._wtStateStale === true ? '更新时间：可能已过期' : '更新时间：刚刚';
-        card.appendChild(updated);
-        card._wtStateDetails = { media: media, mediaLabel: mediaLabel, overview: overview, participants: participants, updated: updated };
+        side.appendChild(updated);
+        card._wtStateDetails = { media: media, mediaLabel: mediaLabel, overview: overview, side: side, participants: participants, updated: updated };
     }
 
     function updateRoomStateDetails(card, room) {
@@ -1566,14 +1606,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         fields.state.textContent = info.label;
         fields.state.title = info.description;
         fields.state.className = 'wt-roomState wt-roomState-' + info.className;
-        fields.participantLine.textContent = '参与者：' + (room.ParticipantUserIds || []).map(function (id) {
-            return roomUserName(room, id);
-        }).join('、');
+        fields.participantLine.textContent = (room.ParticipantUserIds || []).length + ' 位参与者';
         fields.primaryLine.textContent = '主用户：' + roomUserName(room, room.PrimaryUserId);
         fields.membershipLine.textContent = room.CurrentUserIsParticipant === true
-            ? '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
-                '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。'
-            : '管理员可管理此房间；当前账号不是参与者。';
+            ? '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离')
+            : '管理员视角 · 当前账号未加入';
         var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
         fields.feedback.textContent = feedback ? feedback.text : '';
         fields.feedback.className = 'wt-roomFeedback' + (feedback && feedback.isError ? ' error' : '');
@@ -2086,12 +2123,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             card.appendChild(header);
 
             var meta = document.createElement('div');
-            meta.className = 'fieldDescription wt-roomMeta';
+            meta.className = 'fieldDescription wt-roomMeta wt-roomIdentityMeta';
             var participantLine = document.createElement('div');
             var participantIds = room.ParticipantUserIds || [];
-            participantLine.textContent = '参与者：' + participantIds.map(function (id) {
-                return roomUserName(room, id);
-            }).join('、');
+            participantLine.textContent = participantIds.length + ' 位参与者';
             card._wtFields.participantLine = participantLine;
             var primaryLine = document.createElement('div');
             primaryLine.textContent = '主用户：' + roomUserName(room, room.PrimaryUserId);
@@ -2105,11 +2140,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var membershipLine = document.createElement('div');
             membershipLine.className = 'fieldDescription wt-roomMeta wt-roomMembership';
             membershipLine.textContent = room.CurrentUserIsParticipant === true
-                ? '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
-                    '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。'
-                : '管理员可管理此房间；当前账号不是参与者。';
+                ? '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离')
+                : '管理员视角 · 当前账号未加入';
             card._wtFields.membershipLine = membershipLine;
-            card.appendChild(membershipLine);
+            card._wtStateDetails.side.appendChild(membershipLine);
 
             var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
             var feedbackEl = document.createElement('div');
@@ -2119,7 +2153,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             feedbackEl.textContent = feedback ? feedback.text : '';
             feedbackEl.hidden = !feedback;
             card._wtFields.feedback = feedbackEl;
-            card.appendChild(feedbackEl);
+            card._wtStateDetails.side.appendChild(feedbackEl);
 
             var actions = document.createElement('div');
             actions.className = 'wt-roomActions';
@@ -2128,7 +2162,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 actions.appendChild(actionButton);
                 if (action === 'more' && actionButton._wtMoreMenu) actions.appendChild(actionButton._wtMoreMenu);
             });
-            card.appendChild(actions);
+            card._wtStateDetails.side.appendChild(actions);
             card._wtFields.actions = actions;
             var diagnosticDetails = createDiagnosticPanel(page, room);
             card._wtDiagnosticPanel = page._wtDiagnosticPanels[room.RoomId];
