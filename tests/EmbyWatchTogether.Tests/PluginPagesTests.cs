@@ -21,9 +21,12 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherUiVNext");
+            Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherDiagnostics");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherUiVNext.js");
+            Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherDiagnostics.js");
+            Assert.Equal(1, pages.Count(page => page.EnableInUserMenu));
         }
 
         [Fact]
@@ -49,10 +52,17 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherDiagnostics");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiVNext");
             Assert.Equal("sync", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
+            Assert.Equal("Watch Together", page.DisplayName);
+            Assert.Equal("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", page.EmbeddedResourcePath);
+
+            var controller = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiVNext.js");
+            Assert.False(controller.EnableInMainMenu);
+            Assert.False(controller.EnableInUserMenu);
+            Assert.Equal("Emby.Plugins.WatchTogether.Configuration.WatchTogether.js", controller.EmbeddedResourcePath);
         }
 
         private static int ReadBigEndianInt32(byte[] bytes)
@@ -69,7 +79,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherDiagnostics.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherUiVNext.js\"", html);
             Assert.DoesNotContain("class=\"wt-title\"", html);
             Assert.DoesNotContain("<h1>Watch Together</h1>", html);
             Assert.Contains("class=\"wt-pluginNav\"", html);

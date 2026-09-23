@@ -13,7 +13,7 @@
 ## 当前实现事实
 
 - UI 是嵌入 DLL 的单个 HTML 与 AMD JavaScript 页面，不引入生产 SPA、Node 服务或额外部署目录。
-- 页面入口和控制器键保持 `WatchTogetherDiagnostics` / `WatchTogetherDiagnostics.js`，继续只提供一个用户菜单入口。
+- 页面入口使用稳定缓存键 `WatchTogetherUiVNext` / `WatchTogetherUiVNext.js`，继续只提供一个用户菜单入口。该键因真实 Emby 页面缓存证据在 S8 更新，HTML 与 controller 键必须联动。
 - `/Rooms` 已返回 `IsAdmin`、`CurrentUserJoined` 和 `CanEnd`，但 `CurrentUserJoined=false` 无法区分暂离成员与管理员非成员。
 - 当前页面不读取 `/Rooms/{Id}/State`，因此无法可靠展示逐成员播放状态和只读进度。
 - `SessionSnapshot` 已有 `RunTimeTicks`；本次只允许把它投影到只读 State 响应，不改变会话选择或同步状态机。
