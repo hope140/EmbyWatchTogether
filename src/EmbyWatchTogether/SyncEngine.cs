@@ -234,6 +234,7 @@ namespace Emby.Plugins.WatchTogether
                             runtime.Barrier = null;
                             runtime.Pending.Clear();
                             runtime.ClearMediaHandoff();
+                            runtime.ClearPrimaryItemTransitionCandidate();
                             _logger?.Info($"Room {room.Id}: marked unavailable (server mismatch)");
                             results.Add(new RoomPollResult
                             {
@@ -1585,11 +1586,9 @@ namespace Emby.Plugins.WatchTogether
             runtime.BeginPrimaryItemTransitionCandidate(
                 now,
                 room.PrimaryUserId,
-                previousPrimary.SessionId,
                 previousPrimary.ItemId,
                 participantUserId,
-                previousParticipant.SessionId,
-                previousParticipant.ItemId);
+                previousParticipant.SessionId);
         }
 
         private void PauseOtherAfterPlaybackStopped(

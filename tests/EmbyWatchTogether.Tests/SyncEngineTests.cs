@@ -642,6 +642,32 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void PollOnce_ServerMismatch_ClearsLatePrimaryTransitionCandidate()
+        {
+            var room = CreateRoom();
+            string currentServerId = "server-1";
+            var engine = new SyncEngine(
+                _rooms, _provider, _issuer, () => currentServerId, () => _clock.Now,
+                pollIntervalSeconds: 1.0,
+                pauseOtherOnPlaybackStop: true,
+                notifyOtherOnPlaybackStop: false,
+                notifyOnSyncActions: false,
+                messageIssuer: _messageIssuer);
+            EnterWatching(engine, room);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.NotNull(GetInternalProperty(
+                _rooms.GetRuntime(room.Id), "PrimaryItemTransitionCandidate"));
+
+            currentServerId = "other-server";
+            Assert.Equal(RoomState.Unavailable, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Null(GetInternalProperty(
+                _rooms.GetRuntime(room.Id), "PrimaryItemTransitionCandidate"));
+        }
+
+        [Fact]
         public void Barrier_ProgressesPauseSeekRestoreToWatching()
         {
             var room = CreateRoom();
@@ -3653,9 +3679,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
 
-            // The replacement session arrives after the 2-second stop grace,
-            // but remains inside the bounded late-transition recovery window.
-            _clock.Advance(3.1);
+            // The replacement session arrives just after the 2-second stop
+            // debounce, matching the observed ~2.1s same-round boundary.
+            _clock.Advance(2.1);
             SetCandidates(
                 Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
@@ -3702,6 +3728,29 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
             _clock.Advance(1);
             Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
+
+            RoomState finalState = RoomState.Barrier;
+            for (int attempt = 0; attempt < 5 && finalState != RoomState.Watching; attempt++)
+            {
+                _clock.Advance(1);
+                finalState = engine.PollOnce(_clock.Now).Single().State;
+            }
+
+            Assert.Equal(RoomState.Watching, finalState);
+            Assert.Single(issuer.PlayItems);
+            Assert.DoesNotContain(issuer.CommandDetails,
+                command => command.command == RemoteCommands.Seek && command.itemId != "item-b");
         }
 
         [Fact]
@@ -3719,7 +3768,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
             _clock.Advance(2.1);
-            engine.PollOnce(_clock.Now);
+            var stopResult = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Waiting, stopResult.State);
+            int pauseCountAtStopConfirmation =
+                issuer.Commands.Count(command => command.command == RemoteCommands.Pause);
+            Assert.Equal(1, pauseCountAtStopConfirmation);
 
             _clock.Advance(8.0);
             SetCandidates(
@@ -3771,6 +3824,27 @@ namespace Emby.Plugins.WatchTogether.Tests
             SetCandidates(
                 Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-c"));
+
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void MediaHandoff_LatePrimaryTransitionParticipantChangesSession_DoesNotPlayItem()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            issuer.PlayItems.Clear();
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(2.1);
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2-new", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "i1"));
 
             Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
             Assert.Empty(issuer.PlayItems);
@@ -4193,6 +4267,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             EnterWatching(engine, room);
             issuer.Commands.Clear();
+            issuer.CommandDetails.Clear();
             issuer.PlayItems.Clear();
         }
 
@@ -4726,6 +4801,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             public List<(string userId, string command)> Commands { get; } =
                 new List<(string, string)>();
 
+            public List<(string userId, string command, string itemId)> CommandDetails { get; } =
+                new List<(string, string, string)>();
+
             public List<(string userId, string itemId, string sessionId, string snapshotItemId)> PlayItems { get; } =
                 new List<(string, string, string, string)>();
 
@@ -4742,6 +4820,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 out string error)
             {
                 Commands.Add((userId, command));
+                CommandDetails.Add((userId, command, snapshot?.ItemId));
                 error = null;
                 return true;
             }

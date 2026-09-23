@@ -10,15 +10,12 @@ namespace Emby.Plugins.WatchTogether
 
         public string PrimaryUserId { get; set; }
 
-        public string PrimarySessionId { get; set; }
-
         public string SourceItemId { get; set; }
 
         public string ParticipantUserId { get; set; }
 
         public string ParticipantSessionId { get; set; }
 
-        public string ParticipantItemId { get; set; }
     }
 
     /// <summary>
@@ -383,21 +380,17 @@ namespace Emby.Plugins.WatchTogether
         internal void BeginPrimaryItemTransitionCandidate(
             DateTimeOffset startedAtUtc,
             string primaryUserId,
-            string primarySessionId,
             string sourceItemId,
             string participantUserId,
-            string participantSessionId,
-            string participantItemId)
+            string participantSessionId)
         {
             PrimaryItemTransitionCandidate = new PrimaryItemTransitionCandidate
             {
                 StartedAtUtc = startedAtUtc,
                 PrimaryUserId = primaryUserId,
-                PrimarySessionId = primarySessionId,
                 SourceItemId = sourceItemId,
                 ParticipantUserId = participantUserId,
                 ParticipantSessionId = participantSessionId,
-                ParticipantItemId = participantItemId,
             };
         }
 
