@@ -164,6 +164,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("loadGitHubTokenStatus", javascript);
             Assert.Contains("clearGitHubTokenInput", javascript);
             Assert.Contains("只有管理员可以查看和修改 Token", javascript);
+            Assert.Contains("_wtGitHubTokenCanClear", javascript);
+            Assert.Contains("Token 状态读取失败，可尝试清除后重新配置", javascript);
             Assert.DoesNotContain("_wtPluginConfiguration.GitHubToken", javascript);
             Assert.Contains("wtRoomsHeading", html);
             Assert.Contains(">创建房间</h2>", html);

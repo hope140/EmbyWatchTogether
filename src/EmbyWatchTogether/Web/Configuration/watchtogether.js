@@ -844,7 +844,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             saveButton.textContent = isBusy ? '保存中…' : '保存 Token';
         }
         if (clearButton) {
-            clearButton.disabled = isBusy || !page._wtGitHubTokenReady;
+            clearButton.disabled = isBusy || !page._wtGitHubTokenCanClear;
             clearButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
         }
     }
@@ -858,15 +858,19 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function loadGitHubTokenStatus(page) {
         page._wtGitHubTokenReady = false;
+        page._wtGitHubTokenCanClear = false;
         setGitHubTokenStatus(page, '正在读取 Token 状态…');
         setGitHubTokenBusy(page, true);
         return apiGet('WatchTogether/GitHubToken').then(function (result) {
             page._wtGitHubTokenReady = true;
+            page._wtGitHubTokenCanClear = true;
             setGitHubTokenStatus(page, result && result.Configured ? 'Token 已配置。' : '尚未配置 Token。');
         }).catch(function (error) {
             page._wtGitHubTokenReady = false;
-            setGitHubTokenStatus(page,
-                isPermissionError(error) ? '只有管理员可以查看和修改 Token。' : 'Token 状态读取失败，请稍后重试。', true);
+            page._wtGitHubTokenCanClear = !isPermissionError(error);
+            setGitHubTokenStatus(page, isPermissionError(error)
+                ? '只有管理员可以查看和修改 Token。'
+                : 'Token 状态读取失败，可尝试清除后重新配置。', true);
         }).then(function () {
             setGitHubTokenBusy(page, false);
         });
