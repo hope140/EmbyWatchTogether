@@ -910,6 +910,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         setGitHubTokenStatus(page, '正在清除 Token…');
         return apiSend('WatchTogether/GitHubToken', 'DELETE').then(function (result) {
             clearGitHubTokenInput(page);
+            if (result && result.Configured === false) {
+                page._wtGitHubTokenReady = true;
+                page._wtGitHubTokenCanClear = true;
+            }
             setGitHubTokenStatus(page, result && result.Configured ? 'Token 仍已配置。' : 'Token 已清除。');
         }).catch(function (error) {
             setGitHubTokenStatus(page,
