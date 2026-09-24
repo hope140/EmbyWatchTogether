@@ -101,6 +101,18 @@ namespace Emby.Plugins.WatchTogether
     [Route("/WatchTogether/Info", "GET")]
     public class GetPluginInfoRequest { }
 
+    [Route("/WatchTogether/GitHubToken", "GET")]
+    public class GetGitHubTokenRequest { }
+
+    [Route("/WatchTogether/GitHubToken", "POST")]
+    public class SetGitHubTokenRequest
+    {
+        public string Token { get; set; }
+    }
+
+    [Route("/WatchTogether/GitHubToken", "DELETE")]
+    public class DeleteGitHubTokenRequest { }
+
     /// <summary>
     /// REST API for room management and remote control. Admin endpoints verify
     /// the caller's user policy; participant endpoints verify membership.
@@ -683,6 +695,28 @@ namespace Emby.Plugins.WatchTogether
             };
         }
 
+        public object Get(GetGitHubTokenRequest request)
+        {
+            RequireAdmin();
+            return new { Configured = RequireGitHubTokens().IsConfigured() };
+        }
+
+        public object Post(SetGitHubTokenRequest request)
+        {
+            RequireAdmin();
+            var store = RequireGitHubTokens();
+            store.SetToken(request?.Token);
+            return new { Configured = true };
+        }
+
+        public object Delete(DeleteGitHubTokenRequest request)
+        {
+            RequireAdmin();
+            var store = RequireGitHubTokens();
+            store.Clear();
+            return new { Configured = false };
+        }
+
         private static Dictionary<string, SessionSnapshot> BuildSnapshots(Plugin plugin, Room room)
         {
             var candidates = plugin.Bridge == null
@@ -941,6 +975,13 @@ namespace Emby.Plugins.WatchTogether
         private Plugin RequirePlugin()
         {
             return RuntimePlugin ?? Plugin.Instance ?? throw new ServiceUnavailableException(
+                "Watch Together is still initializing. Please retry shortly.");
+        }
+
+        private GitHubTokenStore RequireGitHubTokens()
+        {
+            var plugin = RequirePlugin();
+            return plugin.GitHubTokens ?? throw new ServiceUnavailableException(
                 "Watch Together is still initializing. Please retry shortly.");
         }
 

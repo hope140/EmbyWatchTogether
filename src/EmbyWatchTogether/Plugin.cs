@@ -25,6 +25,8 @@ namespace Emby.Plugins.WatchTogether
         /// </summary>
         public static Plugin Instance { get; private set; }
 
+        private GitHubTokenStore _githubTokenStore;
+
         /// <summary>
         /// Raised only after BasePlugin has accepted the persisted
         /// configuration. Subscribers receive an immutable normalized snapshot
@@ -51,6 +53,24 @@ namespace Emby.Plugins.WatchTogether
         public string ServerId { get; internal set; }
 
         public IServerApplicationHost ApplicationHost { get; internal set; }
+
+        /// <summary>
+        /// The token store is created only after Emby has assigned the plugin
+        /// data directory. Keeping it separate from PluginConfiguration also
+        /// prevents the token from being returned by the generic settings API.
+        /// </summary>
+        public GitHubTokenStore GitHubTokens
+        {
+            get
+            {
+                if (_githubTokenStore == null && !string.IsNullOrWhiteSpace(DataFolderPath))
+                {
+                    _githubTokenStore = new GitHubTokenStore(DataFolderPath);
+                }
+
+                return _githubTokenStore;
+            }
+        }
 
         public override void UpdateConfiguration(BasePluginConfiguration configuration)
         {

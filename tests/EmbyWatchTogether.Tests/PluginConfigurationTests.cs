@@ -123,6 +123,15 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void GitHubToken_IsNotPartOfPluginConfiguration()
+        {
+            Assert.DoesNotContain(
+                typeof(PluginConfiguration).GetProperties(),
+                property => string.Equals(property.Name, "Token", StringComparison.OrdinalIgnoreCase) ||
+                    property.Name.IndexOf("GitHub", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        [Fact]
         public void PendingUpdateVersion_RemainsInternalStateWithNullDefault()
         {
             var configuration = new PluginConfiguration();
