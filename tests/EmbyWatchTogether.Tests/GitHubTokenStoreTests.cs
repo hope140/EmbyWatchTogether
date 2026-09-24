@@ -103,6 +103,49 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void DirectorySymlinkIsRejectedWhenThePlatformAllowsCreatingOne()
+        {
+            string target = Path.Combine(_root, "secrets-target");
+            string link = Path.Combine(_root, "secrets");
+            Directory.CreateDirectory(_root);
+            Directory.CreateDirectory(target);
+            try
+            {
+                Directory.CreateSymbolicLink(link, target);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException || ex is IOException || ex is PlatformNotSupportedException)
+            {
+                return;
+            }
+
+            var store = new GitHubTokenStore(_root);
+            Assert.Throws<GitHubTokenStoreException>(() => store.IsConfigured());
+            Assert.Throws<GitHubTokenStoreException>(() => store.SetToken("ghp_link_target"));
+        }
+
+        [Fact]
+        public void FileSymlinkIsRejectedWhenThePlatformAllowsCreatingOne()
+        {
+            var store = new GitHubTokenStore(_root);
+            store.SetToken("ghp_original");
+            string tokenPath = Path.Combine(_root, "secrets", "github-token");
+            string targetPath = Path.Combine(_root, "other-token");
+            File.WriteAllText(targetPath, "ghp_other");
+            File.Delete(tokenPath);
+            try
+            {
+                File.CreateSymbolicLink(tokenPath, targetPath);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException || ex is IOException || ex is PlatformNotSupportedException)
+            {
+                return;
+            }
+
+            Assert.Throws<GitHubTokenStoreException>(() => store.GetToken());
+            Assert.Throws<GitHubTokenStoreException>(() => store.SetToken("ghp_new"));
+        }
+
+        [Fact]
         public void TokenStatusNeverReturnsTheToken()
         {
             var store = new GitHubTokenStore(_root);

@@ -54,7 +54,7 @@ namespace Emby.Plugins.WatchTogether
                 var info = new FileInfo(_tokenPath);
                 if (!info.Exists)
                 {
-                    return null;
+                    throw new GitHubTokenStoreException("configured GitHub token cannot be read");
                 }
 
                 if (info.Length <= 0 || info.Length > MaxTokenBytes)
@@ -233,7 +233,8 @@ namespace Emby.Plugins.WatchTogether
             try
             {
                 FileAttributes attributes = File.GetAttributes(path);
-                if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) == 0)
+                if ((attributes & FileAttributes.Directory) == 0 ||
+                    (attributes & FileAttributes.ReparsePoint) != 0)
                 {
                     throw new GitHubTokenStoreException("token storage is not a regular directory");
                 }
