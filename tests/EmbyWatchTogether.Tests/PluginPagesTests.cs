@@ -21,9 +21,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnosticsV2");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnosticsV2.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
         [Fact]
@@ -49,7 +49,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherDiagnosticsV2");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherSettingsV3");
             Assert.Equal("sync", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
@@ -69,7 +69,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherDiagnosticsV2.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherSettingsV3.js\"", html);
             Assert.DoesNotContain("<h1>一起看</h1>", html);
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
@@ -83,10 +83,17 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("wtSaveConfig", html);
             Assert.Contains("wtGitHubToken", html);
             Assert.Contains("type=\"password\"", html);
-            Assert.Contains("autocomplete=\"off\"", html);
+            Assert.Contains("autocomplete=\"new-password\"", html);
+            Assert.Contains("placeholder=\"粘贴需要保存的 Token\"", html);
             Assert.Contains("wtSaveGitHubToken", html);
             Assert.Contains("wtClearGitHubToken", html);
             Assert.Contains("aria-describedby=\"wtGitHubTokenHelp wtGitHubTokenStatus\"", html);
+            Assert.Contains("id=\"wtGitHubTokenSection\"", html);
+            Assert.Contains("如何获取 Token", html);
+            Assert.Contains("https://github.com/settings/personal-access-tokens/new", html);
+            Assert.Contains("wt-settingsButton--primary", html);
+            Assert.Contains("wt-settingsButton--secondary", html);
+            Assert.Contains("max-width: 40em", html);
             Assert.Contains("wtPluginVersion", html);
             Assert.Contains("wtRepositoryLink", html);
             Assert.Contains("--wt-text: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)));", html);
@@ -163,6 +170,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("WatchTogether/GitHubToken", javascript);
             Assert.Contains("loadGitHubTokenStatus", javascript);
             Assert.Contains("clearGitHubTokenInput", javascript);
+            Assert.Contains("function setGitHubTokenBusy(page, isBusy, operation)", javascript);
+            Assert.Contains("setGitHubTokenBusy(page, true, 'save')", javascript);
+            Assert.Contains("setGitHubTokenBusy(page, true, 'clear')", javascript);
             Assert.Contains("只有管理员可以查看和修改 Token", javascript);
             Assert.Contains("_wtGitHubTokenCanClear", javascript);
             Assert.Contains("page._wtGitHubTokenReady = true", javascript);

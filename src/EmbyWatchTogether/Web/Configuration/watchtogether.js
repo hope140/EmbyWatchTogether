@@ -831,21 +831,23 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
-    function setGitHubTokenBusy(page, isBusy) {
+    function setGitHubTokenBusy(page, isBusy, operation) {
         var input = page.querySelector('#wtGitHubToken');
         var saveButton = page.querySelector('#wtSaveGitHubToken');
         var clearButton = page.querySelector('#wtClearGitHubToken');
+        operation = operation || '';
         if (input) {
             input.disabled = isBusy;
         }
         if (saveButton) {
             saveButton.disabled = isBusy || !page._wtGitHubTokenReady;
-            saveButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
-            saveButton.textContent = isBusy ? '保存中…' : '保存 Token';
+            saveButton.setAttribute('aria-busy', isBusy && operation === 'save' ? 'true' : 'false');
+            saveButton.textContent = isBusy && operation === 'save' ? '保存中…' : '保存 Token';
         }
         if (clearButton) {
             clearButton.disabled = isBusy || !page._wtGitHubTokenCanClear;
-            clearButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+            clearButton.setAttribute('aria-busy', isBusy && operation === 'clear' ? 'true' : 'false');
+            clearButton.textContent = isBusy && operation === 'clear' ? '清除中…' : '清除 Token';
         }
     }
 
@@ -859,8 +861,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function loadGitHubTokenStatus(page) {
         page._wtGitHubTokenReady = false;
         page._wtGitHubTokenCanClear = false;
+        clearGitHubTokenInput(page);
         setGitHubTokenStatus(page, '正在读取 Token 状态…');
-        setGitHubTokenBusy(page, true);
+        setGitHubTokenBusy(page, true, 'read');
         return apiGet('WatchTogether/GitHubToken').then(function (result) {
             page._wtGitHubTokenReady = true;
             page._wtGitHubTokenCanClear = true;
@@ -887,7 +890,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return Promise.resolve();
         }
 
-        setGitHubTokenBusy(page, true);
+        setGitHubTokenBusy(page, true, 'save');
         setGitHubTokenStatus(page, '正在保存 Token…');
         return apiSend('WatchTogether/GitHubToken', 'POST', { Token: value }).then(function (result) {
             clearGitHubTokenInput(page);
@@ -906,7 +909,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
-        setGitHubTokenBusy(page, true);
+        setGitHubTokenBusy(page, true, 'clear');
         setGitHubTokenStatus(page, '正在清除 Token…');
         return apiSend('WatchTogether/GitHubToken', 'DELETE').then(function (result) {
             clearGitHubTokenInput(page);

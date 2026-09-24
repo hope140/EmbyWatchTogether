@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherDiagnosticsV2.js"
+     data-controller="__plugin/WatchTogetherSettingsV3.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -100,6 +100,83 @@
             margin: 0;
         }
 
+        .wt-settingsButton {
+            min-height: 2.45em;
+            padding: .5em 1.1em;
+            border: 1px solid transparent !important;
+            border-radius: .28em !important;
+            box-shadow: none !important;
+            font-weight: 600;
+        }
+
+        .wt-settingsButton--primary {
+            border-color: var(--wt-primary) !important;
+            background: var(--wt-primary) !important;
+            color: #fff !important;
+        }
+
+        .wt-settingsButton--primary:hover:not(:disabled) {
+            opacity: .88;
+        }
+
+        .wt-settingsButton--secondary {
+            border-color: var(--wt-border) !important;
+            background: var(--wt-button) !important;
+            color: var(--wt-text) !important;
+        }
+
+        .wt-settingsButton--secondary:hover:not(:disabled) {
+            background: var(--wt-hover) !important;
+        }
+
+        .wt-settingsButton:focus-visible {
+            outline: 2px solid var(--wt-primary);
+            outline-offset: 2px;
+        }
+
+        .wt-settingsButton:disabled {
+            border-color: var(--wt-border) !important;
+            background: var(--wt-button) !important;
+            color: var(--wt-muted) !important;
+            opacity: .62;
+        }
+
+        .wt-updateSetting {
+            margin-top: 1.15em;
+        }
+
+        .wt-updateSetting select,
+        .wt-tokenField,
+        .wt-tokenField input {
+            width: 100%;
+            max-width: 40em;
+            box-sizing: border-box;
+        }
+
+        .wt-tokenHelp {
+            margin: .8em 0 0;
+        }
+
+        .wt-tokenHelp summary {
+            color: var(--wt-text);
+            cursor: pointer;
+        }
+
+        .wt-tokenHelp .fieldDescription {
+            max-width: 52em;
+            margin: .55em 0 0;
+        }
+
+        .wt-tokenStatus {
+            display: block;
+            max-width: 52em;
+            overflow-wrap: anywhere;
+        }
+
+        .wt-page #wtGitHubTokenStatus.error {
+            color: var(--theme-error-color, #c62828) !important;
+        }
+
         .wt-invitationCode {
             margin-top: 1em;
             padding: .8em 1em;
@@ -121,28 +198,6 @@
         .wt-page input,
         .wt-page select {
             color: var(--wt-text);
-        }
-
-        #wtSaveConfig {
-            min-height: 2.45em;
-            padding: .5em 1.1em;
-            border: 1px solid #216a96 !important;
-            border-radius: .28em;
-            background: var(--wt-primary) !important;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, .16) !important;
-            color: #fff !important;
-            font-weight: 600;
-        }
-
-        #wtSaveConfig:hover:not(:disabled) {
-            background: #216f9f !important;
-        }
-
-        #wtSaveConfig:disabled {
-            border-color: #aeb8bf !important;
-            background: #aeb8bf !important;
-            color: #fff !important;
-            opacity: .72;
         }
 
         #wtCreate {
@@ -182,7 +237,6 @@
             background: rgba(38, 49, 58, .08) !important;
         }
 
-        #wtSaveConfig:focus-visible,
         #wtCreate:focus-visible,
         .wt-refresh:focus-visible,
         .wt-roomActions button.wt-action:focus-visible {
@@ -622,7 +676,7 @@
             <div class="wt-sectionHeading">
                 <div>
                     <h2>设置</h2>
-                    <p class="fieldDescription wt-sectionDescription">播放停止行为与插件信息。</p>
+                    <p class="fieldDescription wt-sectionDescription">播放行为、更新通道与插件信息。</p>
                 </div>
             </div>
 
@@ -645,8 +699,8 @@
                     <span>同步操作时向播放端发送文字提示</span>
                 </label>
                 <div class="fieldDescription">覆盖暂停、继续、进度调整、重新同步、加入、退出、视频不一致和同步完成提示；播放端提示约 3 秒自动消失。</div>
-                <h3 class="wt-subHeading">更新通道</h3>
-                <div class="selectContainer wt-fieldWide">
+                <h3 class="wt-subHeading wt-updateSetting">更新通道</h3>
+                <div class="selectContainer wt-fieldWide wt-updateSetting">
                     <select is="emby-select" id="wtUpdateChannel" label="更新通道">
                         <option value="stable" selected>正式版 / stable</option>
                         <option value="beta">测试版 / beta</option>
@@ -655,23 +709,26 @@
                 </div>
                 <div class="fieldDescription">此设置由 Emby 服务器保存，仅管理员可以修改。</div>
                 <div class="wt-formActions">
-                    <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
+                    <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit wt-settingsButton wt-settingsButton--primary" disabled>保存设置</button>
                     <p class="fieldDescription wt-formHint" id="wtConfigStatus" role="status" aria-live="polite">正在读取配置…</p>
                 </div>
+            </div>
 
-                <h3 class="wt-subHeading">beta GitHub API Token</h3>
-                <p class="fieldDescription wt-sectionDescription">
-                    可选。仅用于 beta 更新查询 GitHub Releases API；正式版仍使用固定下载地址。Token 只保存在服务器私有配置中，不会显示或写入通用插件配置。
-                </p>
-                <div class="inputContainer wt-fieldWide">
-                    <input is="emby-input" id="wtGitHubToken" type="password" label="GitHub Token" autocomplete="off" aria-describedby="wtGitHubTokenHelp wtGitHubTokenStatus" />
-                    <div class="fieldDescription" id="wtGitHubTokenHelp">建议使用 fine-grained token，设置有效期，仅保留公开仓库读取所需的只读权限，不申请写权限或额外私有仓库权限。</div>
+            <div class="wt-subGroup" id="wtGitHubTokenSection">
+                <h3 class="wt-subHeading">GitHub Token <span class="fieldDescription">可选</span></h3>
+                <p class="fieldDescription wt-sectionDescription">用于测试版更新检查，缓解 GitHub API 限流。</p>
+                <div class="inputContainer wt-fieldWide wt-tokenField">
+                    <input is="emby-input" id="wtGitHubToken" type="password" label="输入新的 GitHub Token" placeholder="粘贴需要保存的 Token" autocomplete="new-password" spellcheck="false" autocapitalize="off" aria-describedby="wtGitHubTokenHelp wtGitHubTokenStatus" />
                 </div>
+                <details class="wt-tokenHelp">
+                    <summary>如何获取 Token</summary>
+                    <p class="fieldDescription" id="wtGitHubTokenHelp">建议使用 fine-grained token，设置有效期，并仅授予读取公开仓库所需的最小权限。可在 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub Token 设置页</a>创建。保存后不会显示已有 Token。</p>
+                </details>
                 <div class="wt-formActions">
-                    <button is="emby-button" id="wtSaveGitHubToken" type="button" class="raised button-submit" disabled>保存 Token</button>
-                    <button is="emby-button" id="wtClearGitHubToken" type="button" class="button-flat" disabled>清除 Token</button>
-                    <p class="fieldDescription wt-formHint" id="wtGitHubTokenStatus" role="status" aria-live="polite">正在读取 Token 状态…</p>
+                    <button is="emby-button" id="wtSaveGitHubToken" type="button" class="raised button-submit wt-settingsButton wt-settingsButton--primary" disabled>保存 Token</button>
+                    <button is="emby-button" id="wtClearGitHubToken" type="button" class="button-flat wt-settingsButton wt-settingsButton--secondary" disabled>清除 Token</button>
                 </div>
+                <p class="fieldDescription wt-formHint wt-tokenStatus" id="wtGitHubTokenStatus" role="status" aria-live="polite">正在读取 Token 状态…</p>
             </div>
 
             <div class="wt-subGroup" id="wtAboutSection">
