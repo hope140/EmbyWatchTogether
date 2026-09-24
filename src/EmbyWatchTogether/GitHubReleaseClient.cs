@@ -52,13 +52,15 @@ namespace Emby.Plugins.WatchTogether
         private readonly IJsonSerializer _jsonSerializer;
         private readonly string _userAgent;
         private readonly string _updateChannel;
+        private readonly Func<string> _tokenProvider;
 
         public GitHubReleaseClient(
             IHttpClient httpClient,
             string userAgent = null,
             ReleaseSignatureVerifier signatureVerifier = null,
             IJsonSerializer jsonSerializer = null,
-            string updateChannel = null)
+            string updateChannel = null,
+            Func<string> tokenProvider = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _signatureVerifier = signatureVerifier ?? ReleaseTrustStore.CreateVerifier();
@@ -67,6 +69,7 @@ namespace Emby.Plugins.WatchTogether
                 ? "EmbyWatchTogether/1.1 (+" + RepositoryUrl + ")"
                 : userAgent;
             _updateChannel = PluginConfiguration.NormalizeUpdateChannel(updateChannel);
+            _tokenProvider = tokenProvider;
         }
 
         public async Task<VerifiedPluginRelease> CheckForLatestAsync(CancellationToken cancellationToken)
@@ -344,15 +347,30 @@ namespace Emby.Plugins.WatchTogether
             HttpResponseInfo response = null;
             try
             {
-                response = await _httpClient.GetResponse(new HttpRequestOptions
+                var token = ReadApiToken();
+                var options = new HttpRequestOptions
                 {
                     Url = ReleasesApiUrl,
                     AcceptHeader = "application/vnd.github+json",
                     UserAgent = _userAgent,
+                    LogRequest = string.IsNullOrEmpty(token),
                     CancellationToken = cancellationToken,
                     ThrowOnErrorResponse = false,
                     Progress = new Progress<double>(),
-                }).ConfigureAwait(false);
+                };
+                if (!string.IsNullOrEmpty(token))
+                {
+                    options.RequestHeaders["Authorization"] = "Bearer " + token;
+                }
+
+                response = await _httpClient.GetResponse(options).ConfigureAwait(false);
+
+                if (!string.IsNullOrEmpty(token) &&
+                    response != null &&
+                    response.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    throw new ReleaseValidationException("测试版 GitHub Token 无效，请在插件管理页重新配置。");
+                }
 
                 if (response == null || response.StatusCode != HttpStatusCode.OK ||
                     (response.ContentLength.HasValue && response.ContentLength.Value > MaxApiResponseBytes))
@@ -484,6 +502,29 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Best-effort cleanup; no API response is retained.
                 }
+            }
+        }
+
+        private string ReadApiToken()
+        {
+            if (_tokenProvider == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var token = _tokenProvider();
+                if (token != null && string.IsNullOrWhiteSpace(token))
+                {
+                    throw new InvalidOperationException("configured GitHub token is empty");
+                }
+
+                return token;
+            }
+            catch (Exception)
+            {
+                throw new ReleaseValidationException("测试版 GitHub Token 无法读取，请检查插件管理页配置。");
             }
         }
 

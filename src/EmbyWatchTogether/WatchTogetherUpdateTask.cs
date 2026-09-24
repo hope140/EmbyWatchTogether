@@ -87,12 +87,32 @@ namespace Emby.Plugins.WatchTogether
             progress?.Report(0.1);
             var updateChannel = PluginConfiguration.NormalizeUpdateChannel(
                 plugin.Configuration?.UpdateChannel);
+            Func<string> tokenProvider = null;
+            if (string.Equals(updateChannel, PluginConfiguration.BetaUpdateChannel, StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(plugin.DataFolderPath))
+                {
+                    throw new InvalidOperationException(
+                        "测试版 GitHub Token 存储不可用，请稍后重试。");
+                }
+
+                var tokenStore = plugin.GitHubTokens;
+                if (tokenStore == null)
+                {
+                    throw new InvalidOperationException(
+                        "测试版 GitHub Token 存储不可用，请稍后重试。");
+                }
+
+                tokenProvider = tokenStore.GetToken;
+            }
+
             var releaseClient = new GitHubReleaseClient(
                 _httpClient,
                 "EmbyWatchTogether/" + (plugin.Version?.ToString() ?? "unknown") +
                 " (+" + GitHubReleaseClient.RepositoryUrl + ")",
                 jsonSerializer: _jsonSerializer,
-                updateChannel: updateChannel);
+                updateChannel: updateChannel,
+                tokenProvider: tokenProvider);
             await RunCheckAsync(
                 plugin,
                 releaseClient,

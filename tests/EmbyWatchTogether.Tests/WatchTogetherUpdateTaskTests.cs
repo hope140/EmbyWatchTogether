@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -53,6 +54,66 @@ namespace Emby.Plugins.WatchTogether.Tests
             await task.Execute(CancellationToken.None, progress);
 
             Assert.Equal(1, progress.Values.Last());
+        }
+
+        [Fact]
+        public async Task Execute_BetaReadsTokenFromPluginStoreAndUsesItForApiCheck()
+        {
+            var root = Path.Combine(
+                Path.GetTempPath(),
+                "watch-together-update-task-token-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var paths = new Mock<IApplicationPaths>();
+                paths.SetupGet(x => x.PluginConfigurationsPath).Returns(root);
+                var plugin = new Plugin(paths.Object, Mock.Of<IXmlSerializer>());
+                plugin.SetAttributes(
+                    Path.Combine(root, "Emby.Plugins.WatchTogether.dll"),
+                    root,
+                    new Version(1, 0, 0, 0));
+                plugin.SetStartupInfo(_ => { });
+                plugin.UpdateConfiguration(new PluginConfiguration
+                {
+                    UpdateChannel = PluginConfiguration.BetaUpdateChannel,
+                });
+                plugin.GitHubTokens.SetToken("ghp_mock_token");
+                SetPluginInstance(plugin);
+
+                HttpRequestOptions capturedRequest = null;
+                var httpClient = new Mock<IHttpClient>();
+                httpClient.Setup(x => x.GetResponse(It.IsAny<HttpRequestOptions>()))
+                    .Returns((HttpRequestOptions request) =>
+                    {
+                        capturedRequest = request;
+                        return Task.FromResult(new HttpResponseInfo
+                        {
+                            StatusCode = System.Net.HttpStatusCode.Unauthorized,
+                        });
+                    });
+                var task = new WatchTogetherUpdateTask(
+                    httpClient.Object,
+                    Mock.Of<IJsonSerializer>(),
+                    Mock.Of<IInstallationManager>(),
+                    Mock.Of<IServerApplicationHost>());
+
+                var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    task.Execute(CancellationToken.None, null));
+
+                Assert.Contains("GitHub Token 无效", exception.Message);
+                Assert.NotNull(capturedRequest);
+                Assert.Equal("Bearer ghp_mock_token", capturedRequest.RequestHeaders["Authorization"]);
+                Assert.False(capturedRequest.LogRequest);
+            }
+            finally
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+
+                SetPluginInstance(null);
+            }
         }
 
         [Fact]

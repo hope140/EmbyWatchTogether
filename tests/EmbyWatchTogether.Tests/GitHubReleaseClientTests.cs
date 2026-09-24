@@ -154,6 +154,172 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public async Task BetaCheck_WithConfiguredToken_UsesAuthorizationOnlyForReleasesApi()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                const string token = "ghp_test_token_123";
+                var apiRequests = new List<HttpRequestOptions>();
+                var downloadRequests = new List<HttpRequestOptions>();
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseApiDto>
+                    {
+                        CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
+                    },
+                    out _,
+                    captureDownloadRequest: downloadRequests.Add,
+                    captureApiRequest: apiRequests.Add,
+                    tokenProvider: () => token);
+
+                await client.CheckForLatestAsync(CancellationToken.None);
+
+                var apiRequest = Assert.Single(apiRequests);
+                Assert.Equal("Bearer " + token, apiRequest.RequestHeaders["Authorization"]);
+                Assert.False(apiRequest.LogRequest);
+                Assert.DoesNotContain(token, apiRequest.Url);
+                Assert.DoesNotContain(token, apiRequest.UserAgent);
+                Assert.Equal(3, downloadRequests.Count);
+                foreach (var downloadRequest in downloadRequests)
+                {
+                    Assert.True(downloadRequest.RequestHeaders == null ||
+                        !downloadRequest.RequestHeaders.ContainsKey("Authorization"));
+                    Assert.DoesNotContain(token, downloadRequest.Url);
+                    Assert.DoesNotContain(token, downloadRequest.UserAgent);
+                }
+
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_WithoutConfiguredToken_UsesAnonymousApiRequest()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var apiRequests = new List<HttpRequestOptions>();
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseApiDto>
+                    {
+                        CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
+                    },
+                    out _,
+                    captureApiRequest: apiRequests.Add,
+                    tokenProvider: () => null);
+
+                await client.CheckForLatestAsync(CancellationToken.None);
+
+                var apiRequest = Assert.Single(apiRequests);
+                Assert.True(apiRequest.RequestHeaders == null ||
+                    !apiRequest.RequestHeaders.ContainsKey("Authorization"));
+                Assert.True(apiRequest.LogRequest);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task StableCheck_DoesNotReadConfiguredToken()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                var providerCalled = false;
+                var client = CreateClient(
+                    fixture,
+                    out _,
+                    tokenProvider: () =>
+                    {
+                        providerCalled = true;
+                        throw new InvalidOperationException("token provider must not be read for stable");
+                    });
+
+                await client.CheckForLatestAsync(CancellationToken.None);
+
+                Assert.False(providerCalled);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_WhenTokenProviderFails_DoesNotFallBackToAnonymousOrDownloadAssets()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var apiRequests = new List<HttpRequestOptions>();
+                var downloadRequests = new List<HttpRequestOptions>();
+                var client = CreateBetaClient(
+                    fixture,
+                    new List<GitHubReleaseApiDto>
+                    {
+                        CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
+                    },
+                    out _,
+                    captureDownloadRequest: downloadRequests.Add,
+                    captureApiRequest: apiRequests.Add,
+                    tokenProvider: () => throw new InvalidOperationException("storage unavailable"));
+
+                var exception = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+
+                Assert.Contains("Token", exception.UserMessage);
+                Assert.DoesNotContain("storage unavailable", exception.UserMessage);
+                Assert.Empty(apiRequests);
+                Assert.Empty(downloadRequests);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_WhenApiRejectsToken_ReportsActionableErrorWithoutDownloadingAssets()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var downloadRequests = new List<HttpRequestOptions>();
+                var client = CreateBetaClient(
+                    fixture,
+                    null,
+                    out _,
+                    apiStatusCode: HttpStatusCode.Unauthorized,
+                    captureDownloadRequest: downloadRequests.Add,
+                    tokenProvider: () => "ghp_invalid_token");
+
+                var exception = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+
+                Assert.Contains("Token", exception.UserMessage);
+                Assert.Contains("插件管理页", exception.UserMessage);
+                Assert.DoesNotContain("ghp_invalid_token", exception.UserMessage);
+                Assert.Empty(downloadRequests);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_WhenAnonymousApiIsUnauthorized_UsesGenericApiError()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var client = CreateBetaClient(
+                    fixture,
+                    null,
+                    out _,
+                    apiStatusCode: HttpStatusCode.Unauthorized);
+
+                var exception = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+
+                Assert.Equal("测试版 Releases API 请求失败。", exception.UserMessage);
+                Assert.DoesNotContain("Token", exception.UserMessage);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Fact]
         public async Task BetaCheck_IgnoresMissingAssetsOnLowerReleaseAfterSelectingHighestVersion()
         {
             using (var fixture = SignedReleaseFixture.Create())
@@ -557,7 +723,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             HttpStatusCode apiStatusCode = HttpStatusCode.OK,
             string apiResponseUrl = null,
             Action<HttpRequestOptions> captureDownloadRequest = null,
-            Action<HttpRequestOptions> captureApiRequest = null)
+            Action<HttpRequestOptions> captureApiRequest = null,
+            Func<string> tokenProvider = null)
         {
             var apiUrls = new List<string>();
             requestedApiUrls = apiUrls;
@@ -600,14 +767,16 @@ namespace Emby.Plugins.WatchTogether.Tests
                 httpClient.Object,
                 signatureVerifier: fixture.Verifier,
                 jsonSerializer: serializer.Object,
-                updateChannel: PluginConfiguration.BetaUpdateChannel);
+                updateChannel: PluginConfiguration.BetaUpdateChannel,
+                tokenProvider: tokenProvider);
         }
 
         private static GitHubReleaseClient CreateClient(
             SignedReleaseFixture fixture,
             out Mock<IHttpClient> httpClient,
             Action<string> afterResponse = null,
-            Action<HttpRequestOptions> captureRequest = null)
+            Action<HttpRequestOptions> captureRequest = null,
+            Func<string> tokenProvider = null)
         {
             httpClient = new Mock<IHttpClient>();
             httpClient.Setup(x => x.GetTempFileResponse(It.IsAny<HttpRequestOptions>()))
@@ -622,7 +791,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             return new GitHubReleaseClient(
                 httpClient.Object,
-                signatureVerifier: fixture.Verifier);
+                signatureVerifier: fixture.Verifier,
+                tokenProvider: tokenProvider);
         }
 
         private sealed class SignedReleaseFixture : IDisposable
