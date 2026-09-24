@@ -823,6 +823,99 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function setGitHubTokenStatus(page, text, isError) {
+        var el = page.querySelector('#wtGitHubTokenStatus');
+        if (el) {
+            el.textContent = text;
+            el.classList.toggle('error', !!isError);
+        }
+    }
+
+    function setGitHubTokenBusy(page, isBusy) {
+        var input = page.querySelector('#wtGitHubToken');
+        var saveButton = page.querySelector('#wtSaveGitHubToken');
+        var clearButton = page.querySelector('#wtClearGitHubToken');
+        if (input) {
+            input.disabled = isBusy;
+        }
+        if (saveButton) {
+            saveButton.disabled = isBusy || !page._wtGitHubTokenReady;
+            saveButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+            saveButton.textContent = isBusy ? '保存中…' : '保存 Token';
+        }
+        if (clearButton) {
+            clearButton.disabled = isBusy || !page._wtGitHubTokenReady;
+            clearButton.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+        }
+    }
+
+    function clearGitHubTokenInput(page) {
+        var input = page.querySelector('#wtGitHubToken');
+        if (input) {
+            input.value = '';
+        }
+    }
+
+    function loadGitHubTokenStatus(page) {
+        page._wtGitHubTokenReady = false;
+        setGitHubTokenStatus(page, '正在读取 Token 状态…');
+        setGitHubTokenBusy(page, true);
+        return apiGet('WatchTogether/GitHubToken').then(function (result) {
+            page._wtGitHubTokenReady = true;
+            setGitHubTokenStatus(page, result && result.Configured ? 'Token 已配置。' : '尚未配置 Token。');
+        }).catch(function (error) {
+            page._wtGitHubTokenReady = false;
+            setGitHubTokenStatus(page,
+                isPermissionError(error) ? '只有管理员可以查看和修改 Token。' : 'Token 状态读取失败，请稍后重试。', true);
+        }).then(function () {
+            setGitHubTokenBusy(page, false);
+        });
+    }
+
+    function saveGitHubToken(page) {
+        var input = page.querySelector('#wtGitHubToken');
+        var value = input ? String(input.value || '').trim() : '';
+        if (!value) {
+            setGitHubTokenStatus(page, '请输入 GitHub Token。', true);
+            if (input) {
+                input.focus();
+            }
+            return Promise.resolve();
+        }
+
+        setGitHubTokenBusy(page, true);
+        setGitHubTokenStatus(page, '正在保存 Token…');
+        return apiSend('WatchTogether/GitHubToken', 'POST', { Token: value }).then(function (result) {
+            clearGitHubTokenInput(page);
+            setGitHubTokenStatus(page, result && result.Configured ? 'Token 已保存。' : 'Token 未配置。');
+        }).catch(function (error) {
+            setGitHubTokenStatus(page,
+                isPermissionError(error) ? '保存被拒绝：只有管理员可以修改 Token。' : 'Token 保存失败，请稍后重试。', true);
+        }).then(function () {
+            clearGitHubTokenInput(page);
+            setGitHubTokenBusy(page, false);
+        });
+    }
+
+    function clearGitHubToken(page) {
+        if (!window.confirm('清除 GitHub Token 后，beta 更新查询将恢复使用匿名 API，确认清除吗？')) {
+            return;
+        }
+
+        setGitHubTokenBusy(page, true);
+        setGitHubTokenStatus(page, '正在清除 Token…');
+        return apiSend('WatchTogether/GitHubToken', 'DELETE').then(function (result) {
+            clearGitHubTokenInput(page);
+            setGitHubTokenStatus(page, result && result.Configured ? 'Token 仍已配置。' : 'Token 已清除。');
+        }).catch(function (error) {
+            setGitHubTokenStatus(page,
+                isPermissionError(error) ? '清除被拒绝：只有管理员可以修改 Token。' : 'Token 清除失败，请稍后重试。', true);
+        }).then(function () {
+            clearGitHubTokenInput(page);
+            setGitHubTokenBusy(page, false);
+        });
+    }
+
     function isPermissionError(error) {
         return !!(error && (error.status === 401 || error.status === 403 ||
             error.statusCode === 401 || error.statusCode === 403));
@@ -929,7 +1022,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             applyPluginConfiguration(page, config);
             setAdminVisibility(page, true);
             setConfigStatus(page, '配置已读取');
-            return config;
+            return loadGitHubTokenStatus(page).then(function () {
+                return config;
+            });
         }).catch(function (error) {
             page._wtConfigReady = false;
             var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
@@ -1733,6 +1828,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         dom.addEventListener(page.querySelector('#wtSaveConfig'), 'click', function () {
             savePluginConfiguration(page);
         });
+        dom.addEventListener(page.querySelector('#wtSaveGitHubToken'), 'click', function () {
+            saveGitHubToken(page);
+        });
+        dom.addEventListener(page.querySelector('#wtClearGitHubToken'), 'click', function () {
+            clearGitHubToken(page);
+        });
         dom.addEventListener(page.querySelector('#wtCreate'), 'click', function () {
             createRoom(page);
         });
@@ -1808,6 +1909,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             clearTimeout(page._wtStatusTimer);
             page._wtStatusTimer = null;
         }
+        clearGitHubTokenInput(page);
         BaseView.prototype.onPause.apply(this, arguments);
     };
 

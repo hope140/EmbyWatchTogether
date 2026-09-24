@@ -21,9 +21,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnosticsV2");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnostics.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherDiagnosticsV2.js");
         }
 
         [Fact]
@@ -49,7 +49,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherDiagnostics");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherDiagnosticsV2");
             Assert.Equal("sync", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
@@ -69,7 +69,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherDiagnostics.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherDiagnosticsV2.js\"", html);
             Assert.DoesNotContain("<h1>一起看</h1>", html);
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
@@ -81,6 +81,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("beta 可接收 stable 与 prerelease 中的更高版本", html);
             Assert.Contains("aria-live=\"polite\"", html);
             Assert.Contains("wtSaveConfig", html);
+            Assert.Contains("wtGitHubToken", html);
+            Assert.Contains("type=\"password\"", html);
+            Assert.Contains("autocomplete=\"off\"", html);
+            Assert.Contains("wtSaveGitHubToken", html);
+            Assert.Contains("wtClearGitHubToken", html);
+            Assert.Contains("aria-describedby=\"wtGitHubTokenHelp wtGitHubTokenStatus\"", html);
             Assert.Contains("wtPluginVersion", html);
             Assert.Contains("wtRepositoryLink", html);
             Assert.Contains("--wt-text: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)));", html);
@@ -154,6 +160,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("_wtUpdateBusy", javascript);
             Assert.Contains("dataType: 'json'", javascript);
             Assert.Contains("setAdminVisibility", javascript);
+            Assert.Contains("WatchTogether/GitHubToken", javascript);
+            Assert.Contains("loadGitHubTokenStatus", javascript);
+            Assert.Contains("clearGitHubTokenInput", javascript);
+            Assert.Contains("只有管理员可以查看和修改 Token", javascript);
+            Assert.DoesNotContain("_wtPluginConfiguration.GitHubToken", javascript);
             Assert.Contains("wtRoomsHeading", html);
             Assert.Contains(">创建房间</h2>", html);
             Assert.DoesNotContain(">1. 创建房间</h2>", html);

@@ -85,6 +85,8 @@ stable 检查入口使用这三个资产的 `releases/latest/download/<asset>` �
 
 Releases API 查询仍使用 20 秒有界超时；DLL、manifest 和 detached signature 三项固定资产下载使用 60 秒有界超时，以覆盖较慢的 GitHub/CDN 网络。超时调整不改变资产来源、签名、哈希、程序集身份和版本校验，也不改变失败清理与 fail closed 行为。
 
+管理员可在插件管理页配置可选的 GitHub fine-grained token，建议仅授予本仓库 `Contents: read` 并设置有效期。Token 只附加到 beta Releases API 查询，stable 和固定资产下载均不携带 Token。未配置 Token 时 beta 继续使用匿名 API，但会受匿名请求额度影响；管理页只显示“已配置/未配置”状态，不回显 Token，也不写入通用插件配置。
+
 ## 项目结构
 
 ```text

@@ -130,3 +130,9 @@
 - 结论：缓存能力只证明该会话曾声明远控命令，不能证明当前 WebSocket 可用；全局资格和初始 Barrier 继续使用严格规则。只有身份连续、同一有效媒体、没有 Pending 且仍有有效能力证据的既有 `Watching` 会话可以等待最多 8 秒恢复，窗口内不发送命令。
 - 规则：恢复窗口必须绑定 SessionId、ItemId 和受影响用户集合，不得刷新同一故障的起始时间；身份、Item、有效能力、Pending 或用户集合变化立即退出，超时仍执行现有安全暂停。窗口内真实暂停或 Seek 在能力恢复后按保留快照最多处理一次。
 - 验证：两次真实 ETLP/Emby 日志均显示 HTTP 进度正常、WebSocket `ConnectionResetError`、重连后重新声明能力并恢复命令；`SyncEngineTests` 覆盖短暂恢复、8 秒超时、初始 Waiting、Session/Item 变化、Pending、有效能力消失、恢复后的 Pause/Seek 以及重置清理。真实测试版客户端验收仍待执行。
+
+## 18. 嵌入式页面更新时必须同步页面缓存键
+
+- 现象：只替换嵌入式 HTML 或 JavaScript 资源时，Emby Web 可能继续使用旧缓存，导致新界面与旧控制器不匹配。
+- 结论：修改嵌入式管理页时，同时递增 `Plugin.GetPages()` 中 HTML 页面和 JavaScript 控制器的 `Name`，并让 HTML 的 `data-controller` 使用新的控制器键；对应页面测试必须检查三者一致。
+- 验证：GitHub Token 管理区加入后，页面键和控制器键同步更新为 `WatchTogetherDiagnosticsV2` / `WatchTogetherDiagnosticsV2.js`，`PluginPagesTests` 检查嵌入资源与控制器声明。

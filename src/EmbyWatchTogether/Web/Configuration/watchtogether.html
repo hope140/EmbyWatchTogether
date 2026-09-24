@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherDiagnostics.js"
+     data-controller="__plugin/WatchTogetherDiagnosticsV2.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -657,6 +657,20 @@
                 <div class="wt-formActions">
                     <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
                     <p class="fieldDescription wt-formHint" id="wtConfigStatus" role="status" aria-live="polite">正在读取配置…</p>
+                </div>
+
+                <h3 class="wt-subHeading">beta GitHub API Token</h3>
+                <p class="fieldDescription wt-sectionDescription">
+                    可选。仅用于 beta 更新查询 GitHub Releases API；正式版仍使用固定下载地址。Token 只保存在服务器私有配置中，不会显示或写入通用插件配置。
+                </p>
+                <div class="inputContainer wt-fieldWide">
+                    <input is="emby-input" id="wtGitHubToken" type="password" label="GitHub Token" autocomplete="off" aria-describedby="wtGitHubTokenHelp wtGitHubTokenStatus" />
+                    <div class="fieldDescription" id="wtGitHubTokenHelp">建议使用只允许本仓库 Contents read 的 fine-grained token，并设置有效期。</div>
+                </div>
+                <div class="wt-formActions">
+                    <button is="emby-button" id="wtSaveGitHubToken" type="button" class="raised button-submit" disabled>保存 Token</button>
+                    <button is="emby-button" id="wtClearGitHubToken" type="button" class="button-flat" disabled>清除 Token</button>
+                    <p class="fieldDescription wt-formHint" id="wtGitHubTokenStatus" role="status" aria-live="polite">正在读取 Token 状态…</p>
                 </div>
             </div>
 

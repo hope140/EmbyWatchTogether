@@ -41,6 +41,8 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 更新组件由 `GitHubReleaseClient`、`PluginUpdateManager`、`ReleaseSignatureVerifier` 和 `ReleaseTrustStore` 协作：默认 `stable` 通道从固定的 `releases/latest` 资产读取，管理员选择 `beta` 后先从公开 Releases API 的非 draft stable 与 prerelease 中选择最高规范版本，再构造本仓库规范数字 tag 的固定资产地址；API 返回的下载地址不作为安装来源。两条通道最终都校验 manifest 的版本、大小、SHA-256、tag 与 detached RSA 签名，未知 key、当前插件版本不可读或校验失败时 fail closed；GitHub 资产下载允许其官方 CDN 重定向，但不会因此放宽内容验签。每次检查会使旧的已验证 release 缓存失效。检查、发现版本、安装成功或失败及待重启等结果统一通过 Emby Web 管理端的 `GeneralCommand` / `DisplayMessage` 短提示反馈；提示发送失败只记录日志，不改变已经完成的检查或安装事实。发布 workflow 负责构建和资产发布，不负责服务器部署。
 
+管理员可在嵌入式管理页保存可选的 GitHub fine-grained token。Token 仅用于 beta Releases API 请求，stable 查询和两条通道的固定资产下载均不携带 Token；未配置 Token 时 beta 继续使用匿名 API。Token 保存在独立的私有存储中，不进入通用插件配置或页面回显。
+
 ## 证据与维护
 
 上述结论来自 `src/EmbyWatchTogether` 的入口、房间、会话、同步和发布信任实现，以及对应 `tests/EmbyWatchTogether.Tests` 测试。新增跨组件约束时先补测试或文档证据，再更新本文；稳定决策另建 ADR。
