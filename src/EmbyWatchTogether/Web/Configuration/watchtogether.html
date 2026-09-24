@@ -665,7 +665,7 @@
                 </p>
                 <div class="inputContainer wt-fieldWide">
                     <input is="emby-input" id="wtGitHubToken" type="password" label="GitHub Token" autocomplete="off" aria-describedby="wtGitHubTokenHelp wtGitHubTokenStatus" />
-                    <div class="fieldDescription" id="wtGitHubTokenHelp">建议使用只允许本仓库 Contents read 的 fine-grained token，并设置有效期。</div>
+                    <div class="fieldDescription" id="wtGitHubTokenHelp">建议使用 fine-grained token，设置有效期，仅保留公开仓库读取所需的只读权限，不申请写权限或额外私有仓库权限。</div>
                 </div>
                 <div class="wt-formActions">
                     <button is="emby-button" id="wtSaveGitHubToken" type="button" class="raised button-submit" disabled>保存 Token</button>

@@ -51,7 +51,7 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 
 当前 beta 对 DLL、manifest 和 signature 三项固定资产使用 60 秒的有界下载超时，以适应较慢的 GitHub/CDN 网络；Releases API 查询仍使用 20 秒超时。签名、哈希、来源和身份校验以及失败清理规则不变。
 
-管理员可在插件管理页输入可选的 GitHub fine-grained token，建议只授予本仓库 `Contents: read` 权限并设置有效期。Token 仅用于 beta 的 Releases API 查询，正式版继续使用固定的 `releases/latest` 下载地址，固定资产下载也不携带 Token。未配置 Token 时 beta 仍可使用匿名 API，但受 GitHub 按出口 IP 计算的匿名请求额度影响；Token 只显示“已配置/未配置”状态，保存内容不会回显或写入通用插件配置。
+管理员可在插件管理页输入可选的 GitHub fine-grained token，建议设置有效期，仅保留公开仓库读取所需的只读权限，不申请写权限或额外私有仓库权限。Token 仅用于 beta 的 Releases API 查询，正式版继续使用固定的 `releases/latest` 下载地址，固定资产下载也不携带 Token。未配置 Token 时 beta 仍可使用匿名 API，但受 GitHub 按出口 IP 计算的匿名请求额度影响；Token 只显示“已配置/未配置”状态，保存内容不会回显或写入通用插件配置。
 
 首次信任引导版本 `1.2.0.9` 必须由运营人工部署；完成后版本方可使用签名自动更新。如果服务器尚未完成首次信任引导，请先按人工安装方式部署该版本。正式版更新的发布资产、签名格式和信任根约束见[技术文档中的更新实现说明](docs/technical.md#正式版更新实现约束)。
 
