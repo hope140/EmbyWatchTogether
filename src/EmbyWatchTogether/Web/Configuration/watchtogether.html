@@ -101,7 +101,8 @@
         }
 
         .wt-settingsButton {
-            min-height: 2.45em;
+            min-height: 44px;
+            margin: 0 !important;
             padding: .5em 1.1em;
             border: 1px solid transparent !important;
             border-radius: .28em !important;
@@ -141,8 +142,13 @@
             opacity: .62;
         }
 
-        .wt-updateSetting {
+        h3.wt-updateSetting {
             margin-top: 1.15em;
+        }
+
+        .selectContainer.wt-updateSetting {
+            width: 100%;
+            max-width: 40em;
         }
 
         .wt-updateSetting select,
@@ -169,12 +175,19 @@
 
         .wt-tokenStatus {
             display: block;
+            margin-top: .5em;
             max-width: 52em;
             overflow-wrap: anywhere;
         }
 
         .wt-page #wtGitHubTokenStatus.error {
-            color: var(--theme-error-color, #c62828) !important;
+            color: var(--wt-text) !important;
+            font-weight: 600;
+        }
+
+        .wt-optional {
+            font-size: .85em;
+            font-weight: 400;
         }
 
         .wt-invitationCode {
@@ -715,7 +728,7 @@
             </div>
 
             <div class="wt-subGroup" id="wtGitHubTokenSection">
-                <h3 class="wt-subHeading">GitHub Token <span class="fieldDescription">可选</span></h3>
+                <h3 class="wt-subHeading">GitHub Token <span class="wt-optional">可选</span></h3>
                 <p class="fieldDescription wt-sectionDescription">用于测试版更新检查，缓解 GitHub API 限流。</p>
                 <div class="inputContainer wt-fieldWide wt-tokenField">
                     <input is="emby-input" id="wtGitHubToken" type="password" label="输入新的 GitHub Token" placeholder="粘贴需要保存的 Token" autocomplete="new-password" spellcheck="false" autocapitalize="off" aria-describedby="wtGitHubTokenHelp wtGitHubTokenStatus" />

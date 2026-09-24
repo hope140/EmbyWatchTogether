@@ -93,6 +93,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("https://github.com/settings/personal-access-tokens/new", html);
             Assert.Contains("wt-settingsButton--primary", html);
             Assert.Contains("wt-settingsButton--secondary", html);
+            Assert.Contains("min-height: 44px", html);
+            Assert.Contains(".selectContainer.wt-updateSetting", html);
+            Assert.Contains(".wt-tokenStatus", html);
+            Assert.Contains(".wt-optional", html);
             Assert.Contains("max-width: 40em", html);
             Assert.Contains("wtPluginVersion", html);
             Assert.Contains("wtRepositoryLink", html);
