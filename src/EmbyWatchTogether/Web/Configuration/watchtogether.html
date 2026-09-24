@@ -168,6 +168,23 @@
             cursor: pointer;
         }
 
+        .wt-tokenHelp a,
+        .wt-tokenHelp a:visited {
+            color: var(--wt-primary);
+            text-decoration: underline;
+        }
+
+        .wt-tokenHelp a:hover {
+            color: var(--wt-primary);
+            font-weight: 600;
+        }
+
+        .wt-tokenHelp a:focus-visible {
+            color: var(--wt-primary);
+            outline: 2px solid var(--wt-primary);
+            outline-offset: 2px;
+        }
+
         .wt-tokenHelp .fieldDescription {
             max-width: 52em;
             margin: .55em 0 0;
