@@ -29,6 +29,12 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 - `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后创建者或管理员可按房间权限结束自助房间。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 在当前房间 gate 内重新校验房间、成员和服务器身份，返回只读、有界、脱敏的同步诊断 DTO。诊断事件环、当前选中快照、Pending、Handoff 和 Barrier 状态仅驻留 `RoomRuntime` 内存，房间删除或运行时重建时丢弃，不写入 `rooms.json`；导出使用 `userA`/`userB` 别名、短 hash 和稳定错误分类，不包含用户名、GUID、Token、路径或异常文本。
 
+## 嵌入式 UI
+
+UI 继续由嵌入式 HTML 和 AMD JavaScript 实现，复用 Emby 的 `mainTabsManager`、原生输入框、选择框、开关、列表和按钮。`Plugin.GetPages()` 注册“我的房间、房间管理、设置”三个路由，共用相同资源；只有“我的房间”进入用户菜单。管理员路由在权限结果返回后初始化，服务端继续决定所有读取和操作权限。
+
+页面读取 `/Rooms` 和参与者 `/State`；新增的 `CurrentUserIsParticipant`、`IsAdmin`、`RunTimeTicks` 仅用于只读展示。读取通过页面 generation 与资源 sequence 丢弃迟到响应，账号变化会清空旧房间、邀请、诊断、配置草稿及 Token 输入并暂停交互，重新进入页面后再加载权限。离页同时停止轮询和移除更多菜单/分页的 document 监听。Token 使用现有独立私有存储和 API，UI 不回显已有 Token。
+
 ## 状态与持久化
 
 起播 `Barrier` 按 Pause → Seek（仅非锚点用户）→ Restore 执行，远程命令等待会话快照确认；进入 Restore 前，锚点和另一端都必须在固定 Seek 目标的容差内。Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的绝对预算内重试；只有检测到锚点有当前远程命令无法解释的明显新位置操作时，才显式重建 Barrier。正常 `Watching` 期间只传播明确暂停/继续和明显手动 Seek，不做周期性追帧；同一 Session/Item 的原始远控标志短暂丢失且仍有有效能力证据、没有 Pending 命令时，使用绑定身份和受影响用户集合的 8 秒内存恢复窗口，期间不发送命令，恢复后继续观察，超时或条件变化仍进入严格等待。

@@ -15,7 +15,17 @@
 | Release build | PASS，0 warning / 0 error |
 | `git diff --check` | PASS |
 
-## 验收矩阵
+## S114 主线程集成回归（2026-10-18）
+
+源码基线 `2f3f481`，版本 `1.6.0.5`；包含 S111 换集诊断和原生风格 UI，Phase E 策略冲突候选尚未并入。
+
+- `scripts/build.ps1 -Configuration Release`：Release build 0 warning / 0 error，.NET 519/519，publish 与单 DLL ZIP 成功。
+- `tests/build-path-guard.tests.ps1`、`release-signing.tests.ps1`、`release-workflow.tests.ps1`、`ci-workflow.tests.ps1`：全部通过。签名测试不代表已执行正式发布。
+- 主线程在独立集成工作区执行 `npm ci` 与完整 Playwright：35/35，通过真实生产 HTML/JS 的模拟宿主回归；生产控制器 `node --check` 与 `git diff --check` 通过。
+- 主线程已查看桌面深色设置页及 390px 设置页截图；模拟宿主背景问题已修正，并以设置页主体背景/文字对比度断言保护。普通成员、管理员成员/非成员、邀请、房间、设置、诊断及 320–1920px 布局由浏览器门禁覆盖。
+- 账号变化后的旧按钮操作、迟到 Token 响应和十次 pause/resume 单实例监听已纳入门禁。真实 Emby 的顶栏、主题 CSS、登录切换、缓存和双端播放仍需在最终部署构建中验收。
+
+## 历史与持续验收矩阵
 
 以下项目仅在对应命令或真实环境执行后更新。
 

@@ -136,3 +136,9 @@
 - 现象：只替换嵌入式 HTML 或 JavaScript 资源时，Emby Web 可能继续使用旧缓存，导致新界面与旧控制器不匹配。
 - 结论：修改嵌入式管理页时，同时递增 `Plugin.GetPages()` 中 HTML 页面和 JavaScript 控制器的 `Name`，并让 HTML 的 `data-controller` 使用新的控制器键；对应页面测试必须检查三者一致。
 - 验证：GitHub Token 管理区加入后，页面键和控制器键同步更新为 `WatchTogetherDiagnosticsV2` / `WatchTogetherDiagnosticsV2.js`，`PluginPagesTests` 检查嵌入资源与控制器声明。
+
+## 19. 页面账号变化必须同步使读取和操作失效
+
+- 现象：为 Token 加入迟到响应隔离后，单独清空输入框仍会保留旧账号的房间、邀请和管理员视图；若只在读取回调中检查账号，切换后的第一下操作还可能使用旧页面对象。
+- 规则：页面 mutation 入口与异步回写都核对当前账号，区分 SDK 身份未知与已知登出；身份变化使整个页面 generation 失效、停止轮询、清空旧数据并禁止交互，正常 resume 后重新加载权限。document 级菜单监听在 pause 时解绑，不能在每次子视图切换时重复注册。
+- 验证：UI 浏览器测试覆盖账号变化后立即触发旧邀请/房间动作且零新增 POST/DELETE、迟到 Token 响应、正常 resume 恢复，以及十次 pause/resume 后仅有一组活跃菜单监听。模拟宿主测试不等于真实 Emby 多账号验收。

@@ -76,8 +76,8 @@
 
 实施顺序为 S0 契约、S1 视觉基础、S2 生命周期/身份/State、S3 交互、S4 条件媒体展示、S5 浏览器验证和本地打包。共享 HTML/JS 的 Stack 串行执行，每个 Stack 使用独立 branch/worktree 和本地 commit；单 Stack 以 revert 该 commit 回滚。
 
-## 本地测试包身份
+## 历史本地测试包身份
 
-本轮不改变项目版本。最终包必须使用名称 `EmbyWatchTogether-UI-VNext-localtest-<short-sha>-UNSIGNED.zip`，并附 `SHA256.txt` 与 `PROVENANCE.txt`。Provenance 必须记录完整 commit、构建时间、程序集版本及 DLL/ZIP 哈希，并明确 `UNSIGNED / LOCAL TEST / NOT A RELEASE`。
+早期 UI VNext 阶段未改变项目版本，其本地包名称为 `EmbyWatchTogether-UI-VNext-localtest-<short-sha>-UNSIGNED.zip`，并附 `SHA256.txt` 与 `PROVENANCE.txt`。历史 Provenance 记录完整 commit、构建时间、程序集版本及 DLL/ZIP 哈希，并明确 `UNSIGNED / LOCAL TEST / NOT A RELEASE`。
 
-ZIP 根目录仍只包含 `Emby.Plugins.WatchTogether.dll`。不得生成发布 manifest/signature、创建 tag、运行发布 workflow、上传或部署。由于程序集版本仍为已发布的 `1.6.0.1`，测试包只能通过 commit 与 SHA-256 区分。
+这些历史包的程序集版本为 `1.6.0.1`，通过 commit 与 SHA-256 区分。2026-10-18 的本地整合保留 `1.6.0.5`，构建输出只用于本地验证，不能冒充已发布的同版本资产。统一正式版按当前开发排期验收后另行准备；ZIP 根目录继续只包含 `Emby.Plugins.WatchTogether.dll`。
