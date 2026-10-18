@@ -20,6 +20,8 @@
 
 各 Stack 串行、独立分支及 worktree；后继从直接前置已审核 commit 建立。主线程拥有跨 Stack 合并、冲突解决、完整 diff 审核、回归及本地 beta 集成。子代理仅在完整派发契约及真实隔离核验后写入。所有步骤保留原独立分支和原工作区改动。
 
+执行调整：S112 首轮集成发现 beta 晚到换片与 Phase E 主用户缺失恢复对同一输入存在行为冲突，541 项测试中 6 项失败，策略选择待用户确认。S112 暂停修改；S113 改从已审核 S111 `98ace2b` 建立，先完成独立 UI 整合。S114 再负责最终功能与 UI 汇合，Phase E 状态展示在该决策确定后接入。
+
 共用知识输入：`AGENTS.md`、`docs/pr-stack-workflow.md`、`docs/architecture.md`、`docs/lessons-learned.md`；Phase E 另读 ADR-003，UI 另读原 UI VNext 契约与验证记录。
 
 ## PR Stack 计划
@@ -51,7 +53,7 @@
 ### S113：整合 Emby 原生风格 UI
 
 - 目标：复用既有 UI VNext 的原生分页、表单及列表，接回 beta Token 设置和 Phase E 状态。
-- 基础分支：S112 已审核 commit；前置依赖：S112。
+- 基础分支：S111 已审核 commit `98ace2b`；前置依赖：S111；S112 策略确认后由 S114 汇合。
 - 允许修改及所有权：`Plugin.cs`、`WatchTogetherService.cs` 的只读展示字段、`Web/Configuration/watchtogether.html`、`watchtogether.js`、`PluginPagesTests.cs`、`WatchTogetherServiceRoomTests.cs`、`tests/ui/`、UI 契约/验证文档。
 - 禁止修改：同步引擎、会话选择、房间/邀请生命周期、Token 存储/API、更新器、版本及发布工作流。
 - 实现边界：保留 HTML/AMD 和现有动作语义；轮询不丢失输入/焦点，离页/换账号清理，服务端权限仍为边界；HTML 与控制器缓存键联动更新。
@@ -79,3 +81,11 @@
 3. UI 设计与集成功能验收完成后，统一准备正式版版本号、发布说明和签名发布。
 
 当前步骤 2、3 待执行。原生媒体名称、封面、头像沿用权限门禁；未验证的媒体权限继续使用占位。
+
+## 本轮整合状态
+
+- S111：`98ace2b`，已收录原 S110 六项精确文件；issuer/SyncEngine 相关 173 项测试通过。原 S110 工作区未提交改动完整保留。
+- NAS 文件身份：本轮只读核验，当前安装 DLL 与本机原 S110 产物及历史部署 receipt 的 SHA-256 三者一致。本轮未部署新构建。
+- S112：合并候选暂存于独立工作区；541 项测试中 535 通过、6 项失败，均指向主用户会话缺失恢复与 beta 晚到换集路径。尚未将该候选并入 beta。
+- 待确认的策略：保留当前 beta 的 2 秒停止观察与 10 秒晚到换集识别，或使用 Phase E 等待原会话且拒绝替换会话的路径。不能同时把两套互相矛盾的预期标为通过。
+- S113：从 S111 独立整合原生风格 UI，保留 beta Token 能力；当前策略选择不阻塞本 Stack。

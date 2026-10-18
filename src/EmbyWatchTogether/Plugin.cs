@@ -142,9 +142,9 @@ namespace Emby.Plugins.WatchTogether
             {
                 new PluginPageInfo
                 {
-                    // Change the page key together with the controller key so
-                    // Emby Web refreshes the embedded HTML cache as well.
-                    Name = "WatchTogetherSettingsV3",
+                    // Each route has its own page key so Emby Web can resolve
+                    // the tab URL through the normal configuration-page router.
+                    Name = "WatchTogetherUiMineV4",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
@@ -152,14 +152,31 @@ namespace Emby.Plugins.WatchTogether
                     MenuSection = "server",
                     MenuIcon = "sync",
                 },
-                // Controller module for the page above. Emby serves embedded
-                // resources by page Name, so the .js resource must be declared
-                // as its own page entry (same convention as ChapterApi pages).
                 new PluginPageInfo
                 {
-                    // Use a new controller name so Emby Web does not reuse a
-                    // cached copy of the previous embedded module.
-                    Name = "WatchTogetherSettingsV3.js",
+                    Name = "WatchTogetherUiManageV4",
+                    DisplayName = "Watch Together",
+                    EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
+                    EnableInMainMenu = false,
+                    EnableInUserMenu = false,
+                    MenuSection = "server",
+                    MenuIcon = "sync",
+                },
+                new PluginPageInfo
+                {
+                    Name = "WatchTogetherUiSettingsV4",
+                    DisplayName = "Watch Together",
+                    EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
+                    EnableInMainMenu = false,
+                    EnableInUserMenu = false,
+                    MenuSection = "server",
+                    MenuIcon = "sync",
+                },
+                // Emby serves embedded resources by page Name, so the shared
+                // controller module must be declared as its own page entry.
+                new PluginPageInfo
+                {
+                    Name = "WatchTogetherUiNativeTabsV4.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };
