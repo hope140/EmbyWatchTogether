@@ -5,7 +5,7 @@
 ## 运行时行为与约束
 
 - 起播同步使用 `Barrier`：先暂停双方，以主用户位置为锚点对齐另一端，再恢复起播前的暂停/播放状态。进入恢复阶段前，双方都必须在固定 Seek 目标的容差内；Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的预算内有限重试。
-- `Watching` 阶段只传播明确的暂停/继续和明显的手动 Seek，不做周期性追帧。主用户同时操作时作为冲突裁决者；命令确认、抑制窗口以及 session identity、Item、设备会话绑定用于避免回环和旧会话误控制。
+- `Watching` 阶段传播明确的暂停/继续和明显的手动 Seek；持续明显漂移满足 Phase E 的门槛时，以低频 Barrier 重新对齐。主用户同时操作时作为冲突裁决者；命令确认、抑制窗口以及 session identity、Item、设备会话绑定用于避免回环和旧会话误控制。
 - 已绑定的 `Watching` 会话若仅出现原始远控标志短暂丢失，而同一 Session/Item 的有效能力证据仍在、双方仍为同一有效媒体且没有 Pending 命令，则最多等待 8 秒恢复。窗口内不推进 `WatchingTick`、不发命令或提示；恢复后按保留的上一轮快照处理真实暂停或 Seek，超时及身份、Item、能力或 Pending 变化立即回到现有严格路径。
 - `Watching` 中主用户切换 Item 时进入独立的 `Handoff` 状态。插件通过 `SessionBridge` 的 `PlayItem` 抽象让非 Primary 参与者打开主用户当前 Item，收到当前用户、Session 和 ItemId 均匹配的快照确认后才进入 `Barrier`；参与者自行切换 Item 仍回到安全 `Waiting`，不会让主用户跟随。两人同时播放时按安全规则暂停活跃会话，单人播放受到保护。
 - `PlaybackStopped` 事件只用于立即唤醒轮询，不直接确认停止。`Watching` 开始后，停止、离线或缺失状态持续达到 2 秒才确认停止；原有 2 秒窗口用于区分主用户的 Stop A → Start B 媒体交接，窗口内出现新主用户 Item 时不执行普通停止副作用。若新主用户会话晚于该窗口出现，插件还会保留最长 10 秒的有界换集候选，满足房间成员、会话身份和目标 Item 条件后继续进入 Handoff；候选过期或条件变化时回到安全等待。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。合法的 seek-to-zero 不单独视为停止。
@@ -19,6 +19,12 @@
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 是只读诊断接口，普通参与者和管理员可读取当前房间。接口在 room gate 内重新检查房间、成员和当前 `ServerId`，初始化未完成、房间不存在或服务器身份不匹配时沿用现有稳定错误语义；读取不会调用 `ICommandIssuer` 或消息发送器。返回字段采用白名单 DTO，`RoomRuntime` 保存最多 500 条连续去重事件、最近选中快照和最近动作，均为内存状态，删除房间或重启后清空；页面和导出只取最近 50 条，并按最新在前显示。快照位置、能力和命令确认延迟均表示服务端观察值，不代表客户端已实际执行。
 - 已加入的普通参与者可以通过 `POST /WatchTogether/Rooms/{Id}/Resync` 请求重新同步。请求在 room gate 内再次核验成员、加入状态、当前 `ServerId`、快照保护状态和运行中操作；`Barrier`、`Handoff` 或任意 Pending 存在时返回稳定的 busy 结果，不清理当前同步。受理后仅在内存中记录一次性请求，由轮询读取 Primary 当前 Item：参与者已在相同 Item 时直接进入原有 `Barrier`，Item 不同则通过 `PlayItem` Handoff 等待确认后再进入 Barrier。发送失败或确认超时会回到安全 `Waiting`，之后仍可在冷却结束后再次请求。响应的 `Status` 只使用 `accepted`、`busy`、`unavailable`，`Reason` 使用稳定原因码。
 - 阶段 C 的自助邀请只驻留 `RoomInvitationManager` 内存。`POST /WatchTogether/Invitations` 创建 15 分钟有效的一次性邀请码，服务端只保存 SHA-256 校验值；`GET` 只返回当前用户的有效邀请元数据，`DELETE` 可撤销，`POST /WatchTogether/Invitations/{Code}/Accept` 在同一串行边界内检查接受者、成员占用和房间持久化后消费邀请码。每位创建者最多 3 个有效邀请，全局最多 100 个，接受尝试按用户每分钟 5 次、全局每分钟 100 次限制。重启后邀请失效，现有 `rooms.json` 房间不受影响。
+
+## Phase E Playback Stability
+
+- `Recovering` 只从 `Watching` 的非 Primary 参与者已绑定 Session 短暂缺失进入，窗口固定为 10 秒。缺失会话按原 User、原 SessionId、原 ItemId、在线和有效播放身份恢复，并重新执行一次 `Barrier`；Primary 缺失、停止、Session 或 Item 变化会先交还既有停止 debounce/晚到换集 Handoff，参与者替换 SessionId、超时和显式停止都不会自动恢复。
+- Drift telemetry 只在 `Watching`、同 Item、双方 actively playing、倍速接近 1x、无 Pending/Handoff/Barrier/Recovering 时采样，定义为 `Participant.PositionTicks - Primary.PositionTicks`。观察阈值为 1.5 秒，自动纠偏阈值为 3 秒，hold 为 5 秒，cooldown 为 120 秒。
+- 自动纠偏只启动一次既有 `Barrier`，不执行连续追帧式 Seek。Recovery、drift hold、cooldown、最近自动纠偏和事件均为内存 runtime 数据，不写入 `rooms.json`；诊断只输出别名、短 hash 和有限时间/数值字段。
 
 ## 配置与运行时参数
 

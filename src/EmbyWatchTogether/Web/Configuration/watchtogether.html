@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherUiNativeTabsV4.js"
+     data-controller="__plugin/WatchTogetherUiNativeTabsV5.js"
      data-require="emby-input,emby-select,emby-toggle,emby-button">
     <style>
         .wt-page {
@@ -171,6 +171,8 @@
 
         .wt-refresh {
             min-height: 44px;
+            flex: 0 0 auto;
+            white-space: nowrap;
         }
 
         .wt-roomRefresh {
@@ -304,6 +306,12 @@
             border-color: #8d7ac7;
             background: #f1edff;
             color: #5c4a9a;
+        }
+
+        .wt-roomState-recovering {
+            border-color: var(--theme-primary-color, var(--wt-primary));
+            background: var(--wt-accent-soft);
+            color: var(--wt-text);
         }
 
         .wt-roomState-watching {

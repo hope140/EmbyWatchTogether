@@ -1,6 +1,6 @@
 # Watch Together 插件：当前实现说明
 
-本文档说明仓库中独立 C# Emby 插件的实际行为、运行边界和验收方式。插件的取舍是“少打断播放”：正常播放只根据会话快照识别用户明确操作，不在每一轮轮询中强制把两端位置拉齐。
+本文档说明仓库中独立 C# Emby 插件的实际行为、运行边界和验收方式。插件的取舍是“少打断播放”：正常播放主要传播用户明确操作，并对持续明显漂移进行低频 Barrier 纠偏，不在每一轮轮询中强制把两端位置拉齐。
 
 ## 1. 范围和非目标
 
@@ -19,7 +19,7 @@
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
 
-程序集目标框架为 `netstandard2.0`，当前 beta 项目版本为 `1.6.0.4`，稳定版为 `1.5.0.0`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
+程序集目标框架为 `netstandard2.0`，当前 beta 项目版本为 `1.6.0.5`，稳定版为 `1.5.0.0`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
 
 ## 2. 组件和数据流
 
@@ -41,7 +41,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 - `SessionBridge` 将 Emby `SessionInfo` 和远程命令适配为插件使用的快照和命令；`SendPlayItemAsync` 通过 `SendPlayCommand` 请求当前会话打开指定 Item，会话事件会请求立即轮询。
 - `SessionSelector` 为每位已加入用户选择当前有效会话，过滤停止/陈旧记录，并尽量保留两端共同 Item；后续同步继续绑定所选 session identity。
 - `RoomManager` 管理房间元数据和每个房间的 `RoomRuntime`；只有已知房间才会创建 runtime，`RoomStore` 将房间元数据写入插件数据目录的 `rooms.json`。
-- `SyncEngine` 是轮询驱动的状态机；每个房间通过独立 gate 串行处理，单房间异常被记录并隔离。状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching` 和 `Unavailable`；`Handoff` 只负责媒体打开确认，`Barrier` 继续负责时间轴对齐。`WatchTogetherService` 提供管理页使用的 REST API，并在服务端再次校验权限。
+- `SyncEngine` 是轮询驱动的状态机；每个房间通过独立 gate 串行处理，单房间异常被记录并隔离。状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching`、`Recovering` 和 `Unavailable`；`Handoff` 只负责媒体打开确认，`Barrier` 继续负责时间轴对齐，`Recovering` 等待非主用户参与者原会话恢复。`WatchTogetherService` 提供管理页使用的 REST API，并在服务端再次校验权限。
 
 ## 3. 房间、资格和运行时状态
 
@@ -70,6 +70,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 | `Handoff` | 主用户已切换媒体，正在让非 Primary 参与者打开目标 Item 并等待快照确认 | 主用户换片、参与者显式跨 Item Resync |
 | `Barrier` | 暂停—Seek—恢复的起播握手 | 双方在线且资格检查通过 |
 | `Watching` | 起播完成，只处理明确的播放操作 | Barrier 完成 |
+| `Recovering` | 非 Primary 参与者已绑定会话短暂缺失，等待原 Session 在固定 Item 上恢复 | Watching 中非 Primary 选中快照暂时缺失 |
 | `Unavailable` | 房间 `ServerId` 与当前 Emby 实例不一致 | 载入或轮询时发现归属不符 |
 
 ## 4. 轮询和事件唤醒
@@ -112,6 +113,12 @@ Pending 命令默认等待约 3 秒，Barrier 内允许 1 次重试；仍未确�
 已经进入 `Watching` 的房间若仅有一端原始 `SupportsRemoteControl` 从 `true` 短暂变为 `false`，插件只在以下条件同时成立时保留最多 8 秒恢复窗口：双方仍在线且未停止、SessionId 与 ItemId 继续匹配上一轮身份、媒体相同且时长与倍速有效、有效能力证据仍在、当前没有 Pending 命令。窗口按受影响用户集合和两端身份绑定，不因重复快照刷新起始时间。
 
 窗口内保持 `Watching`，但不运行普通暂停/Seek 检测，也不发送播放命令或提示。能力恢复后使用窗口前保留的快照继续判断，自然播放不会被误认为 Seek；窗口内发生的真实暂停或明显 Seek 在恢复后按既有规则处理一次。超过 8 秒，或 Session、Item、受影响用户、有效能力、Pending 等条件变化时，立即退出保护并执行原有严格等待和安全暂停。初始 `Waiting`、Barrier、换片、停止/离线与快照源保护不使用这个窗口。
+
+### Session 缺失恢复与 drift 监测
+
+已经进入 `Watching` 的房间若非 Primary 参与者的已绑定 Session 从选中快照中短暂消失，且原始候选没有明确的 stopped 记录，则进入 `Recovering`。窗口固定为 10 秒，记录缺失用户、预期 SessionId、预期 ItemId、开始时间、上次位置和暂停状态；窗口内不向缺失端发送 Pause、Seek 或 PlayItem，也不启动 drift auto repair。缺失会话按原 User、原 SessionId、原 ItemId 恢复并满足有效播放身份后，必须经过一次现有 Barrier 才能回到 `Watching`。Recovery 期间 Primary 缺失、停止、Session 或 Item 变化会先退出 Recovery，再由既有停止 debounce 或晚到换集 Handoff 处理；参与者明确 Stop、替换 SessionId、Participant Item 变化或超时都回到 `Waiting`。
+
+正常播放期间仅在双方同 Item、actively playing、倍速接近 1x 且没有 Pending、Handoff、Barrier 或 Recovery 时记录 `Participant.PositionTicks - Primary.PositionTicks`。绝对偏移达到 1.5 秒进入 telemetry，达到 3 秒并持续 5 秒才触发一次现有 Barrier；自动纠偏后冷却 120 秒。系统不执行连续追帧式 Seek，hold 和 cooldown 均按 UTC 时间计算。
 
 ### Media Handoff
 

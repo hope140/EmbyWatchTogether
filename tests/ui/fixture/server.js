@@ -30,16 +30,32 @@ function room(overrides) {
   }, overrides || {});
 }
 
-function diagnostic() {
+function diagnostic(scenario) {
+  const recovering = scenario === 'recovering';
+  const positiveDrift = scenario === 'drift-positive';
   return {
-    RoomState: 'Watching', StatusReason: 'watching', SnapshotHealth: 'fresh', GeneratedAtUtc: '2026-09-22T11:00:00Z',
+    RoomState: recovering ? 'Recovering' : 'Watching',
+    StatusReason: recovering ? 'transient_recovery' : 'watching',
+    SnapshotHealth: 'fresh', GeneratedAtUtc: '2026-09-22T11:00:00Z',
+    RoomHash: 'sensitive-room-id', ServerHash: 'sensitive-server-id', SecretToken: 'should-not-export',
     Sessions: [
-      { Alias: 'userA', Online: true, Paused: false, PositionSeconds: 42, ReportedSupportsRemoteControl: true, EffectiveSupportsRemoteControl: true, AckLatencySeconds: .15, PlaybackRate: 1, SupportedCommands: ['Pause', 'Seek'] },
-      { Alias: 'userB', Online: true, Paused: false, PositionSeconds: 41, ReportedSupportsRemoteControl: true, EffectiveSupportsRemoteControl: true, AckLatencySeconds: .21, PlaybackRate: 1, SupportedCommands: ['Pause'] }
+      { Alias: 'userA', SessionHash: 'sensitive-session-a', ItemHash: 'sensitive-item-a', Online: true, Paused: false, PositionSeconds: 42, ReportedSupportsRemoteControl: true, EffectiveSupportsRemoteControl: true, AckLatencySeconds: .15, PlaybackRate: 1, SupportedCommands: ['Pause', 'Seek'] },
+      { Alias: 'userB', SessionHash: 'sensitive-session-b', ItemHash: 'sensitive-item-b', Online: !recovering, Paused: false, PositionSeconds: 41, ReportedSupportsRemoteControl: true, EffectiveSupportsRemoteControl: true, AckLatencySeconds: .21, PlaybackRate: 1, SupportedCommands: ['Pause'] }
     ],
     Pending: [], Barrier: null, Handoff: null, RecoveryWindow: null,
-    LastAction: { Type: 'entered_watching', Alias: 'userA', Result: 'success' }, LastError: null,
-    Events: [{ AtUtc: '2026-09-22T10:59:00Z', Type: 'entered_watching', Result: 'success' }]
+    TransientRecovery: recovering ? {
+      Active: true, AgeSeconds: 4.2, RemainingSeconds: 5.8, MissingAliases: ['userB'],
+      Participants: [
+        { Alias: 'userA', Missing: false, ExpectedSessionHash: 'hash-session-a', ExpectedItemHash: 'hash-item-a', LastKnownPositionSeconds: 42, LastKnownPaused: false },
+        { Alias: 'userB', Missing: true, ExpectedSessionHash: 'hash-session-b', ExpectedItemHash: 'hash-item-b', LastKnownPositionSeconds: 41, LastKnownPaused: false }
+      ]
+    } : null,
+    Drift: { CurrentDriftSeconds: recovering ? null : (positiveDrift ? 1.25 : -1.25), MaxObservedAbsoluteDriftSeconds: 4.4, HoldAgeSeconds: null, LastAutoRepairAtUtc: '2026-09-22T10:59:00Z', AutoRepairCount: 2, LastAutoRepairDriftSeconds: positiveDrift ? 3.2 : -3.2, CooldownRemainingSeconds: 60 },
+    LastAction: { Type: recovering ? 'recovery_started' : 'drift_auto_repair_started', Alias: 'userB', Result: recovering ? 'entered' : 'started', DriftSeconds: positiveDrift ? 3.2 : -3.2, UserId: 'sensitive-user-id' }, LastError: null,
+    Events: [
+      { AtUtc: '2026-09-22T10:59:00Z', Type: recovering ? 'recovery_started' : 'drift_auto_repair_started', Result: recovering ? 'entered' : 'started', DriftSeconds: -2.1, SessionHash: 'sensitive-event-session' },
+      { AtUtc: '2026-09-22T10:59:30Z', Type: 'drift_threshold_cleared', Result: 'cleared', DriftSeconds: positiveDrift ? .25 : -.25, UnknownSecret: 'should-not-export' }
+    ]
   };
 }
 
@@ -47,6 +63,12 @@ function stateForScenario(scenario) {
   if (scenario === 'empty') return [];
   if (scenario === 'admin-manage') return [room({ RoomId: 'managed-1', Name: '管理员长列表房间', CurrentUserIsParticipant: false, CurrentUserJoined: false, CanEnd: false, IsAdmin: true })];
   if (scenario === 'admin-member') return [room({ RoomId: 'admin-member-1', Name: '管理员成员房间', IsAdmin: true })];
+  if (scenario === 'recovering') return [room({ RoomId: 'recovering-1', Name: '临时掉线恢复房间', State: 'Recovering', StatusReason: 'transient_recovery', _wtState: { Sessions: [
+    { UserId: 'user-a', Online: true, IsPaused: false }, { UserId: 'user-b', Online: false, IsPaused: false }
+  ] } })];
+  if (scenario === 'primary-missing') return [room({ RoomId: 'primary-missing-1', Name: '主用户掉线房间', State: 'Waiting', StatusReason: 'playback_stopped', _wtState: { Sessions: [
+    { UserId: 'user-b', Online: true, IsPaused: false }
+  ] } })];
   if (scenario === 'waiting') return [room({ RoomId: 'waiting-1', Name: '等待播放房间', State: 'Waiting', StatusReason: 'waiting_for_playback', _wtState: { Sessions: [] } })];
   if (scenario === 'state-fail') return [room({ RoomId: 'state-fail-1', Name: '状态读取失败房间' })];
   if (scenario === 'long') return [room({ Name: '这是一个很长很长很长的房间名称用于窄屏测试', Participants: [
@@ -107,10 +129,12 @@ function page() {
     var theme = params.get('theme') || 'light'; var host = document.querySelector('.fixture-host'); host.className += ' ' + theme;
     var hasHostHeader = params.get('host') !== 'missing';
     var sourceHtml = ${JSON.stringify(html)}; var sourceJs = ${JSON.stringify(javascript)};
-    var diagnosticData = ${JSON.stringify(diagnostic())};
+    var diagnosticData = ${JSON.stringify(diagnostic('recovering'))};
+    if (scenario !== 'recovering') diagnosticData = ${JSON.stringify(diagnostic('active'))};
+    if (scenario === 'drift-positive') diagnosticData = ${JSON.stringify(diagnostic('drift-positive'))};
     var apiCalls = []; var accountId = 'mock-admin'; var tokenConfigured = false;
     var config = { PauseOtherOnPlaybackStop: true, NotifyOtherOnPlaybackStop: true, NotifyOnSyncActions: true, UpdateChannel: 'stable' };
-    var rooms = (scenario === 'empty' || scenario === 'accept-fail' || scenario === 'accept-network' ? [] : scenario === 'admin-manage' ? ${JSON.stringify(stateForScenario('admin-manage'))} : scenario === 'admin-member' ? ${JSON.stringify(stateForScenario('admin-member'))} : scenario === 'waiting' ? ${JSON.stringify(stateForScenario('waiting'))} : scenario === 'state-fail' ? ${JSON.stringify(stateForScenario('state-fail'))} : scenario === 'long' ? ${JSON.stringify(stateForScenario('long'))} : ${JSON.stringify(stateForScenario('active'))});
+    var rooms = (scenario === 'empty' || scenario === 'accept-fail' || scenario === 'accept-network' ? [] : scenario === 'admin-manage' ? ${JSON.stringify(stateForScenario('admin-manage'))} : scenario === 'admin-member' ? ${JSON.stringify(stateForScenario('admin-member'))} : scenario === 'recovering' ? ${JSON.stringify(stateForScenario('recovering'))} : scenario === 'primary-missing' ? ${JSON.stringify(stateForScenario('primary-missing'))} : scenario === 'waiting' ? ${JSON.stringify(stateForScenario('waiting'))} : scenario === 'state-fail' ? ${JSON.stringify(stateForScenario('state-fail'))} : scenario === 'long' ? ${JSON.stringify(stateForScenario('long'))} : ${JSON.stringify(stateForScenario('active'))});
     var invitations = [];
     function isAdminScenario() { return ['admin-manage', 'admin-member', 'save-fail', 'token-read-fail', 'token-save-fail', 'token-clear-fail', 'token-slow'].indexOf(scenario) >= 0; }
     function delay(value) { return new Promise(function (resolve) { setTimeout(function () { resolve(value); }, scenario === 'late' || scenario === 'token-slow' ? 900 : 0); }); }

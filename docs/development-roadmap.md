@@ -20,7 +20,7 @@
 
 各 Stack 串行、独立分支及 worktree；后继从直接前置已审核 commit 建立。主线程拥有跨 Stack 合并、冲突解决、完整 diff 审核、回归及本地 beta 集成。子代理仅在完整派发契约及真实隔离核验后写入。所有步骤保留原独立分支和原工作区改动。
 
-执行调整：S112 首轮集成发现 beta 晚到换片与 Phase E 主用户缺失恢复对同一输入存在行为冲突，541 项测试中 6 项失败，策略选择待用户确认。S112 暂停修改；S113 改从已审核 S111 `98ace2b` 建立，先完成独立 UI 整合。S114 再负责最终功能与 UI 汇合，Phase E 状态展示在该决策确定后接入。
+执行调整：S112 首轮集成曾发现 beta 晚到换片与 Phase E 主用户缺失恢复对同一输入存在行为冲突，因此 S113/S114 先从 S111 独立完成 UI 整合。用户现已确认保留 beta 主用户晚到换集行为；S112 `f294c67` 已按此修正并通过 544 项测试，S115 负责最后汇合与验收。
 
 共用知识输入：`AGENTS.md`、`docs/pr-stack-workflow.md`、`docs/architecture.md`、`docs/lessons-learned.md`；Phase E 另读 ADR-003，UI 另读原 UI VNext 契约与验证记录。
 
@@ -74,6 +74,20 @@
 - 回滚：revert 文档提交及按逆依赖撤销集成提交；允许并行：否。
 - 执行代理：主线程；Max 选择理由：不适用。
 
+### S115：Playback Stability 与原生风格 UI 汇合
+
+- 目标：将已审核 S112 与本地 beta 的 S111/S113/S114 合流，接通 Recovery/drift 的只读界面。
+- 基础分支：`beta@e0f3a02`；前置依赖：S112 `f294c67`，完整 .NET 544/544、主线程交叉窄测 5/5。
+- 主线程文件所有权：跨分支 merge、README、架构、技术/版本说明、当前排期、经验及策略记录；同步产品代码保持 S112 审核结果。
+- UI 子任务允许修改及所有权：`Plugin.cs` 的页面缓存键、`Web/Configuration/watchtogether.html` / `watchtogether.js`、`PluginPagesTests.cs`、`tests/ui/fixture/server.js` / `specs/watchtogether.spec.js`、`docs/ui-vnext-plan.md` / `ui-vnext-verification.md`。
+- 禁止修改：同步引擎、Session/Room/邀请/Token/更新器 API、依赖和锁文件、程序集版本、发布工作流、远端及 NAS。
+- 实现边界：Emby 原生风格、控件与现有 HTML/AMD 不变；接入 `Recovering` 标签和 `transient_recovery` 原因，保留两种恢复窗口、Handoff、drift 的各自诊断与脱敏导出；页面/控制器/route 缓存键统一 V5。
+- 验收：保留 Token、权限、账号及页面生命周期门禁；参与者 Recovery 的房间和诊断信息一致，主用户缺失仍显示原 beta 等待/停止状态；新诊断字段不导出原始身份，320px 展开诊断无横向溢出，浅深主题可读。
+- 测试命令：`node --check src/EmbyWatchTogether/Web/Configuration/watchtogether.js`；页面/诊断 .NET 过滤测试；`npm ci` / `npm test`（`tests/ui`）；最终 `scripts/build.ps1 -Configuration Release` 和四组 PowerShell 门禁；`git diff --check`。
+- 回滚：先 revert UI 收口及文档提交，再 revert 本 Stack merge（mainline 1）；不覆盖旧分支。
+- 允许并行：否，共享文件和最终回归串行；子代理：Luna High 负责限定 UI 收口，主线程负责集成、审核、最终回归及本地 beta fast-forward；Max 理由不适用。
+- Knowledge context：`AGENTS.md`、当前架构/经验、ADR-003、S112 策略记录和 UI 契约/验证记录。
+
 ## 正式版验收与停点
 
 1. 本地集成与 UI 浏览器门禁。
@@ -86,8 +100,9 @@
 
 - S111：`98ace2b`，已收录原 S110 六项精确文件；issuer/SyncEngine 相关 173 项测试通过。原 S110 工作区未提交改动完整保留。
 - NAS 文件身份：本轮只读核验，当前安装 DLL 与本机原 S110 产物及历史部署 receipt 的 SHA-256 三者一致。本轮未部署新构建。
-- S112：合并候选暂存于独立工作区；541 项测试中 535 通过、6 项失败，均指向主用户会话缺失恢复与 beta 晚到换集路径。尚未将该候选并入 beta。
-- 待确认的策略：保留当前 beta 的 2 秒停止观察与 10 秒晚到换集识别，或使用 Phase E 等待原会话且拒绝替换会话的路径。不能同时把两套互相矛盾的预期标为通过。
+- S112：`f294c67`，按用户已确认的 beta 主用户规则整合 Phase E，完整 .NET 544/544、主线程交叉窄测 5/5 通过；首次 535/541 和六项失败为已解决的历史记录。
+- 已确认策略：主用户缺失走 beta 的 2 秒停止观察与 10 秒晚到换集识别；Recovery 仅处理非主用户参与者缺失。参与者恢复期间主用户发生变化，先交还原有停止/Handoff 路径，不在 Recovery 内迁移身份。
 - S113：`2f3f481`，从 S111 整合既有原生分页、表单、开关、列表及按钮，保留 beta Token 功能并完成生命周期收口。子代理执行的 .NET 页面/服务测试 56 项通过，UI 浏览器 35 项通过，最后的账号立即操作隔离窄测 1 项通过；S114 将独立运行最终集成回归。
 - S114：最终源码基线 `2f3f481` 已由主线程独立验证：.NET 519/519、Playwright 35/35、Release build/publish、单 DLL ZIP 和四组 PowerShell 门禁全部通过，`git diff --check` 通过。本地 beta 整合包含 S111/S113 及本轮文档同步；远端与已发布版本保持原基线。
-- 正式版剩余项：S112 策略选择及对应回归、最终 UI 的真实 Emby/桌面/手机/双账号验收、统一版本和签名发布。当前整合构建未部署到 NAS，浏览器截图均为明确标注的模拟宿主。
+- S115：最后汇合与 UI 诊断门禁进行中，完成后将通过本地 beta 接续上述集成。
+- 正式版剩余项：最终 UI 的真实 Emby/桌面/手机/双账号验收、统一版本和签名发布。当前整合构建未部署到 NAS，浏览器截图均为明确标注的模拟宿主。

@@ -29,6 +29,8 @@ namespace Emby.Plugins.WatchTogether
         public RoomDiagnosticHandoff Handoff { get; set; }
         public RoomDiagnosticBarrier Barrier { get; set; }
         public RoomDiagnosticRecovery RecoveryWindow { get; set; }
+        public RoomDiagnosticTransientRecovery TransientRecovery { get; set; }
+        public RoomDiagnosticDrift Drift { get; set; }
         public RoomDiagnosticAction LastAction { get; set; }
         public string LastError { get; set; }
         public IReadOnlyList<RoomDiagnosticEvent> Events { get; set; }
@@ -111,6 +113,37 @@ namespace Emby.Plugins.WatchTogether
         public IReadOnlyList<string> AffectedAliases { get; set; }
     }
 
+    public sealed class RoomDiagnosticTransientRecovery
+    {
+        public bool Active { get; set; }
+        public double? AgeSeconds { get; set; }
+        public double? RemainingSeconds { get; set; }
+        public IReadOnlyList<string> MissingAliases { get; set; }
+        public IReadOnlyList<RoomDiagnosticTransientRecoveryParticipant> Participants { get; set; }
+    }
+
+    public sealed class RoomDiagnosticTransientRecoveryParticipant
+    {
+        public string Alias { get; set; }
+        public bool Missing { get; set; }
+        public string ExpectedSessionHash { get; set; }
+        public string ExpectedItemHash { get; set; }
+        public long LastKnownPositionTicks { get; set; }
+        public double LastKnownPositionSeconds { get; set; }
+        public bool LastKnownPaused { get; set; }
+    }
+
+    public sealed class RoomDiagnosticDrift
+    {
+        public double? CurrentDriftSeconds { get; set; }
+        public double MaxObservedAbsoluteDriftSeconds { get; set; }
+        public double? HoldAgeSeconds { get; set; }
+        public DateTimeOffset? LastAutoRepairAtUtc { get; set; }
+        public int AutoRepairCount { get; set; }
+        public double? LastAutoRepairDriftSeconds { get; set; }
+        public double? CooldownRemainingSeconds { get; set; }
+    }
+
     public sealed class RoomDiagnosticAction
     {
         public string Type { get; set; }
@@ -119,6 +152,7 @@ namespace Emby.Plugins.WatchTogether
         public string Result { get; set; }
         public long? PositionTicks { get; set; }
         public double? LatencySeconds { get; set; }
+        public double? DriftSeconds { get; set; }
         public DateTimeOffset AtUtc { get; set; }
     }
 
@@ -130,6 +164,7 @@ namespace Emby.Plugins.WatchTogether
         public string Result { get; set; }
         public long? PositionTicks { get; set; }
         public double? LatencySeconds { get; set; }
+        public double? DriftSeconds { get; set; }
         public DateTimeOffset AtUtc { get; set; }
     }
 
@@ -141,6 +176,7 @@ namespace Emby.Plugins.WatchTogether
         public string Result { get; set; }
         public long? PositionTicks { get; set; }
         public double? LatencySeconds { get; set; }
+        public double? DriftSeconds { get; set; }
         public DateTimeOffset AtUtc { get; set; }
     }
 
@@ -152,6 +188,7 @@ namespace Emby.Plugins.WatchTogether
         public string Result { get; set; }
         public long? PositionTicks { get; set; }
         public double? LatencySeconds { get; set; }
+        public double? DriftSeconds { get; set; }
         public DateTimeOffset AtUtc { get; set; }
     }
 
@@ -185,7 +222,11 @@ namespace Emby.Plugins.WatchTogether
                 "snapshot_protection_entered", "snapshot_protection_recovered", "eligibility_changed",
                 "manual_action", "resync", "resync_barrier_started", "handoff_started",
                 "handoff_play_requested", "handoff_target_confirmed", "handoff_barrier_started",
-                "handoff_completed", "handoff_failed", "handoff_superseded", "primary_item_changed" },
+                "handoff_completed", "handoff_failed", "handoff_superseded", "primary_item_changed",
+                "recovery_started", "recovery_confirmed", "recovery_timed_out",
+                "recovery_session_changed", "recovery_item_changed", "drift_threshold_entered",
+                "drift_threshold_cleared", "drift_auto_repair_started",
+                "drift_auto_repair_completed", "drift_auto_repair_failed" },
             StringComparer.OrdinalIgnoreCase);
 
         public static string Hash(string value)
@@ -242,6 +283,7 @@ namespace Emby.Plugins.WatchTogether
                 case "superseded": case "cancelled": return "changed";
                 case "stopped": return "stopped";
                 case "entered": return "entered";
+                case "cleared": return "cleared";
                 case "recovered": return "recovered";
                 case "changed": return "changed";
                 default: return "observed";
@@ -285,6 +327,8 @@ namespace Emby.Plugins.WatchTogether
             var pending = runtime.Pending.ToList().Take(2).Select(p => ToPending(room, p.Key, p.Value, now)).ToList();
             var handoff = ToHandoff(room, runtime.Handoff, now);
             var barrier = ToBarrier(room, runtime.Barrier, now);
+            var transientRecovery = ToTransientRecovery(room, runtime, now);
+            var drift = ToDrift(runtime, now);
             var recovery = new RoomDiagnosticRecovery
             {
                 Active = runtime.RemoteControlRecoveryStartedAtUtc.HasValue,
@@ -319,6 +363,8 @@ namespace Emby.Plugins.WatchTogether
                 Handoff = handoff,
                 Barrier = barrier,
                 RecoveryWindow = recovery,
+                TransientRecovery = transientRecovery,
+                Drift = drift,
                 LastAction = ToAction(room, state.LastAction),
                 LastError = PublicError(runtime.Error),
                 Events = (state.Events ?? new List<SyncDiagnosticEventRecord>())
@@ -421,6 +467,81 @@ namespace Emby.Plugins.WatchTogether
             };
         }
 
+        private static RoomDiagnosticTransientRecovery ToTransientRecovery(
+            Room room,
+            RoomRuntime runtime,
+            DateTimeOffset now)
+        {
+            var recovery = runtime?.Recovery;
+            if (recovery == null)
+            {
+                return new RoomDiagnosticTransientRecovery
+                {
+                    Active = false,
+                    MissingAliases = Array.Empty<string>(),
+                    Participants = Array.Empty<RoomDiagnosticTransientRecoveryParticipant>(),
+                };
+            }
+
+            double ageSeconds = Math.Max(0, (now - recovery.StartedAtUtc).TotalSeconds);
+            var missing = new HashSet<string>(
+                recovery.MissingUserIds ?? new List<string>(),
+                StringComparer.OrdinalIgnoreCase);
+            return new RoomDiagnosticTransientRecovery
+            {
+                Active = true,
+                AgeSeconds = ageSeconds,
+                RemainingSeconds = Math.Max(0,
+                    SyncConstants.TransientRecoveryTimeoutSeconds - ageSeconds),
+                MissingAliases = recovery.MissingUserIds
+                    .Select(userId => AliasFor(room, userId))
+                    .Where(alias => alias != "unknown")
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                Participants = recovery.Participants.Values
+                    .Take(2)
+                    .Select(participant => new RoomDiagnosticTransientRecoveryParticipant
+                    {
+                        Alias = AliasFor(room, participant.UserId),
+                        Missing = missing.Contains(participant.UserId),
+                        ExpectedSessionHash = Hash(participant.ExpectedSessionId),
+                        ExpectedItemHash = Hash(participant.ExpectedItemId),
+                        LastKnownPositionTicks = participant.LastKnownPositionTicks,
+                        LastKnownPositionSeconds = participant.LastKnownPositionTicks /
+                            (double)SessionSnapshot.TicksPerSecond,
+                        LastKnownPaused = participant.LastKnownPaused,
+                    })
+                    .ToList(),
+            };
+        }
+
+        private static RoomDiagnosticDrift ToDrift(RoomRuntime runtime, DateTimeOffset now)
+        {
+            if (runtime == null)
+            {
+                return new RoomDiagnosticDrift();
+            }
+
+            return new RoomDiagnosticDrift
+            {
+                CurrentDriftSeconds = runtime.CurrentDriftSeconds,
+                MaxObservedAbsoluteDriftSeconds = Math.Max(0, runtime.MaxObservedAbsoluteDriftSeconds),
+                HoldAgeSeconds = runtime.DriftAboveRepairThresholdSinceUtc.HasValue
+                    ? (double?)Math.Max(0,
+                        (now - runtime.DriftAboveRepairThresholdSinceUtc.Value).TotalSeconds)
+                    : null,
+                LastAutoRepairAtUtc = runtime.LastAutoRepairAtUtc,
+                AutoRepairCount = Math.Max(0, runtime.AutoRepairCount),
+                LastAutoRepairDriftSeconds = runtime.LastAutoRepairDriftSeconds,
+                CooldownRemainingSeconds = runtime.LastAutoRepairAtUtc.HasValue
+                    ? (double?)Math.Max(0,
+                        SyncConstants.DriftRepairCooldownSeconds -
+                        (now - runtime.LastAutoRepairAtUtc.Value).TotalSeconds)
+                    : null,
+            };
+        }
+
         private static RoomDiagnosticAction ToAction(Room room, SyncDiagnosticActionRecord a)
         {
             if (a == null) return null;
@@ -429,6 +550,7 @@ namespace Emby.Plugins.WatchTogether
                 Type = NormalizeEventType(a.Type), Command = NormalizeCommand(a.Command), Alias = AliasFor(room, a.UserId),
                 Result = NormalizeResult(a.Result), PositionTicks = a.PositionTicks,
                 LatencySeconds = a.LatencySeconds, AtUtc = a.AtUtc,
+                DriftSeconds = a.DriftSeconds,
             };
         }
 
@@ -439,6 +561,7 @@ namespace Emby.Plugins.WatchTogether
                 Type = NormalizeEventType(e.Type), Command = NormalizeCommand(e.Command), Alias = AliasFor(room, e.UserId),
                 Result = NormalizeResult(e.Result), PositionTicks = e.PositionTicks,
                 LatencySeconds = e.LatencySeconds, AtUtc = e.AtUtc,
+                DriftSeconds = e.DriftSeconds,
             };
         }
 

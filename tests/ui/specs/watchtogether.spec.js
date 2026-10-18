@@ -72,7 +72,7 @@ test('管理员可在顶栏切换 mine、manage、settings，普通用户隐藏�
     await page.locator(`#${id}`).click();
     await expect(page.locator(`#${id}`)).toHaveAttribute('aria-current', 'page');
     await expect(page.locator(`#${id}`)).toHaveClass(/emby-tab-button-active/);
-    await expect.poll(() => page.evaluate(() => location.hash)).toContain(id === 'wtTabManage' ? 'WatchTogetherUiManageV4' : id === 'wtTabSettings' ? 'WatchTogetherUiSettingsV4' : 'WatchTogetherUiMineV4');
+    await expect.poll(() => page.evaluate(() => location.hash)).toContain(id === 'wtTabManage' ? 'WatchTogetherUiManageV5' : id === 'wtTabSettings' ? 'WatchTogetherUiSettingsV5' : 'WatchTogetherUiMineV5');
     if (id === 'wtTabSettings') await page.screenshot({ path: path.join(artifactDir, 'desktop-dark-settings.png'), fullPage: true });
   }
   await open(page, 'active', 'light');
@@ -81,7 +81,7 @@ test('管理员可在顶栏切换 mine、manage、settings，普通用户隐藏�
 });
 
 test('普通用户直达管理员 route 仍只获得我的房间', async ({ page }) => {
-  await page.goto('/?scenario=active&theme=light#!/configurationpage?name=WatchTogetherUiManageV4');
+  await page.goto('/?scenario=active&theme=light#!/configurationpage?name=WatchTogetherUiManageV5');
   await expect(page.locator('.wt-page')).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('#wtAdminSection')).toBeHidden();
@@ -476,6 +476,64 @@ test('诊断内容经过脱敏，导出前不出现原始标识', async ({ page 
   expect(text).not.toContain('SessionHash');
   expect(text).not.toContain('Token');
   await page.screenshot({ path: path.join(artifactDir, 'mobile-diagnostics-390.png'), fullPage: true });
+});
+
+test('Recovering 状态只针对临时掉线参与者，主用户缺失仍显示 Waiting', async ({ page }) => {
+  await open(page, 'recovering', 'dark', 390, 1400);
+  await expect(page.locator('#wtRefresh')).toHaveText('刷新');
+  const refreshMetrics = await page.locator('#wtRefresh').evaluate(button => ({ width: button.getBoundingClientRect().width, textWidth: button.scrollWidth }));
+  expect(refreshMetrics.textWidth).toBeLessThanOrEqual(refreshMetrics.width);
+  await expect(page.locator('.wt-roomState')).toHaveText('正在等待临时掉线的参与者恢复');
+  await expect(page.locator('.wt-roomState')).toHaveClass(/wt-roomState-recovering/);
+  await expect(page.locator('.wt-roomStateDescription')).toContainText('临时掉线');
+  await page.screenshot({ path: path.join(artifactDir, 'mobile-recovering-room-390.png'), fullPage: true });
+
+  await open(page, 'primary-missing', 'light', 390, 1000);
+  await expect(page.locator('.wt-roomState')).toHaveText('等待参与者');
+  await expect(page.locator('.wt-roomState')).not.toHaveClass(/wt-roomState-recovering/);
+  const narrowMetrics = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+  expect(narrowMetrics.width).toBeLessThanOrEqual(narrowMetrics.client + 1);
+});
+
+test('TransientRecovery 和 Drift 诊断清洗后展示并导出，390px 无溢出', async ({ page }) => {
+  await open(page, 'recovering', 'dark', 390, 1800);
+  await page.locator('.wt-roomCard button[data-act="more"]').click();
+  await page.locator('.wt-moreMenu button[data-act="diagnostics"]').click();
+  await expect(page.locator('.wt-roomCard details.wt-diagnostics')).toContainText('临时掉线恢复');
+  await expect(page.locator('.wt-roomCard details.wt-diagnostics')).toContainText('缺失参与者');
+  await expect(page.locator('.wt-roomCard details.wt-diagnostics')).toContainText('播放漂移');
+  const recoveringText = await page.locator('.wt-roomCard details.wt-diagnostics').innerText();
+  expect(recoveringText).not.toContain('sensitive-room-id');
+  expect(recoveringText).not.toContain('sensitive-session');
+  expect(recoveringText).not.toContain('should-not-export');
+  const recoveringMetrics = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+  expect(recoveringMetrics.width).toBeLessThanOrEqual(recoveringMetrics.client + 1);
+  await page.screenshot({ path: path.join(artifactDir, 'mobile-recovering-diagnostics-390.png'), fullPage: true });
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('.wt-diagnosticToolbar button').click();
+  const download = await downloadPromise;
+  const stream = await download.createReadStream();
+  let exported = '';
+  for await (const chunk of stream) exported += chunk.toString();
+  const exportedJson = JSON.parse(exported);
+  expect(exportedJson.transientRecovery.missingAliases).toEqual(['userB']);
+  expect(exportedJson.transientRecovery.participants[1].expectedSessionHash).toBe('hash-session-b');
+  expect(exportedJson.RoomHash).toBeUndefined();
+  expect(exportedJson.SecretToken).toBeUndefined();
+  const exportedText = JSON.stringify(exportedJson);
+  expect(exportedText).not.toContain('sensitive-room-id');
+  expect(exportedText).not.toContain('sensitive-server-id');
+  expect(exportedText).not.toContain('sensitive-session');
+  expect(exportedText).not.toContain('sensitive-item');
+  expect(exportedText).not.toContain('sensitive-user-id');
+  expect(exportedText).not.toContain('should-not-export');
+
+  await open(page, 'drift-positive', 'light', 390, 1400);
+  await page.locator('.wt-roomCard button[data-act="more"]').click();
+  await page.locator('.wt-moreMenu button[data-act="diagnostics"]').click();
+  await expect(page.locator('.wt-roomCard details.wt-diagnostics')).toContainText('1.3 秒');
+  await expect(page.locator('.wt-roomCard details.wt-diagnostics')).toContainText('自动纠偏次数');
 });
 
 for (const width of [320, 360, 390, 430, 768, 1024, 1440, 1920]) {

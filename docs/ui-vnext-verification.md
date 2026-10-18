@@ -98,15 +98,22 @@ S9 的 mock Playwright fixture 验证 `tabs-viewmenubar`、`emby-tabs-slider`、
 
 实机回归发现 `mainTabsManager` 对同一页面实例的首次 tabs 初始化具有粘性：若 `onResume` 在权限请求完成前先以普通用户状态初始化，管理员后续刷新不会补出管理与设置页。修正为等待 `WatchTogether/Users` 权限结果后首次初始化，成功管理员生成三项，403 或其他失败安全生成一项；mock 同样忽略同一 page 的重复初始化并由管理员分页测试覆盖。
 
-历史 S11 集成 S9 的权限后初始化修正与 S10 原生主体组件。由于真实 Emby 缓存嵌入 HTML 和 AMD controller，当时的本地包将三项页面键与共享 controller 键同步轮换到 `V3`，避免客户端复用此前已加载的 `V2` 页面脚本；当前 S113 已继续轮换到 `V4`。真实宿主验收仍需重新执行。
+历史 S11 集成 S9 的权限后初始化修正与 S10 原生主体组件。由于真实 Emby 缓存嵌入 HTML 和 AMD controller，当时的本地包将三项页面键与共享 controller 键同步轮换到 `V3`，避免客户端复用此前已加载的 `V2` 页面脚本；S113 轮换到 `V4`，S115 继续轮换到 `V5`。真实宿主验收仍需重新执行。
 
-### S113 原生 Token 设置与缓存键轮换
+### S113 原生 Token 设置与缓存键轮换（历史）
 
 - 页面入口和共享 controller 继续采用 Emby 原生分页，并同步轮换到 `WatchTogetherUiMineV4`、`WatchTogetherUiManageV4`、`WatchTogetherUiSettingsV4` 与 `WatchTogetherUiNativeTabsV4.js`。
 - GitHub Token 区域复用 `emby-input`、`emby-button`、原生 `raised button-submit` / `button-flat` 语义；移除 Token 专属按钮颜色、背景和圆角覆写。
 - Token 读取、保存、清除使用资源 sequence、页面 generation、账号身份和 pause 隔离；清除复用页面确认对话框，取消不发送 DELETE，离页或账号变化清空明文草稿。
 - Mock fixture 覆盖管理员/普通用户、读取失败仍可清除、保存失败、确认取消、pause 迟到响应和账号切换；截图继续输出到忽略目录 `tests/ui/test-results/ui-vnext/`。
 - 本轮不接入 Phase E 新字段，不改变 Token API、同步、Session、Room 或版本；真实 Emby/NAS、部署、重启、签名和发布仍待主线程单独验收。
+
+### S115 PhaseE 只读诊断衔接
+
+- 页面入口和共享 controller 轮换到 `WatchTogetherUiMineV5`、`WatchTogetherUiManageV5`、`WatchTogetherUiSettingsV5` 与 `WatchTogetherUiNativeTabsV5.js`。
+- Recovering 状态使用主题变量 badge；`transient_recovery`、TransientRecovery、Drift 和 drift event 只读展示并进入清洗 JSON 导出。
+- TransientRecovery 只表示参与者临时缺失；主用户缺失继续走 beta Waiting/stop/handoff 路径。RecoveryWindow 与 TransientRecovery 分开保留。
+- 本轮不改变媒体元数据、业务动作、Token 存储或同步状态机；真实 Emby/NAS/发布仍待主线程验收。
 
 仍待真实 Emby 收口的视觉差异：mock 顶栏无法复现真实 Emby 侧栏、账号菜单、宿主字体和缓存后的 header 尺寸；媒体名称、封面和头像继续按权限门禁使用占位；真实播放状态、双账号设备信息和移动端软键盘布局尚未验收。
 

@@ -6,16 +6,22 @@
 
 - UI VNext 早期基线：`6268a90b4346deb4ba8b5585e06369e465f0ddff`，插件版本 `1.6.0.1`，461 项测试；该阶段的本地未签名包约束只适用于历史阶段。
 
-## S111/S113 整合基线
+## S111/S113 历史整合基线
 
 - S111 审核通过提交：`98ace2b26bab2fc7cfe5a6675e1381728b34d8c9`，基于 beta `v1.6.0.5`，主线程已完成三方合并准备。
-- S113 只整合原生风格 UI 与 beta Token 设置，保留业务/API/Token 存储和同步实现；不接入暂停中的 Phase E 字段。
+- S113 当时只整合原生风格 UI 与 beta Token 设置，保留业务/API/Token 存储和同步实现；Phase E 在该阶段等待策略选择。
 - 本轮交付边界：本地 UI 实现、验证和主线程审核；不部署 NAS、不 push、不创建 PR、Release、tag 或签名包。
+
+## S115 当前整合
+
+- 基础为本地 beta `e0f3a02` 与已审核 S112 `f294c67`，程序集版本保留 `1.6.0.5`。
+- 用户已确认保留 beta 的主用户停止观察和晚到换集规则；Phase E Recovery 只针对非主用户参与者，诊断分别展示 `RecoveryWindow`、`TransientRecovery`、Handoff 和 Drift。
+- 本轮先完成本地代码整合、回归和 UI 设计候选；真实 Emby/桌面/手机/双账号验收完成后，统一准备正式版。
 
 ## 当前实现事实
 
 - UI 是嵌入 DLL 的单个 HTML 与 AMD JavaScript 页面，不引入生产 SPA、Node 服务或额外部署目录。
-- 页面入口使用三个 route-backed 缓存键 `WatchTogetherUiMineV4`、`WatchTogetherUiManageV4`、`WatchTogetherUiSettingsV4`，共用嵌入 HTML；仅“我的房间”进入用户菜单。共享 controller 使用 `WatchTogetherUiNativeTabsV4.js`，HTML 与 controller 键必须联动。
+- 页面入口使用三个 route-backed 缓存键 `WatchTogetherUiMineV5`、`WatchTogetherUiManageV5`、`WatchTogetherUiSettingsV5`，共用嵌入 HTML；仅“我的房间”进入用户菜单。共享 controller 使用 `WatchTogetherUiNativeTabsV5.js`，HTML 与 controller 键必须联动。
 - 插件分页由 Emby `mainTabsManager.setTabs` 与 `Dashboard.getConfigurationPageUrl` 提供，使用宿主原生 `emby-tabs` 结构；业务页面不创建自绘导航，也不修改 `.skinHeader` class。管理员路由在权限确认后显示，非管理员只能保留“我的房间”。
 - `/Rooms` 已返回 `CurrentUserIsParticipant`、`CurrentUserJoined`、`IsAdmin` 和 `CanEnd`，前端按参与者身份区分个人视图与管理员管理视图。
 - 页面读取 `/Rooms/{Id}/State`，只读展示逐成员播放状态、暂停状态和媒体占位；读取失败保留过期标记。

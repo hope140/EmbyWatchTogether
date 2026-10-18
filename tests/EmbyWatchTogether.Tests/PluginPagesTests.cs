@@ -21,12 +21,12 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherUiMineV4");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherUiManageV4");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherUiSettingsV4");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherUiMineV5");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherUiManageV5");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherUiSettingsV5");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherDiagnostics");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherUiNativeTabsV4.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherUiNativeTabsV5.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherDiagnostics.js");
             Assert.Equal(1, pages.Count(page => page.EnableInUserMenu));
         }
@@ -54,15 +54,15 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiMineV4");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiMineV5");
             Assert.Equal("sync", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
             Assert.Equal("Watch Together", page.DisplayName);
             Assert.Equal("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", page.EmbeddedResourcePath);
 
-            var managePage = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiManageV4");
-            var settingsPage = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiSettingsV4");
+            var managePage = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiManageV5");
+            var settingsPage = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiSettingsV5");
             Assert.False(managePage.EnableInMainMenu);
             Assert.False(managePage.EnableInUserMenu);
             Assert.Equal(page.EmbeddedResourcePath, managePage.EmbeddedResourcePath);
@@ -70,7 +70,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.False(settingsPage.EnableInUserMenu);
             Assert.Equal(page.EmbeddedResourcePath, settingsPage.EmbeddedResourcePath);
 
-            var controller = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiNativeTabsV4.js");
+            var controller = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiNativeTabsV5.js");
             Assert.False(controller.EnableInMainMenu);
             Assert.False(controller.EnableInUserMenu);
             Assert.Equal("Emby.Plugins.WatchTogether.Configuration.WatchTogether.js", controller.EmbeddedResourcePath);
@@ -90,7 +90,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherUiNativeTabsV4.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherUiNativeTabsV5.js\"", html);
             Assert.DoesNotContain("class=\"wt-title\"", html);
             Assert.DoesNotContain("<h1>Watch Together</h1>", html);
             Assert.DoesNotContain("wtPluginNav", html);
@@ -117,9 +117,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("mainTabsManager", javascript);
             Assert.Contains("setTabs(page", javascript);
             Assert.Contains("Dashboard.getConfigurationPageUrl", javascript);
-            Assert.Contains("WatchTogetherUiMineV4", javascript);
-            Assert.Contains("WatchTogetherUiManageV4", javascript);
-            Assert.Contains("WatchTogetherUiSettingsV4", javascript);
+            Assert.Contains("WatchTogetherUiMineV5", javascript);
+            Assert.Contains("WatchTogetherUiManageV5", javascript);
+            Assert.Contains("WatchTogetherUiSettingsV5", javascript);
             Assert.DoesNotContain("wtPluginNav", javascript);
             Assert.DoesNotContain("headerTop-withSectionTabs", javascript);
             Assert.DoesNotContain("headerMiddle-withSectionTabs", javascript);
@@ -191,8 +191,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("statusReasonMessages", javascript);
             Assert.Contains("server_unavailable", javascript);
             Assert.Contains("snapshot_unavailable", javascript);
+            Assert.Contains("transient_recovery", javascript);
             Assert.Contains("正在同步下一集", javascript);
             Assert.Contains("正在让另一位参与者打开主用户当前视频", javascript);
+            Assert.Contains("Recovering", javascript);
+            Assert.Contains("正在等待临时掉线的参与者恢复", javascript);
+            Assert.Contains(".wt-roomState-recovering", html);
             Assert.Contains("media_handoff", javascript);
             Assert.Contains("PlayItem", javascript);
             Assert.Contains("handoff_started", javascript);
@@ -286,6 +290,13 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("raw.Pending", javascript);
             Assert.Contains("raw.Barrier", javascript);
             Assert.Contains("raw.RecoveryWindow", javascript);
+            Assert.Contains("raw.TransientRecovery", javascript);
+            Assert.Contains("raw.Drift", javascript);
+            Assert.Contains("driftSeconds", javascript);
+            Assert.Contains("播放漂移", javascript);
+            Assert.Contains("预期 Session 标识", javascript);
+            Assert.Contains("drift_auto_repair_started", javascript);
+            Assert.Contains("var transientRecovery", javascript);
             Assert.Contains("raw.LastAction", javascript);
             Assert.Contains("raw.Events", javascript);
             Assert.Contains("导出诊断 JSON", javascript);
