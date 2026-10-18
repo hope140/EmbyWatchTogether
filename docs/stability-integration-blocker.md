@@ -53,4 +53,6 @@ Phase E 自身还包含等待原 Primary Session 恢复、替换 Session 不成�
 
 策略已经确认并实现于 S112 `f294c67`，由 S115 与原生风格 UI 汇合。后续先读取当前 `docs/development-roadmap.md`，按最终构建继续真实 Emby/UI 验收，保留参与者恢复、drift hold/cooldown、既有停止与 Handoff 的安全边界。
 
+S115 产品源码 `bcfb1fd` 的最终自动验证为 .NET 545/545、Playwright 37/37、Release build/publish、单 DLL ZIP/哈希及四组 PowerShell 门禁通过。此策略阻塞已经解决；真实客户端验收仍独立记录。
+
 独立审核未发现除该路径之外的明确集成缺陷。原始 S110 和 Phase E 分支保持原状；自动验证通过不替代发布候选的真实客户端验收。

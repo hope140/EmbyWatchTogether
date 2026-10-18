@@ -17,6 +17,8 @@
 
 ## S114 主线程集成回归（2026-10-18）
 
+本节为 S111/UI 首次整合的历史结果，当前完整整合结果见下方 S115 记录。
+
 源码基线 `2f3f481`，版本 `1.6.0.5`；包含 S111 换集诊断和原生风格 UI，Phase E 策略冲突候选尚未并入。
 
 - `scripts/build.ps1 -Configuration Release`：Release build 0 warning / 0 error，.NET 519/519，publish 与单 DLL ZIP 成功。
@@ -24,6 +26,19 @@
 - 主线程在独立集成工作区执行 `npm ci` 与完整 Playwright：35/35，通过真实生产 HTML/JS 的模拟宿主回归；生产控制器 `node --check` 与 `git diff --check` 通过。
 - 主线程已查看桌面深色设置页及 390px 设置页截图；模拟宿主背景问题已修正，并以设置页主体背景/文字对比度断言保护。普通成员、管理员成员/非成员、邀请、房间、设置、诊断及 320–1920px 布局由浏览器门禁覆盖。
 - 账号变化后的旧按钮操作、迟到 Token 响应和十次 pause/resume 单实例监听已纳入门禁。真实 Emby 的顶栏、主题 CSS、登录切换、缓存和双端播放仍需在最终部署构建中验收。
+
+## S115 主线程最终集成回归（2026-10-18）
+
+最终产品源码 `bcfb1fd`，程序集版本 `1.6.0.5`；包含 S111 换集诊断、按用户选择融合的 Phase E 与 Emby 原生风格 UI，页面/脚本/route 缓存键同步 V5。
+
+- 标准 `scripts/build.ps1 -Configuration Release`：Release build 0 warning / 0 error；.NET 545/545，0 失败、0 跳过；publish 成功。
+- 主线程完整 Playwright 37/37；保留旧 Token、账号、权限、设置、邀请与生命周期覆盖，新增 Recovery/Drift 展示、主用户 Waiting 状态、脱敏 JSON 导出、390px 展开诊断和 320/390px 刷新按钮单行门禁。
+- 四组 PowerShell build-path、release-signing、release-workflow、CI-workflow 门禁全部通过；生产控制器语法和 `git diff --check` 通过。
+- ZIP 恰好包含一个根目录插件 DLL，entry SHA-256 与旁侧 DLL 一致，程序集版本读回 `1.6.0.5`。本地构建不是已发布的同版本资产。
+- 主线程已查看修正后的 390px Recovery 房间及诊断截图；截图带 mock 宿主标记。Recovery fixture 的 4.2 秒年龄与 5.8 秒剩余窗口匹配 10 秒合同，drift 修复阈值与冷却样本亦已校正为自洽值。
+- Knowledge Review：ADR-003 与经验第 20 条已同步参与者恢复和主用户停止/Handoff 的优先级；UI 架构继续使用现有嵌入 HTML/AMD。
+
+剩余验收：最终构建尚未部署到 NAS，真实 Emby 顶栏/主题/缓存、桌面/手机和双账号播放验收未在本轮执行；正式版本与签名发布等待 UI 及集成验收收口。
 
 ## 历史与持续验收矩阵
 
