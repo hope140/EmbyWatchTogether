@@ -40,6 +40,11 @@ test('单页保留原区域顺序和宿主控件，并隐藏自绘导航', async
   await expect(page.locator('select[is="emby-select"]')).toHaveCount(4);
   await expect(page.locator('input[is="emby-checkbox"]')).toHaveCount(3);
   await expect(page.locator('button[is="emby-button"]')).not.toHaveCount(0);
+  const contentLayout = await page.locator('.wt-nativeContent').evaluate(el => ({ maxWidth: getComputedStyle(el).maxWidth, maxWidthPx: parseFloat(getComputedStyle(el).maxWidth), width: el.getBoundingClientRect().width, left: el.getBoundingClientRect().left, viewport: document.documentElement.clientWidth }));
+  expect(contentLayout.maxWidth).not.toBe('none');
+  expect(contentLayout.width).toBeLessThanOrEqual(contentLayout.maxWidthPx + 1);
+  expect(contentLayout.width).toBeLessThanOrEqual(contentLayout.viewport + 1);
+  expect(Math.abs(contentLayout.left - (contentLayout.viewport - contentLayout.width) / 2)).toBeLessThanOrEqual(2);
   const sections = await page.locator('.wt-section').evaluateAll(nodes => nodes.map(node => node.id || node.className));
   expect(sections).toEqual(['wtAdminSection', 'wtInvitationSection', 'verticalSection wt-section', 'verticalSection wt-section wt-help', 'wtSettingsSection']);
 });
@@ -55,6 +60,100 @@ test('浅色、深色和仅 HSL 单页主体均满足 4.5:1 对比度并保留�
     if (theme === 'light') {
       await page.screenshot({ path: path.join(artifactDir, 'desktop-light-admin-member.png'), fullPage: true });
     }
+  }
+});
+
+test('深色渐变使用宿主半透明 raised 配对并量化代表点对比度', async ({ page }) => {
+  await open(page, 'admin-member', 'darkgradient', 1440, 1000);
+  await page.screenshot({ path: path.join(artifactDir, 'desktop-darkgradient-native-controls.png'), fullPage: true });
+  const metrics = await page.locator('.wt-roomCard button[data-act="pause"]').evaluate(button => {
+    function parse(value) {
+      const match = value.match(/rgba?\(\s*([\d.]+)[, ]+\s*([\d.]+)[, ]+\s*([\d.]+)(?:[, ]+\s*([\d.]+))?\s*\)/i);
+      if (!match) throw new Error(`Unexpected color: ${value}`);
+      return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])];
+    }
+    function over(foreground, background) {
+      const alpha = foreground[3] + background[3] * (1 - foreground[3]);
+      return [0, 1, 2].map(index => (foreground[index] * foreground[3] + background[index] * background[3] * (1 - foreground[3])) / alpha).concat(alpha);
+    }
+    function luminance(color) {
+      return color.slice(0, 3).map(value => value / 255).map(value => value <= .03928 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+    }
+    function contrast(foreground, background) {
+      const light = Math.max(luminance(foreground), luminance(background));
+      const dark = Math.min(luminance(foreground), luminance(background));
+      return (light + .05) / (dark + .05);
+    }
+    const host = document.querySelector('.fixture-host');
+    const sample = getComputedStyle(host).getPropertyValue('--fixture-gradient-sample').split(',').map(Number).concat(1);
+    const section = parse(getComputedStyle(button.closest('.wt-section')).backgroundColor);
+    const card = parse(getComputedStyle(button.closest('.wt-roomCard')).backgroundColor);
+    const surface = over(card, over(section, sample));
+    const background = over(parse(getComputedStyle(button).backgroundColor), surface);
+    const foreground = over(parse(getComputedStyle(button).color), background);
+    return { classes: button.className, background: getComputedStyle(button).backgroundColor, foreground: getComputedStyle(button).color, ratio: contrast(foreground, background) };
+  });
+  expect(metrics.classes).toContain('raised');
+  expect(metrics.background).not.toBe('rgb(255, 255, 255)');
+  expect(Number.isFinite(metrics.ratio)).toBe(true);
+  test.info().annotations.push({ type: 'contrast', description: `代表渐变点合成对比度 ${metrics.ratio.toFixed(3)}，4.5:1 目标${metrics.ratio >= 4.5 ? '达标' : '未达'}；保留宿主主题配对` });
+});
+
+test('深色渐变中的旧 button-flat 会复现浅底白字，页面控件全部使用 raised', async ({ page }) => {
+  await open(page, 'active', 'darkgradient', 1024, 900);
+  const legacy = await page.evaluate(() => {
+    function parse(value) {
+      const match = value.match(/rgba?\(\s*([\d.]+)[, ]+\s*([\d.]+)[, ]+\s*([\d.]+)(?:[, ]+\s*([\d.]+))?\s*\)/i);
+      if (!match) throw new Error(`Unexpected color: ${value}`);
+      return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])];
+    }
+    function over(foreground, background) {
+      const alpha = foreground[3] + background[3] * (1 - foreground[3]);
+      return [0, 1, 2].map(index => (foreground[index] * foreground[3] + background[index] * background[3] * (1 - foreground[3])) / alpha).concat(alpha);
+    }
+    function luminance(color) {
+      return color.slice(0, 3).map(value => value / 255).map(value => value <= .03928 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+    }
+    function contrast(foreground, background) {
+      const light = Math.max(luminance(foreground), luminance(background));
+      const dark = Math.min(luminance(foreground), luminance(background));
+      return (light + .05) / (dark + .05);
+    }
+    const probe = document.createElement('button', { is: 'emby-button' });
+    probe.setAttribute('is', 'emby-button');
+    probe.classList.add('button-flat');
+    probe.textContent = 'legacy';
+    document.querySelector('.wt-roomActions').appendChild(probe);
+    const raised = document.querySelector('.wt-roomActions button.raised');
+    const host = document.querySelector('.fixture-host');
+    const sample = getComputedStyle(host).getPropertyValue('--fixture-gradient-sample').split(',').map(Number).concat(1);
+    const section = parse(getComputedStyle(probe.closest('.wt-section')).backgroundColor);
+    const card = parse(getComputedStyle(probe.closest('.wt-roomCard')).backgroundColor);
+    const surface = over(card, over(section, sample));
+    const legacyBackground = over(parse(getComputedStyle(probe).backgroundColor), surface);
+    const legacyForeground = over(parse(getComputedStyle(probe).color), legacyBackground);
+    const raisedBackground = over(parse(getComputedStyle(raised).backgroundColor), surface);
+    const raisedForeground = over(parse(getComputedStyle(raised).color), raisedBackground);
+    const result = { native: probe.className, background: getComputedStyle(probe).backgroundColor, color: getComputedStyle(probe).color, legacyRatio: contrast(legacyForeground, legacyBackground), raisedRatio: contrast(raisedForeground, raisedBackground) };
+    probe.remove();
+    return result;
+  });
+  expect(legacy.native).toContain('emby-button-focusscale');
+  expect(legacy.color).toContain('255');
+  expect(legacy.legacyRatio).toBeLessThan(4.5);
+  expect(legacy.raisedRatio).toBeGreaterThan(legacy.legacyRatio);
+  await expect(page.locator('.wt-page button.button-flat')).toHaveCount(0);
+  await expect(page.locator('.wt-page button.raised')).not.toHaveCount(0);
+});
+
+test('浅色、深色和 HSL 主题的普通 raised 按钮达到 4.5:1 对比度', async ({ page }) => {
+  for (const theme of ['light', 'dark', 'hsl']) {
+    await open(page, 'admin-member', theme, 1024, 900);
+    const colors = await page.locator('#wtRefresh').evaluate(button => {
+      const style = getComputedStyle(button);
+      return { background: style.backgroundColor, color: style.color };
+    });
+    expect(contrastRatio(colors.color, colors.background)).toBeGreaterThanOrEqual(4.5);
   }
 });
 
@@ -244,7 +343,7 @@ test('GitHub Token 设置使用原生控件并保留保存、清除和取消确�
   await open(page, 'admin-member', 'light', 1024, 900);
   await expect(page.locator('#wtGitHubToken')).toHaveAttribute('type', 'password');
   await expect(page.locator('#wtSaveGitHubToken')).toHaveClass(/raised/);
-  await expect(page.locator('#wtClearGitHubToken')).toHaveClass(/button-flat/);
+  await expect(page.locator('#wtClearGitHubToken')).toHaveClass(/raised/);
   await expect(page.locator('#wtSaveGitHubToken')).not.toHaveClass(/wt-settingsButton/);
   await expect(page.locator('#wtClearGitHubToken')).not.toHaveClass(/wt-settingsButton/);
   await expect(page.locator('#wtGitHubTokenStatus')).toContainText('尚未配置');
