@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Session;
@@ -254,6 +255,174 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
+        [Fact]
+        public void TryIssuePlayItem_LogsOneDispatchAndReturnedResult_WithRequestHash()
+        {
+            var manager = NewManager();
+            var messages = new List<string>();
+            var exceptions = new List<Exception>();
+            var infos = new List<string>();
+            var logManager = NewLogManager(messages, exceptions, infos);
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge, logManager.Object);
+                string error;
+                var result = issuer.TryIssuePlayItem(
+                    "room-secret", "admin-secret", "user", NewPlayItemSnapshot(), "42",
+                    DateTimeOffset.UtcNow, out error);
+
+                Assert.True(result);
+                Assert.Null(error);
+                Assert.Single(infos, message => message.Contains("event=dispatch "));
+                Assert.Single(infos, message => message.Contains("event=dispatch_result ") &&
+                    message.Contains("result=returned"));
+                manager.Verify(m => m.SendPlayCommand(
+                    It.IsAny<string>(), "session", It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()),
+                    Times.Once);
+                Assert.Contains(infos, message => message.Contains("requestHash=") &&
+                    !message.Contains("room-secret") && !message.Contains("admin-secret"));
+            }
+        }
+
+        [Fact]
+        public void TryIssuePlayItem_ValidationRejectionDoesNotLogDispatch()
+        {
+            var messages = new List<string>();
+            var exceptions = new List<Exception>();
+            var infos = new List<string>();
+            var logManager = NewLogManager(messages, exceptions, infos);
+            using (var bridge = new SessionBridge(NewManager().Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge, logManager.Object);
+                string error;
+                var result = issuer.TryIssuePlayItem(
+                    "room-secret", "admin-secret", "user-secret", NewPlayItemSnapshot(),
+                    "not-numeric", DateTimeOffset.UtcNow, out error);
+
+                Assert.False(result);
+                Assert.Equal("invalid_argument", error);
+                Assert.Empty(infos);
+            }
+        }
+
+        [Theory]
+        [InlineData(true, "timeout", "command_timeout")]
+        [InlineData(false, "failed", "command_failed")]
+        public void TryIssuePlayItem_TransportFailureLogsOneStableDispatchResult(
+            bool timeout,
+            string expectedDispatchResult,
+            string expectedError)
+        {
+            var manager = NewManager();
+            manager.Setup(m => m.SendPlayCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                .Throws(timeout
+                    ? (Exception)new OperationCanceledException("secret transport detail")
+                    : new InvalidOperationException("secret transport detail"));
+            var messages = new List<string>();
+            var exceptions = new List<Exception>();
+            var infos = new List<string>();
+            var logManager = NewLogManager(messages, exceptions, infos);
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge, logManager.Object);
+                string error;
+                var result = issuer.TryIssuePlayItem(
+                    "room-secret", "admin-secret", "user", NewPlayItemSnapshot(), "42",
+                    DateTimeOffset.UtcNow, new CancellationTokenSource().Token, out error);
+
+                Assert.False(result);
+                Assert.Equal(expectedError, error);
+                Assert.Single(infos, message => message.Contains("event=dispatch "));
+                Assert.Single(infos, message => message.Contains("event=dispatch_result ") &&
+                    message.Contains("result=" + expectedDispatchResult));
+                manager.Verify(m => m.SendPlayCommand(
+                    It.IsAny<string>(), "session", It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()),
+                    Times.Once);
+                Assert.DoesNotContain(infos, message => message.Contains("secret transport detail"));
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void TryIssuePlayItem_LoggerFailureDoesNotChangeCommandResult(bool timeout)
+        {
+            var manager = NewManager();
+            if (timeout)
+            {
+                manager.Setup(m => m.SendPlayCommand(
+                        It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                    .Throws(new OperationCanceledException("logger timeout detail"));
+            }
+            var logger = new Mock<ILogger>();
+            logger.Setup(l => l.Info(It.IsAny<string>(), It.IsAny<object[]>()))
+                .Throws(new InvalidOperationException("logger secret"));
+            var logManager = new Mock<ILogManager>();
+            logManager.Setup(l => l.GetLogger(nameof(SessionBridgeCommandIssuer)))
+                .Returns(logger.Object);
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge, logManager.Object);
+                string error;
+                var result = issuer.TryIssuePlayItem(
+                    "room", "admin", "user", NewPlayItemSnapshot(), "42",
+                    DateTimeOffset.UtcNow, out error);
+
+                Assert.Equal(!timeout, result);
+                Assert.Equal(timeout ? "command_timeout" : null, error);
+                manager.Verify(m => m.SendPlayCommand(
+                    It.IsAny<string>(), "session", It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()),
+                    Times.Once);
+            }
+        }
+
+        [Fact]
+        public void TryIssuePlayItem_RequestHashUsesUtcLengthPrefixesAndRedactsInputs()
+        {
+            var manager = NewManager();
+            var messages = new List<string>();
+            var exceptions = new List<Exception>();
+            var infos = new List<string>();
+            var logManager = NewLogManager(messages, exceptions, infos);
+            var utc = new DateTimeOffset(2026, 10, 8, 12, 0, 0, TimeSpan.Zero);
+            var sameInstantDifferentOffset = utc.ToOffset(TimeSpan.FromHours(8));
+            using (var bridge = new SessionBridge(manager.Object))
+            {
+                var issuer = new SessionBridgeCommandIssuer(bridge, logManager.Object);
+                string error;
+                Assert.True(issuer.TryIssuePlayItem(
+                    "room", "admin", "user", NewPlayItemSnapshot(sessionId: "session"), "42",
+                    utc, out error));
+                Assert.True(issuer.TryIssuePlayItem(
+                    "room", "admin", "user", NewPlayItemSnapshot(sessionId: "session"), "42",
+                    sameInstantDifferentOffset, out error));
+                Assert.True(issuer.TryIssuePlayItem(
+                    "a|b", "admin", "user", NewPlayItemSnapshot(sessionId: "c"), "42",
+                    utc, out error));
+                Assert.True(issuer.TryIssuePlayItem(
+                    "a", "admin", "user", NewPlayItemSnapshot(sessionId: "b|c"), "42",
+                    utc, out error));
+                Assert.True(issuer.TryIssuePlayItem(
+                    "room\r\nSECRET https://internal.example/x", "admin", "user",
+                    NewPlayItemSnapshot(sessionId: "session\r\nSESSION_SECRET"), "42",
+                    utc, out error));
+            }
+
+            var dispatches = infos.Where(message => message.Contains("event=dispatch ")).ToList();
+            var requests = dispatches.Select(message => message.Split(
+                new[] { "requestHash=" }, StringSplitOptions.None)[1].Split(' ')[0]).ToList();
+            Assert.Equal(5, requests.Count);
+            Assert.Equal(requests[0], requests[1]);
+            Assert.NotEqual(requests[2], requests[3]);
+            Assert.DoesNotContain(infos, message => message.Contains("SECRET") ||
+                message.Contains("internal.example") || message.Contains("room\r") ||
+                message.Contains("session\r"));
+            manager.Verify(m => m.SendPlayCommand(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()),
+                Times.Exactly(5));
+        }
+
         private static Mock<ISessionManager> NewManager()
         {
             var manager = new Mock<ISessionManager>();
@@ -271,7 +440,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
         private static Mock<ILogManager> NewLogManager(
             List<string> messages,
-            List<Exception> exceptions)
+            List<Exception> exceptions,
+            List<string> infos = null)
         {
             var logger = new Mock<ILogger>();
             logger.Setup(l => l.ErrorException(
@@ -281,6 +451,8 @@ namespace Emby.Plugins.WatchTogether.Tests
                     messages.Add(message);
                     exceptions.Add(exception);
                 });
+            logger.Setup(l => l.Info(It.IsAny<string>(), It.IsAny<object[]>()))
+                .Callback<string, object[]>((message, _) => infos?.Add(message));
             var logManager = new Mock<ILogManager>();
             logManager.Setup(l => l.GetLogger(nameof(SessionBridgeCommandIssuer)))
                 .Returns(logger.Object);
@@ -294,10 +466,14 @@ namespace Emby.Plugins.WatchTogether.Tests
                 new SessionCapabilityReport(true, new[] { RemoteCommands.Pause, "DisplayMessage" }));
         }
 
-        private static SessionSnapshot NewPlayItemSnapshot(bool stopped = false)
+        private static SessionSnapshot NewPlayItemSnapshot(
+            bool stopped = false,
+            string sessionId = "session",
+            string userId = "user",
+            string itemId = "42")
         {
             return new SessionSnapshot(
-                "session", "user", "42", "source", 0, 1, false, 1, stopped, true,
+                sessionId, userId, itemId, "source", 0, 1, false, 1, stopped, true,
                 new SessionCapabilityReport(true, new[] { RemoteCommands.Pause }));
         }
 

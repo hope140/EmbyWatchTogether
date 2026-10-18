@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Globalization;
 using System.Threading;
 using MediaBrowser.Model.Logging;
@@ -214,21 +215,45 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
+            Stopwatch dispatchTimer = null;
             try
             {
+                if (_logger != null)
+                {
+                    HandoffTrace.Dispatch(_logger, roomId, snapshot.SessionId, itemId, now);
+                    dispatchTimer = Stopwatch.StartNew();
+                }
                 _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, cancellationToken)
                     .GetAwaiter().GetResult();
+                if (_logger != null)
+                {
+                    HandoffTrace.DispatchResult(
+                        _logger, roomId, snapshot.SessionId, itemId, now, "returned",
+                        dispatchTimer?.ElapsedMilliseconds ?? 0L);
+                }
                 error = null;
                 return true;
             }
             catch (OperationCanceledException exception)
             {
+                if (_logger != null)
+                {
+                    HandoffTrace.DispatchResult(
+                        _logger, roomId, snapshot.SessionId, itemId, now, "timeout",
+                        dispatchTimer?.ElapsedMilliseconds ?? 0L);
+                }
                 LogFailure("Watch Together play item command timed out", roomId, userId, RemoteCommands.PlayItem, exception);
                 error = "command_timeout";
                 return false;
             }
             catch (Exception exception)
             {
+                if (_logger != null)
+                {
+                    HandoffTrace.DispatchResult(
+                        _logger, roomId, snapshot.SessionId, itemId, now, "failed",
+                        dispatchTimer?.ElapsedMilliseconds ?? 0L);
+                }
                 LogFailure("Watch Together play item command failed", roomId, userId, RemoteCommands.PlayItem, exception);
                 error = "command_failed";
                 return false;

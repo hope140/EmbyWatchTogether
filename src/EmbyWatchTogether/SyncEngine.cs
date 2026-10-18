@@ -1237,6 +1237,8 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 snapshots.TryGetValue(handoff.ParticipantUserId, out var currentParticipant);
+                HandoffTrace.TargetSuperseded(
+                    _logger, room.Id, handoff, handoff.TargetItemId, now);
                 runtime.RecordDiagnosticEvent(
                     "handoff_superseded", null, RemoteCommands.PlayItem, "superseded", null, null, now);
                 StartMediaHandoff(
@@ -1254,6 +1256,7 @@ namespace Emby.Plugins.WatchTogether
                 // SessionSelector has already selected this identity using the
                 // normal current-candidate rules. A same-user rebind gets a new
                 // generation and cannot inherit the old PlayItem pending.
+                var oldPrimarySessionId = handoff.PrimarySessionId;
                 handoff.PrimarySessionId = currentPrimary.SessionId;
                 handoff.Generation++;
                 handoff.PlayItemPending = false;
@@ -1261,6 +1264,9 @@ namespace Emby.Plugins.WatchTogether
                 handoff.RetryCount = 0;
                 handoff.NextRetryAtUtc = null;
                 handoff.LastError = null;
+                HandoffTrace.SessionRebind(
+                    _logger, room, room.Id, handoff, "primary", handoff.PrimaryUserId,
+                    oldPrimarySessionId, handoff.PrimarySessionId, now);
                 runtime.RecordDiagnosticEvent(
                     "handoff_superseded", null, RemoteCommands.PlayItem, "superseded", null, null, now);
             }
@@ -1301,6 +1307,7 @@ namespace Emby.Plugins.WatchTogether
 
             if (!string.Equals(participantSnapshot.SessionId, handoff.ParticipantSessionId, StringComparison.OrdinalIgnoreCase))
             {
+                var oldParticipantSessionId = handoff.ParticipantSessionId;
                 handoff.ParticipantSessionId = participantSnapshot.SessionId;
                 handoff.Generation++;
                 handoff.PlayItemPending = false;
@@ -1308,6 +1315,9 @@ namespace Emby.Plugins.WatchTogether
                 handoff.RetryCount = 0;
                 handoff.NextRetryAtUtc = null;
                 handoff.LastError = null;
+                HandoffTrace.SessionRebind(
+                    _logger, room, room.Id, handoff, "participant", handoff.ParticipantUserId,
+                    oldParticipantSessionId, handoff.ParticipantSessionId, now);
                 runtime.RecordDiagnosticEvent(
                     "handoff_superseded", null, RemoteCommands.PlayItem, "superseded", null, null, now);
             }
@@ -1320,6 +1330,8 @@ namespace Emby.Plugins.WatchTogether
                     return true;
                 }
 
+                HandoffTrace.TargetConfirmed(
+                    _logger, room, room.Id, handoff, participantSnapshot, now);
                 runtime.RecordDiagnosticEvent(
                     "handoff_target_confirmed", null, RemoteCommands.PlayItem, "confirmed", null, null, now);
                 runtime.ClearMediaHandoff();
@@ -1347,6 +1359,7 @@ namespace Emby.Plugins.WatchTogether
                     return true;
                 }
 
+                HandoffTrace.ConfirmationTimeout(_logger, room.Id, handoff, now);
                 handoff.PlayItemPending = false;
                 handoff.PlayItemIssuedAtUtc = null;
                 handoff.LastError = "play item acknowledgement timed out";
@@ -1365,7 +1378,11 @@ namespace Emby.Plugins.WatchTogether
 
             handoff.NextRetryAtUtc = null;
             handoff.RetryCount++;
-            if (TryIssuePlayItem(room, participantSnapshot, handoff.TargetItemId, now, out var failure))
+            HandoffTrace.Attempt(_logger, room.Id, handoff, participantSnapshot, now);
+            var accepted = TryIssuePlayItem(room, participantSnapshot, handoff.TargetItemId, now, out var failure);
+            HandoffTrace.IssueResult(
+                _logger, room.Id, handoff, participantSnapshot, accepted, failure, now);
+            if (accepted)
             {
                 handoff.PlayItemPending = true;
                 handoff.PlayItemIssuedAtUtc = now;
@@ -1388,7 +1405,7 @@ namespace Emby.Plugins.WatchTogether
             return true;
         }
 
-        private static bool FailMediaHandoffIfExpired(
+        private bool FailMediaHandoffIfExpired(
             RoomRuntime runtime,
             Room room,
             DateTimeOffset now)
@@ -1441,18 +1458,20 @@ namespace Emby.Plugins.WatchTogether
             runtime.MissingSessionSinceUtc = null;
             runtime.ClearRemoteControlRecovery();
             runtime.ClearPrimaryItemTransitionCandidate();
+            HandoffTrace.Started(_logger, room, room.Id, handoff, now);
             runtime.RecordDiagnosticEvent(
                 "handoff_started", null, RemoteCommands.PlayItem, "started", null, null, now);
             _logger?.Info(
                 $"Room {room.Id}: media handoff started for primary item {ShortIdentity(handoff.TargetItemId)}");
         }
 
-        private static void FailMediaHandoff(
+        private void FailMediaHandoff(
             RoomRuntime runtime,
             Room room,
             string error,
             DateTimeOffset now)
         {
+            HandoffTrace.Failed(_logger, room?.Id, runtime?.Handoff, error, now);
             runtime.RecordDiagnosticEvent(
                 "handoff_failed", null, RemoteCommands.PlayItem, "failed", null, null, now);
             runtime.ResetToWaiting();

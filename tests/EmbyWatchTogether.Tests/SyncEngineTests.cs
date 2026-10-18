@@ -3628,9 +3628,11 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             var room = CreateRoom();
             var issuer = new HandoffIssuer();
-            var engine = CreateHandoffEngine(issuer);
+            var infos = new List<string>();
+            var engine = CreateHandoffEngine(issuer, CreateLogManager(new List<string>(), infos).Object);
             EnterWatchingWithIssuer(engine, room, issuer);
             issuer.PlayItems.Clear();
+            infos.Clear();
 
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
@@ -3638,6 +3640,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
             Assert.Empty(issuer.PlayItems);
+            var trace = infos.Where(message => message.StartsWith("WT_HANDOFF", StringComparison.Ordinal)).ToList();
+            Assert.DoesNotContain(trace, message => message.Contains("event=attempt ") ||
+                message.Contains("event=dispatch "));
+            Assert.Contains(trace, message => message.Contains("event=target_confirmed ") &&
+                message.Contains("requestHash=none"));
         }
 
         [Fact]
@@ -4252,7 +4259,209 @@ namespace Emby.Plugins.WatchTogether.Tests
                 BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(runtime);
         }
 
-        private SyncEngine CreateHandoffEngine(HandoffIssuer issuer)
+        [Fact]
+        public void MediaHandoffTrace_NormalAttemptLogsOneAttemptAndAcceptedResult()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var infos = new List<string>();
+            var engine = CreateHandoffEngine(issuer, CreateLogManager(new List<string>(), infos).Object);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            infos.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Single(infos, message => message.Contains("event=attempt "));
+            Assert.Single(infos, message => message.Contains("event=issue_result ") &&
+                message.Contains("accepted=true") && message.Contains("result=accepted"));
+            var trace = infos.Where(message => message.StartsWith("WT_HANDOFF", StringComparison.Ordinal)).ToList();
+            Assert.DoesNotContain(trace, message => message.Contains("item-b"));
+            Assert.Contains(trace, message => message.Contains("operationHash=") &&
+                message.Contains("requestHash="));
+        }
+
+        [Fact]
+        public void MediaHandoffTrace_ConfirmationTimeoutAndRetryHaveDistinctRequests()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var infos = new List<string>();
+            var engine = CreateHandoffEngine(issuer, CreateLogManager(new List<string>(), infos).Object);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            infos.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + 0.1);
+            engine.PollOnce(_clock.Now);
+
+            var attempts = infos.Where(message => message.Contains("event=attempt ")).ToList();
+            var requests = attempts
+                .Select(message => message.Split(new[] { "requestHash=" }, StringSplitOptions.None)[1]
+                    .Split(' ')[0])
+                .ToList();
+            Assert.Equal(2, attempts.Count);
+            Assert.Equal(2, requests.Distinct(StringComparer.Ordinal).Count());
+            Assert.Equal(2, issuer.PlayItems.Count);
+            Assert.Contains(infos, message => message.Contains("event=confirmation_timeout ") &&
+                message.Contains("result=confirmation_timeout"));
+        }
+
+        [Fact]
+        public void MediaHandoffTrace_TargetAndSessionChangesAreSeparated()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var infos = new List<string>();
+            var engine = CreateHandoffEngine(issuer, CreateLogManager(new List<string>(), infos).Object);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            infos.Clear();
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
+                Snapshot("s2-new", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-c"),
+                Snapshot("s2-new", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-a"));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            Assert.Contains(infos, message => message.Contains("event=target_superseded "));
+            Assert.Contains(infos, message => message.Contains("event=session_rebind ") &&
+                message.Contains("role=primary"));
+            Assert.Contains(infos, message => message.Contains("event=session_rebind ") &&
+                message.Contains("role=participant"));
+            Assert.Contains(infos, message => message.Contains("event=session_rebind ") &&
+                message.Contains("role=primary") && message.Contains("generation=2"));
+            Assert.Contains(infos, message => message.Contains("event=session_rebind ") &&
+                message.Contains("role=participant") && message.Contains("generation=3"));
+            var started = infos.Where(message => message.Contains("event=handoff_started "))
+                .Select(message => message.Split(new[] { "operationHash=" }, StringSplitOptions.None)[1]
+                    .Split(' ')[0])
+                .ToList();
+            Assert.True(started.Count >= 2);
+            Assert.NotEqual(started[0], started[started.Count - 1]);
+            Assert.Contains(infos, message => message.Contains("event=attempt ") &&
+                message.Contains("generation=4") && message.Contains("attempt=1"));
+            var trace = infos.Where(message => message.StartsWith("WT_HANDOFF", StringComparison.Ordinal)).ToList();
+            Assert.DoesNotContain(trace, message => message.Contains("s1-new") ||
+                message.Contains("s2-new") || message.Contains("item-c"));
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void MediaHandoffTrace_EngineAttemptAndIssuerDispatchShareRequestHash(
+            bool confirmationTimeout)
+        {
+            var room = CreateRoom();
+            var manager = new Mock<ISessionManager>();
+            manager.Setup(m => m.SendPlaystateCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            manager.Setup(m => m.SendPlayCommand(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            var infos = new List<string>();
+            var logger = new Mock<ILogger>();
+            logger.Setup(l => l.Info(It.IsAny<string>(), It.IsAny<object[]>()))
+                .Callback<string, object[]>((message, _) => infos.Add(message));
+            var logManager = new Mock<ILogManager>();
+            logManager.Setup(l => l.GetLogger(It.IsAny<string>())).Returns(logger.Object);
+
+            using (var bridge = new SessionBridge(manager.Object))
+            using (var engine = new SyncEngine(
+                _rooms,
+                _provider,
+                new SessionBridgeCommandIssuer(bridge, logManager.Object),
+                () => "server-1",
+                () => _clock.Now,
+                pollIntervalSeconds: 1.0,
+                pauseOtherOnPlaybackStop: true,
+                notifyOtherOnPlaybackStop: false,
+                notifyOnSyncActions: false,
+                messageIssuer: _messageIssuer,
+                logManager: logManager.Object))
+            {
+                EnterWatching(engine, room);
+                infos.Clear();
+
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "43"),
+                    Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "42"));
+                _clock.Advance(1);
+                engine.PollOnce(_clock.Now);
+
+                if (confirmationTimeout)
+                {
+                    _clock.Advance(SyncConstants.PendingTimeoutSeconds + 0.1);
+                    engine.PollOnce(_clock.Now);
+                }
+
+                var attempts = infos.Where(message => message.Contains("event=attempt ")).ToList();
+                var dispatches = infos.Where(message => message.Contains("event=dispatch ")).ToList();
+                var dispatchResults = infos.Where(message => message.Contains("event=dispatch_result ")).ToList();
+                var expectedCalls = confirmationTimeout ? 2 : 1;
+                Assert.Equal(expectedCalls, attempts.Count);
+                Assert.Equal(expectedCalls, dispatches.Count);
+                Assert.Equal(expectedCalls, dispatchResults.Count);
+                var requests = new List<string>();
+                for (var i = 0; i < expectedCalls; i++)
+                {
+                    var request = attempts[i].Split(new[] { "requestHash=" }, StringSplitOptions.None)[1]
+                        .Split(' ')[0];
+                    requests.Add(request);
+                    Assert.Contains("requestHash=" + request, dispatches[i]);
+                    Assert.Contains("requestHash=" + request, dispatchResults[i]);
+                    Assert.Contains("result=returned", dispatchResults[i]);
+                }
+                Assert.Equal(expectedCalls, requests.Distinct(StringComparer.Ordinal).Count());
+
+                SetCandidates(
+                    Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "43"),
+                    Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "43"));
+                _clock.Advance(1);
+                engine.PollOnce(_clock.Now);
+                var confirmed = Assert.Single(infos, message => message.Contains("event=target_confirmed "));
+                Assert.Contains("requestHash=" + requests[requests.Count - 1], confirmed);
+                if (confirmationTimeout)
+                {
+                    manager.Verify(m => m.SendPlayCommand(
+                        It.IsAny<string>(), "s2", It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()),
+                        Times.Exactly(2));
+                }
+                else
+                {
+                    manager.Verify(m => m.SendPlayCommand(
+                        It.IsAny<string>(), "s2", It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()),
+                        Times.Once);
+                }
+            }
+        }
+
+        private SyncEngine CreateHandoffEngine(HandoffIssuer issuer, ILogManager logManager = null)
         {
             return new SyncEngine(
                 _rooms, _provider, issuer, () => "server-1", () => _clock.Now,
@@ -4260,7 +4469,8 @@ namespace Emby.Plugins.WatchTogether.Tests
                 pauseOtherOnPlaybackStop: true,
                 notifyOtherOnPlaybackStop: false,
                 notifyOnSyncActions: false,
-                messageIssuer: _messageIssuer);
+                messageIssuer: _messageIssuer,
+                logManager: logManager);
         }
 
         private void EnterWatchingWithIssuer(SyncEngine engine, Room room, HandoffIssuer issuer)
