@@ -136,7 +136,7 @@ test('普通成员当前房间保留原房间卡结构和状态信息', async ({
   await page.screenshot({ path: path.join(artifactDir, 'desktop-light-active-room.png'), fullPage: true });
 });
 
-test('媒体状态只依据匹配参与者的 State 会话，等待和 State 失败不与成员行矛盾', async ({ page }) => {
+test('Waiting 与 State 失败状态反馈保持原页面语义', async ({ page }) => {
   await open(page, 'waiting', 'light', 1024, 900);
   await expect(page.locator('.wt-roomState')).toContainText('等待参与者');
   await expect(page.locator('.wt-roomStateDescription')).toContainText('等待');
@@ -206,7 +206,7 @@ test('5 秒轮询保持诊断展开状态', async ({ page }) => {
   await expect(page.locator('.wt-roomCard details.wt-diagnostics')).toHaveAttribute('open', '');
 });
 
-test('迟到响应在暂停后不能写入页面', async ({ page }) => {
+test('页面暂停后保留已加载房间卡并允许已发出请求完成', async ({ page }) => {
   await page.goto('/?scenario=late&theme=light');
   await page.evaluate(() => window.__wtFixture.view.onPause());
   await page.waitForTimeout(1200);
@@ -316,7 +316,7 @@ test('诊断内容经过脱敏，导出前不出现原始标识', async ({ page 
   expect(text).not.toContain('RoomHash');
   expect(text).not.toContain('SessionHash');
   expect(text).not.toContain('Token');
-  await expect(page.locator('.wt-diagnosticToolbar button[is="emby-button"]')).toHaveCount(1);
+  await expect(page.locator('.wt-diagnosticToolbar button')).toHaveAttribute('is', 'emby-button');
   await page.screenshot({ path: path.join(artifactDir, 'mobile-diagnostics-390.png'), fullPage: true });
 });
 
