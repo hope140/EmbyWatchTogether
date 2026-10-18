@@ -62,3 +62,18 @@
 - 真实 Web V6：内容区实测 727.19px、计算 max-width 727.196px；当前展开侧栏时 margin 为 0，靠左与 `layout_nontv.css` 一致。原五个区域顺序、配置读取、Token 配置状态保留；房间动态按钮有 `raised` 与原生构造类，浅色下背景 `rgba(236,236,243,.7)`、文字 `rgba(0,0,0,.87)`。未执行房间控制、邀请或配置写入。
 - 对比度边界：模拟 light/dark/HSL 普通按钮达到 4.5:1；采用当前宿主 darkgradient 透明色变量与代表背景点进行 alpha 合成，结果约 3.868:1，优于旧浅底白字但低于 4.5:1。此项不是全部背景/客户端可读性通过，保留原生主题配对，等用户实机反馈。
 - Knowledge Review：经验 23 记录原生内容宽度、侧栏对齐覆盖和按钮主题配对；架构已同步，无新增同步或业务架构决策，不需新 ADR。正式发布仍等待 UI 与真实双端验收，未执行远端分支/tag/Release 写入。
+
+## S118：按钮文字对齐和浅色轮廓
+
+- 目标：修正用户截图中的按钮文字偏左及浅色主题边界不清，保留当前原生内容宽度、单页区域顺序与业务。
+- 基础分支/commit：`beta@4fc3ee18dd4ba260f529da7a3f069e9665d55219`；前置依赖：S117 已部署候选。
+- 取证：真实 Web 六个房间动作的文字中心偏左约 4.16px，computed `justify-content: normal`、`align-items: center`。宿主 `.emby-button` 是 inline-flex 且未定义 justify-content；`.raised` 的 text-align:center 不足以让 flex 内容居中。浅/深主题均定义原生 `.raised-outline`。
+- 允许修改/所有权：沿用原 UI worker，仅拥有 HTML/JS、`Plugin.cs` 的 GetPages 缓存键和 `PluginPagesTests.cs`；主线程拥有 `tests/ui/fixture/server.js` / `specs/watchtogether.spec.js`、本契约及相关架构/排期/验收/经验文档、构建部署 receipt。双方文件不重叠。
+- 禁止修改：其他 C#、同步/Session/Room/邀请/Token API 和业务、版本、依赖/锁文件、发布与签名工作流。
+- 实现边界：所有插件原生按钮显式 justify-content/align-items/text-align 居中；普通按钮使用 `raised raised-outline`，只将轮廓色接到已有宿主文字派生变量 `--wt-muted`，不自绘背景/hover/disabled。创建/加入/接受/保存继续 `raised button-submit`；加入按钮不得同时应用 outline。动态按钮保留构造器类；原确认方式、80ch 宽度及对齐规则保持。缓存键同步 `WatchTogetherSettingsV7` / `.js`。
+- 验收：真实及模拟宿主中按钮文字横向中心误差 <=1px，纵向 <=2px；320–1920px 无溢出。普通按钮边界明确，浅/深/HSL 与模拟渐变代表点文字对比 >=4.5:1、边框相邻表面对比 >=3:1，按 RGBA 合成实际测量；主操作保留主题填充，所有业务回归保持。
+- 测试命令：worker 执行 `node --check` 和 PluginPagesTests 窄测；主线程维护实际 native inline-flex/outline 的 fixture，新增对齐及边界/文字对比回归，最终 `npm test`、完整 build/test/publish、四组 PowerShell 门禁、包哈希和真实宿主只读验证。
+- 回滚：revert S118 提交；NAS 精确备份恢复。旧分支和部署 receipt 保留。
+- 允许并行：只有主线程的文档/fixture/spec 准备与 worker 的四个限定文件可并行写；产品交接冻结后串行测试、审核、构建和部署。
+- 子代理：沿用原 Luna High UI worker，主线程负责设计、验收测试、审核与部署；Max 理由不适用。
+- Knowledge context：当前架构和经验 10/18/21–23、原生容器/构造类约束、本轮真实 CSS 与文字中心测量。

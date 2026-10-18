@@ -170,3 +170,9 @@
 - 事实：当前宿主 `emby-button.css` 提供控件基础结构并继承文字色；浅色及深色渐变主题由 `.raised` 同时定义背景和文字，`.button-submit` 进一步应用主题强调色。旧 `button-flat` 没有提供相同的主题背景配对，用户截图出现浅底白字。
 - 规则：复用原生结构和类之前核对当前宿主 CSS；避免只保留原生属性而缺失主题类。主题按钮含透明色时，对比度检查应合成 alpha 与下层表面，不能把透明白色当不透明白色，也不能忽略文字 alpha。
 - 验证：真实宿主文件只读检查与用户截图、S116 当前类交叉确认；S117 通过回归及真实宿主复核分别记录，模拟渐变代表区域不等同于所有客户端背景位置验收。
+
+## 24. 原生 flex 按钮的文字居中与边界需要独立验证
+
+- 事实：宿主 `.emby-button` 使用 inline-flex 和 align-items:center，但没有 justify-content；`.raised` 的 text-align:center 不负责 flex 主轴分布。设置最小宽度或窄屏拉伸后，真实房间按钮文字横向偏左约 4.16px。
+- 修正：只补插件作用域的 justify-content/align-items/text-align:center，保留宿主 display、字体、padding、焦点与禁用行为。普通按钮采用已有原生 raised-outline，通过宿主派生的文字色强化轮廓，不需要自绘按钮背景。
+- 验证：原 V6 源码快照在真实 inline-flex 夹具中出现 7.71px 文字偏移，新增对齐回归失败；描边与文字分别使用 RGBA 合成后测量边界和文字对比度，不能用文字清晰代替轮廓可辨。S118 的最终检查与真实宿主证据见 `native-controls-plan.md`。

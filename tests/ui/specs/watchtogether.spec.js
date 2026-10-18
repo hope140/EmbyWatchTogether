@@ -31,6 +31,65 @@ function contrastRatio(foreground, background) {
   return (light + 0.05) / (dark + 0.05);
 }
 
+async function buttonPaint(page, selector) {
+  return page.locator(selector).evaluate(button => {
+    function parse(value) {
+      const match = value.match(/rgba?\(\s*([\d.]+)[, ]+\s*([\d.]+)[, ]+\s*([\d.]+)(?:[, ]+\s*([\d.]+))?\s*\)/i);
+      if (!match) throw new Error(`Unexpected color: ${value}`);
+      return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])];
+    }
+    function over(foreground, background) {
+      const alpha = foreground[3] + background[3] * (1 - foreground[3]);
+      return [0, 1, 2].map(i => (foreground[i] * foreground[3] + background[i] * background[3] * (1 - foreground[3])) / alpha).concat(alpha);
+    }
+    function luminance(color) {
+      return color.slice(0, 3).map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
+    }
+    function contrast(a, b) {
+      const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (values[0] + .05) / (values[1] + .05);
+    }
+    const ancestors = [];
+    for (let node = button.parentElement; node; node = node.parentElement) ancestors.unshift(node);
+    let surface = [255, 255, 255, 1];
+    for (const node of ancestors) {
+      const style = getComputedStyle(node);
+      surface = over(parse(style.backgroundColor), surface);
+      if (style.backgroundImage !== 'none') {
+        const sample = style.getPropertyValue('--fixture-gradient-sample').trim();
+        if (!sample) throw new Error('Gradient needs an explicit representative sample');
+        surface = sample.split(',').map(Number).concat(1);
+      }
+    }
+    const style = getComputedStyle(button);
+    const background = over(parse(style.backgroundColor), surface);
+    return {
+      classes: button.className,
+      background: style.backgroundColor,
+      borderStyle: style.borderTopStyle,
+      borderWidth: parseFloat(style.borderTopWidth),
+      textContrast: contrast(over(parse(style.color), background), background),
+      borderContrast: contrast(over(parse(style.borderTopColor), background), surface)
+    };
+  });
+}
+
+async function expectButtonTextCentered(page) {
+  const buttons = await page.locator('button[is="emby-button"]').evaluateAll(nodes => nodes.map(button => {
+    const rect = button.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const range = document.createRange();
+    range.selectNodeContents(button);
+    const text = range.getBoundingClientRect();
+    return { id: button.id || button.getAttribute('data-act'), x: text.left + text.width / 2 - rect.left - rect.width / 2, y: text.top + text.height / 2 - rect.top - rect.height / 2 };
+  }).filter(Boolean));
+  expect(buttons.length).toBeGreaterThan(0);
+  for (const button of buttons) {
+    expect(Math.abs(button.x), `${button.id} horizontal text offset`).toBeLessThanOrEqual(1);
+    expect(Math.abs(button.y), `${button.id} vertical text offset`).toBeLessThanOrEqual(2);
+  }
+}
+
 test('单页保留原区域顺序和宿主控件，并隐藏自绘导航', async ({ page }) => {
   await open(page, 'admin-member', 'light', 1440, 1000);
   await expect(page.locator('#wtPluginNav, #wtPluginNavSlot, .tabs-viewmenubar')).toHaveCount(0);
@@ -75,40 +134,14 @@ test('浅色、深色和仅 HSL 单页主体均满足 4.5:1 对比度并保留�
   }
 });
 
-test('深色渐变使用宿主半透明 raised 配对并量化代表点对比度', async ({ page }) => {
+test('深色渐变原生描边按钮的文字和边界满足代表点对比度', async ({ page }) => {
   await open(page, 'admin-member', 'darkgradient', 1440, 1000);
   await page.screenshot({ path: path.join(artifactDir, 'desktop-darkgradient-native-controls.png'), fullPage: true });
-  const metrics = await page.locator('.wt-roomCard button[data-act="pause"]').evaluate(button => {
-    function parse(value) {
-      const match = value.match(/rgba?\(\s*([\d.]+)[, ]+\s*([\d.]+)[, ]+\s*([\d.]+)(?:[, ]+\s*([\d.]+))?\s*\)/i);
-      if (!match) throw new Error(`Unexpected color: ${value}`);
-      return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])];
-    }
-    function over(foreground, background) {
-      const alpha = foreground[3] + background[3] * (1 - foreground[3]);
-      return [0, 1, 2].map(index => (foreground[index] * foreground[3] + background[index] * background[3] * (1 - foreground[3])) / alpha).concat(alpha);
-    }
-    function luminance(color) {
-      return color.slice(0, 3).map(value => value / 255).map(value => value <= .03928 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
-    }
-    function contrast(foreground, background) {
-      const light = Math.max(luminance(foreground), luminance(background));
-      const dark = Math.min(luminance(foreground), luminance(background));
-      return (light + .05) / (dark + .05);
-    }
-    const host = document.querySelector('.fixture-host');
-    const sample = getComputedStyle(host).getPropertyValue('--fixture-gradient-sample').split(',').map(Number).concat(1);
-    const section = parse(getComputedStyle(button.closest('.wt-section')).backgroundColor);
-    const card = parse(getComputedStyle(button.closest('.wt-roomCard')).backgroundColor);
-    const surface = over(card, over(section, sample));
-    const background = over(parse(getComputedStyle(button).backgroundColor), surface);
-    const foreground = over(parse(getComputedStyle(button).color), background);
-    return { classes: button.className, background: getComputedStyle(button).backgroundColor, foreground: getComputedStyle(button).color, ratio: contrast(foreground, background) };
-  });
-  expect(metrics.classes).toContain('raised');
-  expect(metrics.background).not.toBe('rgb(255, 255, 255)');
-  expect(Number.isFinite(metrics.ratio)).toBe(true);
-  test.info().annotations.push({ type: 'contrast', description: `代表渐变点合成对比度 ${metrics.ratio.toFixed(3)}，4.5:1 目标${metrics.ratio >= 4.5 ? '达标' : '未达'}；保留宿主主题配对` });
+  const paint = await buttonPaint(page, '.wt-roomCard button[data-act="pause"]');
+  expect(paint.classes).toContain('raised-outline');
+  expect(paint.textContrast).toBeGreaterThanOrEqual(4.5);
+  expect(paint.borderContrast).toBeGreaterThanOrEqual(3);
+  test.info().annotations.push({ type: 'contrast', description: `代表渐变点合成文字 ${paint.textContrast.toFixed(3)}:1、边界 ${paint.borderContrast.toFixed(3)}:1` });
 });
 
 test('深色渐变中的旧 button-flat 会复现浅底白字，页面控件全部使用 raised', async ({ page }) => {
@@ -158,14 +191,27 @@ test('深色渐变中的旧 button-flat 会复现浅底白字，页面控件全�
   await expect(page.locator('.wt-page button.raised')).not.toHaveCount(0);
 });
 
-test('浅色、深色和 HSL 主题的普通 raised 按钮达到 4.5:1 对比度', async ({ page }) => {
+test('浅色、深色和 HSL 原生描边按钮文字和边界可辨', async ({ page }) => {
   for (const theme of ['light', 'dark', 'hsl']) {
     await open(page, 'admin-member', theme, 1024, 900);
-    const colors = await page.locator('#wtRefresh').evaluate(button => {
-      const style = getComputedStyle(button);
-      return { background: style.backgroundColor, color: style.color };
-    });
-    expect(contrastRatio(colors.color, colors.background)).toBeGreaterThanOrEqual(4.5);
+    const paint = await buttonPaint(page, '#wtRefresh');
+    expect(paint.classes).toContain('raised-outline');
+    expect(paint.borderStyle).toBe('solid');
+    expect(paint.borderWidth).toBeGreaterThan(0);
+    expect(paint.textContrast).toBeGreaterThanOrEqual(4.5);
+    expect(paint.borderContrast).toBeGreaterThanOrEqual(3);
+  }
+});
+
+test('原生按钮文字在浅深主题中居中，主操作保留填充', async ({ page }) => {
+  for (const theme of ['light', 'dark', 'hsl', 'darkgradient']) {
+    await open(page, 'admin-member', theme, 1024, 1000);
+    await expectButtonTextCentered(page);
+    await expect(page.locator('.wt-page button.button-submit.raised-outline')).toHaveCount(0);
+    await expect(page.locator('.wt-page button.raised:not(.button-submit):not(.raised-outline)')).toHaveCount(0);
+    if (theme === 'light' || theme === 'darkgradient') {
+      await page.locator('.wt-roomCard').screenshot({ path: path.join(artifactDir, `room-buttons-${theme}.png`) });
+    }
   }
 });
 
@@ -505,6 +551,7 @@ for (const width of [320, 360, 390, 430, 768, 1024, 1440, 1920]) {
     expect(metrics.width).toBeLessThanOrEqual(metrics.client + 1);
     expect(Math.min(...metrics.controls)).toBeGreaterThanOrEqual(44);
     expect(metrics.headerBottom).toBeLessThanOrEqual(metrics.pageTop + 1);
+    await expectButtonTextCentered(page);
     if (width === 390) await page.screenshot({ path: path.join(artifactDir, 'mobile-active-room-390.png'), fullPage: true });
     if (width === 320) await page.screenshot({ path: path.join(artifactDir, 'mobile-long-name-code-320.png'), fullPage: true });
   });

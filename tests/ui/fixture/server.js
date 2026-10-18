@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const root = path.resolve(__dirname, '..', '..', '..');
+const root = process.env.WT_UI_SOURCE_ROOT ? path.resolve(process.env.WT_UI_SOURCE_ROOT) : path.resolve(__dirname, '..', '..', '..');
 const htmlPath = path.join(root, 'src', 'EmbyWatchTogether', 'Web', 'Configuration', 'watchtogether.html');
 const jsPath = path.join(root, 'src', 'EmbyWatchTogether', 'Web', 'Configuration', 'watchtogether.js');
 const html = fs.readFileSync(htmlPath, 'utf8');
@@ -91,7 +91,7 @@ function page() {
     .fixture-host.dark { --theme-text-color: #edf2f7; --theme-text-color-hue: 210; --theme-text-color-saturation: 25%; --theme-text-color-lightness: 95%; --theme-text-color-alpha: 1; --theme-secondary-text-color: #a7b3bf; --theme-primary-color: #4bd47a; --theme-background-color: #151a1f; --card-background-hue: 210; --card-background-saturation: 22%; --card-background-lightness: 15%; --button-background-hue: 210; --button-background-saturation: 22%; --button-background-lightness: 22%; --button-background-alpha: 1; --line-background: rgba(220,230,240,.25); }
     .fixture-host.light { --theme-text-color: #1e2933; --theme-text-color-hue: 210; --theme-text-color-saturation: 25%; --theme-text-color-lightness: 22%; --theme-text-color-alpha: 1; --theme-secondary-text-color: #667789; --theme-primary-color: #20a956; --theme-background-color: #f7f9fb; --card-background-hue: 210; --card-background-saturation: 25%; --card-background-lightness: 99%; --button-background-hue: 210; --button-background-saturation: 20%; --button-background-lightness: 95%; --button-background-alpha: 1; --line-background: rgba(38,49,58,.2); }
     .fixture-host.hsl { --theme-text-color-hue: 210; --theme-text-color-saturation: 25%; --theme-text-color-lightness: 22%; --theme-text-color-alpha: 1; --theme-secondary-text-color-alpha: 1; --theme-primary-color-hue: 140; --theme-primary-color-saturation: 56%; --theme-primary-color-lightness: 39%; --theme-primary-color-alpha: 1; --card-background-hue: 210; --card-background-saturation: 25%; --card-background-lightness: 99%; --card-background-alpha: 1; --button-background-hue: 210; --button-background-saturation: 20%; --button-background-lightness: 95%; --button-background-alpha: 1; --line-background: rgba(38,49,58,.2); }
-    .fixture-host.darkgradient { --fixture-gradient-sample: 48,52,61; --theme-text-color: hsla(0,0%,100%,.87); --theme-text-color-hue: 0; --theme-text-color-saturation: 0%; --theme-text-color-lightness: 100%; --theme-text-color-alpha: .87; --theme-secondary-text-color: hsla(0,0%,100%,.7); --theme-primary-color: hsl(116,41.7%,50.2%); --theme-background-color: #30343d; --card-background-hue: 0; --card-background-saturation: 0%; --card-background-lightness: 100%; --card-background-alpha: .16; --button-background-hue: 0; --button-background-saturation: 0%; --button-background-lightness: 100%; --button-background-alpha: .2; --line-background: rgba(255,255,255,.25); background: linear-gradient(135deg, #252a32 0%, #3b4653 100%); }
+    .fixture-host.darkgradient { --fixture-gradient-sample: 48,52,61; --theme-text-color: hsla(0,0%,100%,.87); --theme-text-color-hue: 0; --theme-text-color-saturation: 0%; --theme-text-color-lightness: 100%; --theme-text-color-alpha: .87; --theme-secondary-text-color: hsla(0,0%,100%,.6); --theme-primary-color: hsl(116,41.7%,50.2%); --theme-background-color: #30343d; --card-background-hue: 0; --card-background-saturation: 0%; --card-background-lightness: 100%; --card-background-alpha: .16; --button-background-hue: 0; --button-background-saturation: 0%; --button-background-lightness: 100%; --button-background-alpha: .2; --line-background: rgba(255,255,255,.25); background: linear-gradient(135deg, #252a32 0%, #3b4653 100%); }
     .skinHeader { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, auto) minmax(160px, 1fr); align-items: center; min-height: 56px; padding: 0 16px; box-sizing: border-box; border-bottom: 1px solid var(--line-background, rgba(38,49,58,.2)); color: var(--theme-text-color, #1e2933); background: var(--theme-background-color, #f7f9fb); }
     .headerLeft, .headerRight { min-width: 0; display: flex; align-items: center; gap: 8px; }
     .headerRight { justify-content: flex-end; color: var(--theme-secondary-text-color, #667789); font-size: 12px; }
@@ -115,10 +115,12 @@ function page() {
     .fixture-host.dark .fixture-label { border-color: rgba(220,230,240,.25); color: #a7b3bf; background: rgba(220,230,240,.08); }
     button,input,select { box-sizing: border-box; font: inherit; }
     button { min-height: 44px; padding: 0 16px; color: inherit; cursor: pointer; }
+    .emby-button, button[is="emby-button"] { display: inline-flex; align-items: center; box-sizing: border-box; margin: 0 .29em; padding: .66em 2ch; font: inherit; font-weight: 600; color: inherit; border: 0; }
     .readOnlyContent { max-width: 80ch; }
     .auto-center { margin-inline: auto; }
     .page-withDockedDrawer .auto-center { margin-inline: 0; }
     button.raised { border: 0; border-radius: 100em; background: hsla(var(--button-background-hue, 0), var(--button-background-saturation, 0%), var(--button-background-lightness, 95%), var(--button-background-alpha, 1)); color: hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)); }
+    button.raised-outline { background: transparent; border: .08em solid var(--line-background); backdrop-filter: none; }
     button.raised.button-submit { border-color: var(--theme-primary-color, #20a956); color: #fff; background: var(--theme-primary-color, #20a956); }
     button:disabled { cursor: default; opacity: .55; }
     input:not([type="checkbox"]),select { width: min(100%, 32rem); min-height: 44px; padding: 0 12px; border: 1px solid var(--line-background, #c8d0d8); border-radius: 5px; color: var(--theme-text-color, #1e2933); background: var(--wt-card, #fff); }
