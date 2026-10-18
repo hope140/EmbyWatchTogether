@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherSettingsV5.js"
+     data-controller="__plugin/WatchTogetherSettingsV6.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -181,6 +181,11 @@
         .wt-refresh {
             min-height: 44px;
             white-space: nowrap;
+        }
+
+        .wt-nativeContent {
+            width: 100%;
+            box-sizing: border-box;
         }
 
         .wt-roomList {
@@ -451,6 +456,7 @@
     </style>
 
     <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
+        <div class="readOnlyContent auto-center wt-nativeContent">
         <div class="wt-pageHeader">
             <p class="sectionDescription wt-lead">
                 创建房间后，两位参与者打开同一视频，播放、暂停和进度会自动同步。
@@ -517,7 +523,7 @@
                     <div id="wtInvitationExpires"></div>
                 </div>
                 <div class="wt-formActions">
-                    <button is="emby-button" id="wtCopyInvitationCode" type="button" class="button-flat">复制邀请码</button>
+                    <button is="emby-button" id="wtCopyInvitationCode" type="button" class="raised">复制邀请码</button>
                 </div>
             </div>
 
@@ -538,7 +544,7 @@
                     <h2 id="wtRoomsHeading">房间</h2>
                     <p class="fieldDescription wt-sectionDescription">状态变为“同步中”后，两位参与者会自动保持一致。</p>
                 </div>
-                <button is="emby-button" id="wtRefresh" type="button" class="button-flat wt-refresh">刷新</button>
+                <button is="emby-button" id="wtRefresh" type="button" class="raised wt-refresh">刷新</button>
             </div>
             <div id="wtRooms" class="wt-roomList" aria-live="polite" aria-busy="true"></div>
         </div>
@@ -607,7 +613,7 @@
                 </details>
                 <div class="wt-formActions">
                     <button is="emby-button" id="wtSaveGitHubToken" type="button" class="raised button-submit" disabled>保存 Token</button>
-                    <button is="emby-button" id="wtClearGitHubToken" type="button" class="button-flat" disabled>清除 Token</button>
+                    <button is="emby-button" id="wtClearGitHubToken" type="button" class="raised" disabled>清除 Token</button>
                 </div>
                 <p class="fieldDescription wt-formHint wt-tokenStatus" id="wtGitHubTokenStatus" role="status" aria-live="polite">正在读取 Token 状态…</p>
             </div>
@@ -632,4 +638,5 @@
             </div>
         </div>
     </div>
+</div>
 </div>

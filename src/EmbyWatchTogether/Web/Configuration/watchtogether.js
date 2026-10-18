@@ -403,7 +403,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var exportButton = document.createElement('button', { is: 'emby-button' });
         exportButton.type = 'button';
         exportButton.setAttribute('is', 'emby-button');
-        exportButton.classList.add('button-flat');
+        exportButton.classList.add('raised');
         exportButton.textContent = '导出诊断 JSON';
         exportButton.addEventListener('click', function () {
             exportDiagnostic(page, roomId);
@@ -755,7 +755,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var revoke = document.createElement('button', { is: 'emby-button' });
             revoke.type = 'button';
             revoke.setAttribute('is', 'emby-button');
-            revoke.classList.add('button-flat', 'wt-action', 'wt-action--danger');
+            revoke.classList.add('raised', 'wt-action', 'wt-action--danger');
             revoke.textContent = '撤销邀请码';
             revoke.addEventListener('click', function () {
                 revokeInvitation(page, invitation, revoke);
@@ -1490,7 +1490,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 : action === 'resync' || action === 'participantResync'
                     ? 'wt-action--accent'
                     : '';
-        button.classList.add('button-flat', 'wt-action');
+        button.classList.add('raised', 'wt-action');
+        if (action === 'join') button.classList.add('button-submit');
         if (toneClass) button.classList.add(toneClass);
         button.dataset.act = action;
         button.dataset.action = action;

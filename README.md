@@ -4,7 +4,7 @@ Watch Together 是一个运行在 Emby Server 内的双人同步观看插件，�
 
 本文面向 Emby Server 管理员和插件使用者。维护者或开发者需要构建、测试、签名发布、接口和运行时细节时，请阅读[开发者与维护者技术文档](docs/technical.md)。
 
-当前 UI 以原服务器单页界面为基线，保留原区域和房间布局，将既有按钮、输入框、选择框和 checkbox 交给 Emby 原生控件样式。换集诊断和 Playback Stability 保留，主用户缺失继续采用 beta 的晚到换集规则；这些本地整合尚未正式发布。范围与排期见[当前开发排期](docs/development-roadmap.md)和[原生控件调整契约](docs/native-controls-plan.md)。
+当前 UI 以原服务器单页界面为基线，保留原区域和房间布局，复用宿主内容区宽度与既有按钮、输入框、选择框和 checkbox 的 Emby 原生样式。换集诊断和 Playback Stability 保留，主用户缺失继续采用 beta 的晚到换集规则；这些本地整合尚未正式发布。范围与排期见[当前开发排期](docs/development-roadmap.md)和[原生控件调整契约](docs/native-controls-plan.md)。
 
 插件只负责房间内的协调，不会修改媒体库、转码设置或播放器客户端。正常播放期间不会为了消除网络延迟和小幅播放差异而反复跳转。
 

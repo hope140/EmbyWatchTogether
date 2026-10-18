@@ -4,6 +4,8 @@
 
 用户在 2026-10-18 明确要求以本轮部署前服务器上的单页界面为基线，只将按钮、输入框、选择框、checkbox 等已有控件交给 Emby 原生样式。保留原区域顺序、房间布局和操作方式。
 
+后续宽度与配色反馈进入 S117：采用宿主设置内容区的限宽/居中规则，修正深色渐变主题的普通按钮背景与文字配对，原区域和交互继续保留。
+
 基线证据：部署前 NAS 安装 DLL 与原 S110 本机产物 SHA-256 一致，为 `513dda4032d3c06c1d66091610e83e5569fcc810c2982abb05aed2adcb36d535`；S110 没有修改 Web 资源，原 UI 对应 beta `a1408e0`。`f294c67` 的 Web 资源相对该基线只增加 Phase E 的状态/诊断展示，结构仍相同，作为本次 UI 输入。
 
 已确认的主用户晚到换集、参与者 Recovery、drift、S110 tracing 和后台权限保持本地 beta `90feffd` 的实现。
@@ -36,3 +38,18 @@
 - 浏览器浅深主题、320–1920px、普通用户权限与业务失败场景属于模拟宿主证据；真实手机/普通用户、双账号播放、手动及自然换集、停止/恢复和长时观看仍由用户验收，不以启动检查或 mock 结果代替。
 - Knowledge Review：记录原生声明与自绘覆盖、动态控件构造类被覆盖两项事实；架构已同步 UI 基线，没有新增同步架构决策，无需新 ADR。
 - 机器路径及完整回滚位置只保存在被忽略的部署 receipt，不进入仓库；远端分支、tag 和 Release 未写入。
+
+## S117：原生内容宽度与按钮主题适配
+
+- 目标：按用户要求采用其他插件页同类的原生内容宽度，修正深色主题普通按钮浅底白字；保留 S116 单页结构和业务。
+- 基础分支/commit：`beta@d97b82a7cb435f9ea2c7cbfeb5d7d199c0fd7501`；前置依赖：S116 已审核并部署。
+- 真实宿主依据：当前 NAS `layout.css` 的 `form, .readOnlyContent { max-width: 80ch; }` 与 `.auto-center` 双侧 auto margin，路由模板使用 `readOnlyContent auto-center`；按钮主题定义 `.raised` 的背景/文字配对及 `.button-submit` 的主题强调色，`emby-button.css` 未定义 `button-flat` 的背景。
+- 允许修改/文件所有权：原 UI worker 独占 HTML/JS、`Plugin.cs` 的 `GetPages`、`PluginPagesTests.cs`、`tests/ui/fixture/server.js` / `specs/watchtogether.spec.js`；主线程独占本契约、架构/排期/验收和经验文档及本地部署 receipt。
+- 禁止修改：其余 C#、同步/Session/Room/邀请/Token API 和业务、版本、依赖/锁文件、签名与发布工作流。
+- 实现边界：在现有 padded scroll 容器内复用宿主 `readOnlyContent auto-center` 包裹原内容，区域/ID/顺序保持；普通按钮采用宿主 `raised` 背景/文字配对，创建/接受/保存及加入采用原生 `button-submit`；保留动态构造器类与旧确认方式。无自绘按钮颜色、红色方案、新分页、操作收纳或业务变更。页面/控制器键同步 V6。
+- 验收：宽屏内容受宿主 80ch 约束并居中，手机随可用宽度收缩；所有原区域与角色规则保留，普通按钮在浅/深/渐变及 HSL 主题背景与文字可辨，动态按钮保留宿主类，主操作与普通操作区分。
+- 测试命令：`node --check`、页面/服务 .NET 窄测；`npm ci` / `npm test`（`tests/ui`），夹具模拟 80ch 原生规则及 HSL 按钮配色，包含浅/深按钮对比度；最终 build/test/publish、四组 PowerShell 门禁与真实宿主只读复核。
+- 回滚：revert S117 commit；NAS 使用精确备份恢复。旧 S116 与其他工作区保留。
+- 允许并行：否，共享文件和最终构建串行。
+- 子代理：沿用原 Luna High UI worker 处理宿主兼容性修正；主线程设计、审核、集成与部署；Max 理由不适用。
+- Knowledge context：当前架构、经验 10/18/21/22、S116 原布局与按钮构造类边界；本轮只读取得的真实宿主 CSS/路由证据。
