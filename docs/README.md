@@ -12,7 +12,7 @@
 
 ## 开发与维护
 
-- [当前开发排期](development-roadmap.md)：`v1.6.1.0` 当前状态、发布阶段和历史 Stack 入口。
+- [当前开发排期](development-roadmap.md)：`v1.6.1.0` 交付状态和历史 Stack 入口。
 - [路线图](roadmap.md)：已整合能力与长期候选。
 - [贡献与 Stack/Worktree 流程](pr-stack-workflow.md)：分支、隔离、审核和回滚约定。
 - [经验记录](lessons-learned.md)：已由代码、测试或实际运行证实的约束。

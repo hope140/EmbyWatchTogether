@@ -2,7 +2,7 @@
 
 Watch Together 是运行在 Emby Server 内的双人同步观看插件。两位登录同一台 Emby Server 的用户可以在一个房间里一起观看同一视频，插件负责起播对齐、暂停/继续、明显的手动进度调整、主用户换集和有限的播放恢复。
 
-本文面向 Emby Server 管理员和普通使用者。项目版本为 `1.6.1.0`，请先阅读[发布说明](docs/releases/v1.6.1.0.md)。开发者和维护者请从[开发者文档索引](docs/README.md)进入。
+本文面向 Emby Server 管理员和普通使用者。当前正式版为 [v1.6.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，变化见[发布说明](docs/releases/v1.6.1.0.md)。开发者和维护者请从[开发者文档索引](docs/README.md)进入。
 
 ## 功能
 
@@ -27,7 +27,7 @@ Watch Together 是运行在 Emby Server 内的双人同步观看插件。两位�
 3. 将 DLL 直接复制到 Emby Server 数据目录的 `plugins` 目录，不要再套一层插件子目录。
 4. 启动或重启 Emby Server，进入 **Dashboard → Plugins → Watch Together**，确认设置页可以打开。
 
-升级前建议保留旧 DLL 作为回滚备份。安装包是单 DLL 交付，不需要复制源码、NuGet 包或旁车进程。若项目 **Latest** 尚未显示目标版本，请稍后再从 Latest 下载，不要从临时构建目录安装。
+升级前建议保留旧 DLL 作为回滚备份。安装包是单 DLL 交付，不需要复制源码、NuGet 包或旁车进程。
 
 ## 使用方法
 

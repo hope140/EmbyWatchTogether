@@ -1,6 +1,6 @@
 # Watch Together 路线图
 
-当前项目版本目标为 `1.6.1.0`。用户已于 2026-10-18 确认本轮验收通过，当前工作进入 stable 发布阶段；发布结果以主线程的 tag、GitHub Release 和发布后 readback 为准。详细排期见 [`development-roadmap.md`](development-roadmap.md)。
+当前正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，于 2026-10-18 发布并核验为 Latest。详细实施状态见 [`development-roadmap.md`](development-roadmap.md)。
 
 ## 已整合能力
 
@@ -10,9 +10,9 @@
 - 管理页诊断、脱敏导出、更新通道和 GitHub Token 状态保留在原服务器单页中。
 - 原生控件调整保留原区域、房间布局、宿主内容宽度和既有操作语义。
 
-## 当前发布阶段
+## 当前交付状态
 
-S119 已完成 `1.6.1.0` 版本候选准备，S120 正在整理用户入口、开发者入口、历史记录和 Release Notes。主线程随后负责最终构建、tag、签名 Release 与发布后状态同步。真实客户端的具体型号、版本和时长不在本文臆测；多跳集诊断仍按证据记录，不把日志能力写成根因修复。
+原生控件、同步稳定性整合、文档受众整理和 stable 签名发布已完成。README 提供用户入口，开发者从 [`docs/README.md`](README.md) 定位实现、构建和维护资料。后续观察以真实客户端反馈为依据；多跳集诊断按现场证据记录，不把日志能力写成根因修复。
 
 ## 长期边界
 

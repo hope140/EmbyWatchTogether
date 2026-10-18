@@ -4,17 +4,20 @@
 
 ## 当前已确认目标
 
-项目版本目标为 `1.6.1.0`。用户已于 2026-10-18 确认本轮验收通过，当前排期进入 stable 发布阶段。原服务器单页界面、同步、诊断和更新设置作为当前基线保留；正式发布、tag、Release 和发布后状态由主线程单独核验。
+当前正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，已于 2026-10-18 完成验收、签名发布与下载后独立核验，Latest 指向该版本。原服务器单页界面、同步、诊断和更新设置为当前基线。
 
 当前 UI 来源为 `a1408e0` 的原服务器页面，`f294c67` 仅提供其上的 Phase E 诊断增量；S116 控件契约见 [`native-controls-plan.md`](native-controls-plan.md)。UI VNext 的三页布局为已撤回的历史候选，现行 Token 设置、更新通道及已确认同步修复继续保留。
 
-当前排期：S116–S118 原生控件与页面适配（历史完成）→ S119 `v1.6.1.0` 候选准备（历史完成）→ S120 文档受众整理（当前）→ S121 stable 发布与闭环核验（主线程）。具体验收边界见 [`client-compatibility.md`](client-compatibility.md)。
+本轮排期已完成：S116–S118 原生控件与页面适配 → S119 候选准备 → S120 文档受众整理 → S121 stable 发布与核验。具体验收边界见 [`client-compatibility.md`](client-compatibility.md)，发布证据见[维护记录](maintenance/v1.6.1.0-publication.md)。
 
-当前进度：S118 的源码、构建和 UI 门禁证据已归档；用户于 2026-10-18 确认本轮验收通过并授权进入正式发布流程。S120 只整理文档，不改变产品源码或版本字段；S121 负责最终构建、stable tag/Release 和发布后 readback。构建身份与验证边界见 `native-controls-plan.md`。
+后续以真实客户端反馈和 [`roadmap.md`](roadmap.md) 中的候选为输入，具体新功能尚未排入实施。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；发布后的文档状态同步不移动该 tag。构建身份与 UI 验证边界见 `native-controls-plan.md`。
 
 ## 基线与证据
 
-S119 已将 `1.6.1.0` 作为正式版候选并保留其构建来源、签名边界和发布清单。准备阶段记录见 [`release-preparation-v1.6.1.0.md`](release-preparation-v1.6.1.0.md)；当前是否已经创建 tag、Release 或指向 Latest，以 S121 发布后的远端 readback 为准。
+正式版的 tag、版本、四个签名资产及 Latest 已完成远端核验。S119 的[准备记录](release-preparation-v1.6.1.0.md)保留当时的本地候选状态；以下是准备前的历史基线与整合契约，版本、部署和待办措辞只用于解释当时过程。
+
+<details>
+<summary>展开历史基线、Stack 契约与整合证据</summary>
 
 - 远端 `beta`：`a1408e03203201501690544df64509d0926164ec`，版本 `1.6.0.5`。
 - 远端 `main` / Latest stable：`c6568f56b16e03fa62a45265ddb7589006418847` / `v1.5.0.0`。
@@ -32,7 +35,7 @@ S119 已将 `1.6.1.0` 作为正式版候选并保留其构建来源、签名边�
 
 ## PR Stack 计划
 
-### 当前 S116：原服务器单页上的原生控件调整
+### S116：原服务器单页上的原生控件调整（历史）
 
 基础为本地 beta `90feffd`，按用户最新确认恢复 UI 基线，后端保持原已审核实现。实现、所有权、验证和回滚的完整契约见 `native-controls-plan.md`。以下 S111–S115 为历史整合过程；其三页 UI 布局不再是当前交付方案。
 
@@ -116,3 +119,5 @@ S119 已将 `1.6.1.0` 作为正式版候选并保留其构建来源、签名边�
 - S114：最终源码基线 `2f3f481` 已由主线程独立验证：.NET 519/519、Playwright 35/35、Release build/publish、单 DLL ZIP 和四组 PowerShell 门禁全部通过，`git diff --check` 通过。本地 beta 整合包含 S111/S113 及本轮文档同步；远端与已发布版本保持原基线。
 - S115：源码 `bcfb1fd` 已汇合 S112 与原生风格 UI，缓存键统一 V5。主线程独立验证 .NET 545/545、Playwright 37/37、Release build/publish、单 DLL ZIP 布局/哈希及四组 PowerShell 门禁全部通过，工作区与 diff 检查通过。本地 beta 包含该汇合及验证记录提交。
 - 以上记录对应历史整合构建；当前文档状态由 S120 和 S121 维护。S120 负责受众与历史边界整理，S121 负责最终版本、签名发布和远端状态核验。
+
+</details>

@@ -2,9 +2,9 @@
 
 本文按发布状态列出版本说明。普通用户先看对应版本的 Release Notes；开发者和维护者还应阅读 [`docs/versioning.md`](../versioning.md) 与 [`docs/technical.md`](../technical.md)。
 
-## 当前目标
+## 当前正式版
 
-- [v1.6.1.0](v1.6.1.0.md)：项目版本目标及用户可见变化说明。
+- [v1.6.1.0 发布说明](v1.6.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)：2026-10-18 正式发布，当前 Latest stable。
 
 ## 历史发布
 
@@ -52,7 +52,7 @@
 - [v1.2.0.13](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.13)
 - [v1.2.0.9](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.9)
 
-以上 38 项与当前公开 Release metadata 对齐。历史说明不随当前版本整理机械替换。
+以上 38 项为本次正式版之前的公开历史 Release，通道分类与 GitHub 元数据一致。历史说明保留当时的版本事实。
 
 `v1.5.0.4` 只对应一次失败的 tag 尝试，没有 GitHub Release 或发布资产，不能列为成功发布。
 
