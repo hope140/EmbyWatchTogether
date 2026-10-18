@@ -1,4 +1,6 @@
-# Watch Together 插件：当前实现说明
+# Watch Together 插件：历史实现说明
+
+本文保留早期实现说明和验收细节，供开发者追溯。当前版本、发布状态和用户入口以 [`README.md`](../README.md)、[`technical.md`](technical.md) 和 [`development-roadmap.md`](development-roadmap.md) 为准；历史版本号或 Stack 停点不代表当前待办。
 
 本文档说明仓库中独立 C# Emby 插件的实际行为、运行边界和验收方式。插件的取舍是“少打断播放”：正常播放主要传播用户明确操作，并对持续明显漂移进行低频 Barrier 纠偏，不在每一轮轮询中强制把两端位置拉齐。
 
@@ -19,7 +21,7 @@
 - 正常播放期间周期性 Seek 或保证逐帧相同；
 - 依赖外部服务、脚本或第二份配置文件。
 
-程序集目标框架为 `netstandard2.0`，当前 beta 项目版本为 `1.6.0.5`，稳定版为 `1.5.0.0`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
+程序集目标框架为 `netstandard2.0`；本文历史实现基于 beta `1.6.0.5`，NuGet 依赖是 `MediaBrowser.Server.Core` `4.9.0.52-beta`。当前项目版本目标为 `1.6.1.0`，版本号命名和递增以 [`docs/versioning.md`](versioning.md) 为准；C# 行为、公共 API 和当前版本值不由本文档改变。
 
 ## 2. 组件和数据流
 
@@ -257,7 +259,7 @@ https://github.com/hope140/EmbyWatchTogether/releases/download/<tag>/Emby.Plugin
 
 ### 生产 key bootstrap 与 workflow
 
-`src/EmbyWatchTogether/ReleaseTrustStore.cs` 已完成生产 key bootstrap，`ReleaseTrustStore` 包含已审核的公开 `keyId` `prod-2026-08`，并以不可变的 Ordinal 映射提供信任根。首次信任引导版本 `1.2.0.9` 必须人工部署完成信任引导，之后版本方可使用签名自动更新。
+`src/EmbyWatchTogether/ReleaseTrustStore.cs` 已完成生产 key bootstrap，`ReleaseTrustStore` 包含已审核的公开 `keyId` `prod-2026-08`，并以不可变的 Ordinal 映射提供信任根。尚未完成信任引导的既有安装必须先按可信人工安装流程完成一次引导，之后版本方可使用签名自动更新。
 
 1. 使用 `scripts/release/New-ReleaseSigningKey.ps1` 在仓库外生成 RSA 密钥，并审核公钥；
 2. 将 `keyId => RSAKeyValue` 映射提交到 `ReleaseTrustStore`；
@@ -324,7 +326,7 @@ git diff --check
 - 正常播放期间出现反复跳转时，优先排查其他插件、客户端或遥控器；本实现只有检测到明显单次跳变才发 Seek。
 - 停止后的暂停/提示是尽力行为：目标客户端必须支持对应远程命令，消息失败不会阻止房间回到等待状态。
 - 房间元数据文件损坏时 `RoomStore` 会报告错误而不会静默覆盖；恢复前请备份 Emby 插件数据目录。
-- `ReleaseTrustStore` 只信任已审核的生产公钥；匹配 Secret 缺失或错误、未知 key 或签名失败时所有正式版更新都会 fail closed。首次信任引导版本 `1.2.0.9` 需要人工部署，之后版本方可使用签名自动更新。
+- `ReleaseTrustStore` 只信任已审核的生产公钥；匹配 Secret 缺失或错误、未知 key 或签名失败时所有正式版更新都会 fail closed。未完成信任引导的既有安装需要人工完成一次可信引导，之后版本方可使用签名自动更新。
 - 真实网络、客户端实现和媒体上游可能导致确认延迟或会话短暂缺失，发布前仍需在实际 Emby 环境完成人工验收。
 
 仓库协作与 Stack/Worktree 约定见 [`docs/pr-stack-workflow.md`](pr-stack-workflow.md)。

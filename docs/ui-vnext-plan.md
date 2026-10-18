@@ -1,6 +1,6 @@
 # Watch Together UI VNext 实施契约
 
-本文件为历史候选记录。用户于 2026-10-18 明确要求保持原服务器单页布局，仅替换部分原生控件；当前方案以 [`native-controls-plan.md`](native-controls-plan.md) 为准。
+本文件为历史候选记录。用户于 2026-10-18 明确要求保持原服务器单页布局，仅替换部分原生控件；当前实现事实和验收证据以 [`native-controls-plan.md`](native-controls-plan.md) 为准。
 
 以下保留当时 UI VNext 的实现契约及基线，供历史追溯。
 
@@ -12,13 +12,13 @@
 
 - S111 审核通过提交：`98ace2b26bab2fc7cfe5a6675e1381728b34d8c9`，基于 beta `v1.6.0.5`，主线程已完成三方合并准备。
 - S113 当时只整合原生风格 UI 与 beta Token 设置，保留业务/API/Token 存储和同步实现；Phase E 在该阶段等待策略选择。
-- 本轮交付边界：本地 UI 实现、验证和主线程审核；不部署 NAS、不 push、不创建 PR、Release、tag 或签名包。
+- 当时交付边界：本地 UI 实现、验证和主线程审核；不部署 NAS、不 push、不创建 PR、Release、tag 或签名包。该停点属于历史准备阶段。
 
 ## S115 当前整合
 
 - 基础为本地 beta `e0f3a02` 与已审核 S112 `f294c67`，程序集版本保留 `1.6.0.5`。
 - 用户已确认保留 beta 的主用户停止观察和晚到换集规则；Phase E Recovery 只针对非主用户参与者，诊断分别展示 `RecoveryWindow`、`TransientRecovery`、Handoff 和 Drift。
-- 本轮先完成本地代码整合、回归和 UI 设计候选；真实 Emby/桌面/手机/双账号验收完成后，统一准备正式版。
+- 本轮先完成本地代码整合、回归和 UI 设计候选；其后的 UI 验收和 `v1.6.1.0` 发布准备由后续 Stack 记录。
 
 ## 当前实现事实
 

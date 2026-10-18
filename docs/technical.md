@@ -1,6 +1,6 @@
 # 技术文档（开发者与维护者）
 
-本文面向 Watch Together 的开发者、维护者和发布人员，记录构建、版本、签名发布、项目结构、运行时行为、持久化和 REST API 等实现细节。Emby 管理员和插件使用者请先阅读[用户文档 README.md](../README.md)。
+本文面向 Watch Together 的开发者、维护者和发布人员，记录构建、版本、签名发布、项目结构、运行时行为、持久化和 REST API 等实现细节。文档入口见[开发者文档索引](README.md)；Emby 管理员和插件使用者请先阅读[用户文档 README.md](../README.md)。
 
 ## 运行时行为与约束
 
@@ -39,11 +39,11 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.5.0.0`，当前测试版为 `1.6.0.5`，对应 beta tag `v1.6.0.5`；`v1.6.0.4` 及更早版本保留为历史 beta。`v1.6.0.4` 改进了较慢 GitHub/CDN 网络下的固定资产下载等待时间；`v1.6.0.5` 新增可选 Token 认证 beta Releases API 查询并整理了管理页配置入口。后续 beta 从 `beta` 分支以 GitHub prerelease 发布，管理员可在插件配置页选择 beta 让更新任务自动获取测试版。历史版本整理不移动、重命名或重建已有 tag。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。项目当前目标正式版为 `1.6.1.0`，本轮用户验收已于 2026-10-18 确认通过；tag 与 GitHub Release 的最终状态由发布流程单独核验。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
-独立发布准备分支的本地候选为 `1.6.1.0`，三项项目版本同步；公开 stable/beta 仍保持上述版本。候选尚未创建 tag 或 GitHub Release，本地包及未签名 manifest 草稿以 `release-preparation-v1.6.1.0.md` 和本地 receipt 为准；生产签名由既有 `release` Environment 的正式 workflow 生成。
+本轮项目版本目标为 `1.6.1.0`，三项项目版本应保持同步；正式 tag、GitHub Release 和签名资产属于独立发布步骤，不能从本地构建或文档状态推断。生产签名由既有 `release` Environment 的正式 workflow 生成。
 
 ## 构建、测试和打包
 
@@ -89,7 +89,7 @@ stable 检查入口使用这三个资产的 `releases/latest/download/<asset>` �
 
 安装由 Emby 的插件安装器负责，插件不会自行覆盖 DLL，也不会调用重启或关机。安装成功后插件会通知 Emby“等待重启”，仪表盘会出现重启提示；重启前同一版本不会重复安装。正式版 Release 必须包含固定的四个资产：DLL、`EmbyWatchTogether.zip`、发布清单和 detached signature，并且 tag 与三项程序集版本一致。
 
-当前 `ReleaseTrustStore` 已完成生产 bootstrap，包含已审核的公开 `keyId` `prod-2026-08`，并通过不可变的 Ordinal 映射提供验签信任根。匹配 Secret 缺失或错误、未知 key 或签名失败时仍然 fail closed。首次信任引导版本 `1.2.0.9` 必须由运营人工部署；完成后版本方可使用签名自动更新。禁止在文档或仓库写入或提交真实生产私钥、GitHub secret 值、token、本机服务器信息或私人路径；示例不得包含真实生产私钥或 secret 值。
+当前 `ReleaseTrustStore` 已完成生产 bootstrap，包含已审核的公开 `keyId` `prod-2026-08`，并通过不可变的 Ordinal 映射提供验签信任根。匹配 Secret 缺失或错误、未知 key 或签名失败时仍然 fail closed。已有安装若尚未完成信任引导，应按维护者提供的可信人工安装流程先完成一次引导；后续版本才能使用签名自动更新。禁止在文档或仓库写入或提交真实生产私钥、GitHub secret 值、token、本机服务器信息或私人路径；示例不得包含真实生产私钥或 secret 值。
 
 Releases API 查询仍使用 20 秒有界超时；DLL、manifest 和 detached signature 三项固定资产下载使用 60 秒有界超时，以覆盖较慢的 GitHub/CDN 网络。超时调整不改变资产来源、签名、哈希、程序集身份和版本校验，也不改变失败清理与 fail closed 行为。
 

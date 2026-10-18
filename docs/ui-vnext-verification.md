@@ -1,6 +1,6 @@
 # Watch Together UI VNext 验证记录
 
-本文件记录已撤回布局候选的历史证据。2026-10-18 用户确认以原服务器单页布局仅调整控件，当前验收以 `native-controls-plan.md` 和 `client-compatibility.md` 为准；这里的分页/媒体布局结果不代表当前 UI 交付。
+本文件记录已撤回布局候选的历史证据。2026-10-18 用户确认以原服务器单页布局仅调整控件，当前验收以 `native-controls-plan.md` 和 `client-compatibility.md` 为准；这里的分页/媒体布局结果不代表当前 UI 交付。历史记录中的“待验收”只描述当时停点，不代表当前发布阻塞。
 
 本文件在各 Stack 完成后追加经真实代码、测试或渲染验证的结果。模拟宿主证据与真实 Emby 验收必须分开记录。
 
@@ -40,7 +40,7 @@
 - 主线程已查看修正后的 390px Recovery 房间及诊断截图；截图带 mock 宿主标记。Recovery fixture 的 4.2 秒年龄与 5.8 秒剩余窗口匹配 10 秒合同，drift 修复阈值与冷却样本亦已校正为自洽值。
 - Knowledge Review：ADR-003 与经验第 20 条已同步参与者恢复和主用户停止/Handoff 的优先级；UI 架构继续使用现有嵌入 HTML/AMD。
 
-剩余验收：最终构建尚未部署到 NAS，真实 Emby 顶栏/主题/缓存、桌面/手机和双账号播放验收未在本轮执行；正式版本与签名发布等待 UI 及集成验收收口。
+当时剩余验收：最终构建尚未部署到 NAS，真实 Emby 顶栏/主题/缓存、桌面/手机和双账号播放验收未在该轮执行；后续验收状态见 `client-compatibility.md`，正式版本状态见 `development-roadmap.md`。
 
 ## 历史与持续验收矩阵
 

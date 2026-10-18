@@ -1,6 +1,8 @@
 # 当前架构
 
-本文只描述当前代码已实现的结构；行为细节和人工验收步骤见 [`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md)。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
+本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
+
+当前项目版本目标为 `1.6.1.0`。用户已于 2026-10-18 确认本轮验收通过；正式发布状态由发布流程和 GitHub readback 单独确认。
 
 ## 运行时边界
 

@@ -1,20 +1,70 @@
 # 发布日志
 
-## 发布准备候选
+本文按发布状态列出版本说明。普通用户先看对应版本的 Release Notes；开发者和维护者还应阅读 [`docs/versioning.md`](../versioning.md) 与 [`docs/technical.md`](../technical.md)。
 
-- [v1.6.1.0](v1.6.1.0.md) 为本地 stable 候选，尚未发布；当前公开 stable 为 v1.5.0.0，beta 为 v1.6.0.5。
-- 本地候选验证、签名发布边界与人工验收见[准备清单](../release-preparation-v1.6.1.0.md)。
+## 当前目标
+
+- [v1.6.1.0](v1.6.1.0.md)：项目版本目标及用户可见变化说明。
+
+## 历史发布
+
+### Stable
+
+- [v1.5.0.0](v1.5.0.0.md)
+- [v1.4.5.0](v1.4.5.0.md)
+- [v1.4.4.0](v1.4.4.0.md)
+- [v1.4.3.0](v1.4.3.0.md)
+- [v1.4.2.0](v1.4.2.0.md)
+- [v1.4.1.0](v1.4.1.0.md)
+- [v1.4.0.0](v1.4.0.0.md)
+- [v1.3.0.0](v1.3.0.0.md)
+- [v1.2.0.1](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.1)
+- [v1.1.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.1.0.0)
+- [v1.0.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.0.0.0)
+
+### Beta
+
+- [v1.6.0.5](v1.6.0.5.md)
+- [v1.6.0.4](v1.6.0.4.md)
+- [v1.6.0.3](v1.6.0.3.md)
+- [v1.6.0.2](v1.6.0.2.md)
+- [v1.6.0.1](v1.6.0.1.md)
+- [v1.5.0.3](v1.5.0.3.md)
+- [v1.5.0.2](v1.5.0.2.md)
+- [v1.5.0.1](v1.5.0.1.md)
+- [v1.4.5.2](v1.4.5.2.md)
+- [v1.4.5.1](v1.4.5.1.md)
+- [v1.4.4.6](v1.4.4.6.md)
+- [v1.4.4.5](v1.4.4.5.md)
+- [v1.4.4.4](v1.4.4.4.md)
+- [v1.4.4.3](v1.4.4.3.md)
+- [v1.4.4.2](v1.4.4.2.md)
+- [v1.4.4.1](v1.4.4.1.md)
+- [v1.4.3.2](v1.4.3.2.md)
+- [v1.4.3.1](v1.4.3.1.md)
+- [v1.4.2.2](v1.4.2.2.md)
+- [v1.4.2.1](v1.4.2.1.md)
+- [v1.3.0.6](v1.3.0.6.md)
+- [v1.3.0.2](v1.3.0.2.md)
+- [v1.3.0.1](v1.3.0.1.md)
+- [v1.2.0.16](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.16)
+- [v1.2.0.15](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.15)
+- [v1.2.0.13](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.13)
+- [v1.2.0.9](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.9)
+
+以上 38 项与当前公开 Release metadata 对齐。历史说明不随当前版本整理机械替换。
+
+`v1.5.0.4` 只对应一次失败的 tag 尝试，没有 GitHub Release 或发布资产，不能列为成功发布。
 
 ## 发布通道
 
-- `main` 是正式发布分支，对应 `stable` 通道。维护者从 `main` 手动运行发布 workflow 后创建普通 GitHub Release。
-- `beta` 是测试发布分支，对应 `beta` 通道。维护者从 `beta` 手动运行发布 workflow 后创建 GitHub prerelease。
-- 两个通道共用规范数字 tag，例如 `v1.3.0.6`，不得添加 `-beta`、`-rc` 或其他后缀。workflow 会拒绝 channel 与手动触发分支不匹配的请求。
-- 插件默认使用 `stable`。管理员可以在插件配置页选择 `stable` 或 `beta`，Watch Together 更新检查任务会按所选通道获取并自动安装；Emby 的任务开关和计划仍是控制入口。
-- `stable` 更新器只读取 `releases/latest`；`beta` 通过 GitHub Releases API 在非 draft stable 与 prerelease 中选择最高规范版本，并使用对应 tag 的签名资产。GitHub prerelease 不会成为 `releases/latest`。
-- beta 仍是预发布版；静态测试、维护者验证和自动安装均不等于真实客户端验收，Release Notes 不得作此类表述。
+- `main` 对应 stable，正式 Release 由维护者手动运行发布 workflow 创建。
+- `beta` 对应 prerelease，测试版本从 `beta` 分支手动发布。
+- 新 tag 使用四段数字格式，例如 `v1.6.1.0`；不得添加 `-beta` 或 `-rc` 后缀。
+- 插件默认使用 `stable`；管理员可在配置页选择 `beta`，更新任务按所选通道获取并安装。
+- 静态测试、自动安装和维护者检查不等于真实客户端验收；Release Notes 只描述已有证据。
 
-每个 stable 或 beta 四段数字 tag 都必须对应一个 `docs/releases/v<version>.md` 文件。正文使用简体中文，面向普通用户说明新增功能、改进、修复、配置变化和升级注意事项，不包含内部协作过程、敏感信息或未经验证的夸大描述。
+每个新建的 stable 或 beta tag 必须对应一个 `docs/releases/v<version>.md` 文件。正文使用简体中文，面向普通用户说明用户可见变化、配置兼容性和升级注意事项，不包含内部协作过程、敏感信息或未经验证的夸大描述。历史公开 Release 若仓库没有对应本地文件，索引直接链接其 GitHub Release 页面；这不改变新版本 Release Notes 门禁。
 
 ## 模板
 
@@ -33,5 +83,3 @@
 
 - 重启、回滚或人工验收要求。
 ```
-
-版本提交和 tag 创建前，维护者必须审核对应日志文件；文件必须为非空 UTF-8（无 BOM），并至少包含中文内容。发布 workflow 会在创建 GitHub Release 前再次执行这些门禁。
