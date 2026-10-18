@@ -31,7 +31,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 ## 嵌入式 UI
 
-UI 由原服务器单页的嵌入式 HTML 和 AMD JavaScript 实现，保留创建房间、邀请、房间、说明、设置的原有顺序和容器布局。`Plugin.GetPages()` 注册一个页面入口及其控制器，使用 `WatchTogetherSettingsV4` / `.js` 缓存键；原有 `emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮使用相同原生初始化。UI 调整只剥离控件自绘覆盖，服务端继续决定所有读取和操作权限。
+UI 由原服务器单页的嵌入式 HTML 和 AMD JavaScript 实现，保留创建房间、邀请、房间、说明、设置的原有顺序和容器布局。`Plugin.GetPages()` 注册一个页面入口及其控制器，使用 `WatchTogetherSettingsV5` / `.js` 缓存键；原有 `emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮使用相同原生初始化并保留构造器附加的样式类。UI 调整只剥离控件自绘覆盖，服务端继续决定所有读取和操作权限。
 
 页面沿用原房间列表、邀请、设置与按需诊断读取流程；Phase E 的恢复/漂移诊断保留，`/State` 的只读扩展仍向后兼容。Token 使用现有独立私有存储和 API，UI 不回显已有 Token，离页清空输入。房间操作、确认、设置保存和权限可见性沿用原页面流程；详细控件边界和验证见 `native-controls-plan.md`。
 

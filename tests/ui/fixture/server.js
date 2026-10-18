@@ -134,6 +134,14 @@ function page() {
     if (scenario === 'drift-positive') diagnosticData = ${JSON.stringify(diagnostic('drift-positive'))};
     var apiCalls = []; var accountId = 'mock-admin'; var tokenConfigured = false;
     var config = { PauseOtherOnPlaybackStop: true, NotifyOtherOnPlaybackStop: true, NotifyOnSyncActions: true, UpdateChannel: 'stable' };
+    var nativeCreateElement = document.createElement.bind(document);
+    document.createElement = function (tagName, options) {
+      var element = nativeCreateElement(tagName);
+      if (String(tagName).toLowerCase() === 'button' && options && options.is === 'emby-button') {
+        element.classList.add('emby-button', 'emby-button-focusscale');
+      }
+      return element;
+    };
     var rooms = (scenario === 'empty' || scenario === 'accept-fail' || scenario === 'accept-network' ? [] : scenario === 'admin-manage' ? ${JSON.stringify(stateForScenario('admin-manage'))} : scenario === 'admin-member' ? ${JSON.stringify(stateForScenario('admin-member'))} : scenario === 'recovering' ? ${JSON.stringify(stateForScenario('recovering'))} : scenario === 'primary-missing' ? ${JSON.stringify(stateForScenario('primary-missing'))} : scenario === 'waiting' ? ${JSON.stringify(stateForScenario('waiting'))} : scenario === 'state-fail' ? ${JSON.stringify(stateForScenario('state-fail'))} : scenario === 'long' ? ${JSON.stringify(stateForScenario('long'))} : ${JSON.stringify(stateForScenario('active'))});
     var invitations = [];
     function isAdminScenario() { return ['admin-manage', 'admin-member', 'save-fail', 'token-read-fail', 'token-save-fail', 'token-clear-fail', 'token-slow'].indexOf(scenario) >= 0; }

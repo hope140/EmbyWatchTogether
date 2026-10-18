@@ -21,10 +21,10 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV4");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV5");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV4.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV5.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
@@ -51,7 +51,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherSettingsV4");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherSettingsV5");
             Assert.Equal("sync", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
@@ -71,9 +71,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherSettingsV4.js\"", html);
-            Assert.DoesNotContain("WatchTogetherSettingsV3", html);
-            Assert.DoesNotContain("WatchTogetherSettingsV3", javascript);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherSettingsV5.js\"", html);
+            Assert.DoesNotContain("WatchTogetherSettingsV4", html);
+            Assert.DoesNotContain("WatchTogetherSettingsV4", javascript);
             Assert.DoesNotContain("<h1>一起看</h1>", html);
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
@@ -226,7 +226,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("raw.TransientRecovery", javascript);
             Assert.Contains("raw.Drift", javascript);
             Assert.Contains("document.createElement('button', { is: 'emby-button' })", javascript);
-            Assert.Contains("exportButton.className = 'button-flat'", javascript);
+            Assert.Contains("exportButton.classList.add('button-flat')", javascript);
+            Assert.Contains("classList.add('button-flat', 'wt-action'", javascript);
             Assert.Contains("播放漂移", javascript);
             Assert.Contains("预期 Session 标识", javascript);
             Assert.Contains("drift_auto_repair_started", javascript);

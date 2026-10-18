@@ -111,7 +111,9 @@ test('房间卡保留原单页结构、成员信息和原生动态按钮', async
 test('管理员成员保留原有房间动作，动态按钮使用 Emby 原生控件', async ({ page }) => {
   await open(page, 'admin-member', 'light', 1024, 900);
   await expect(page.locator('.wt-roomCard .wt-action[data-act="pause"]')).toHaveAttribute('is', 'emby-button');
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="pause"]')).toHaveClass(/emby-button-focusscale/);
   await expect(page.locator('.wt-roomCard .wt-action[data-act="delete"]')).toHaveAttribute('is', 'emby-button');
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="delete"]')).toHaveClass(/emby-button-focusscale/);
 
   await open(page, 'admin-manage', 'light', 1024, 900);
   await expect(page.locator('.wt-roomCard .wt-action[data-act="participantResync"]')).toHaveCount(0);
@@ -161,6 +163,7 @@ test('无房间、邀请创建等待与接受失败都有可见状态', async ({
   await page.locator('#wtCreateInvitation').click();
   await expect(page.locator('#wtInvitationCodePanel')).toBeVisible();
   await expect(page.locator('#wtInvitationCode')).toHaveText('ABCD12EFghI3J4KLMNopQR');
+  await expect(page.locator('#wtInvitations button[is="emby-button"]')).toHaveClass(/emby-button-focusscale/);
   await page.screenshot({ path: path.join(artifactDir, 'mobile-invitation-390.png'), fullPage: true });
 
   await open(page, 'accept-fail', 'light', 390, 900);
@@ -317,6 +320,7 @@ test('诊断内容经过脱敏，导出前不出现原始标识', async ({ page 
   expect(text).not.toContain('SessionHash');
   expect(text).not.toContain('Token');
   await expect(page.locator('.wt-diagnosticToolbar button')).toHaveAttribute('is', 'emby-button');
+  await expect(page.locator('.wt-diagnosticToolbar button')).toHaveClass(/emby-button-focusscale/);
   await page.screenshot({ path: path.join(artifactDir, 'mobile-diagnostics-390.png'), fullPage: true });
 });
 
