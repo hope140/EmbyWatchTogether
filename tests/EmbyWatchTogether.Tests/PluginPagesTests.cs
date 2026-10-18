@@ -21,14 +21,11 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherUiMineV5");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherUiManageV5");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherUiSettingsV5");
-            Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherDiagnostics");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV4");
+            Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherUiNativeTabsV5.js");
-            Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherDiagnostics.js");
-            Assert.Equal(1, pages.Count(page => page.EnableInUserMenu));
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV4.js");
+            Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
         [Fact]
@@ -54,26 +51,10 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiMineV5");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherSettingsV4");
             Assert.Equal("sync", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
-            Assert.Equal("Watch Together", page.DisplayName);
-            Assert.Equal("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", page.EmbeddedResourcePath);
-
-            var managePage = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiManageV5");
-            var settingsPage = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiSettingsV5");
-            Assert.False(managePage.EnableInMainMenu);
-            Assert.False(managePage.EnableInUserMenu);
-            Assert.Equal(page.EmbeddedResourcePath, managePage.EmbeddedResourcePath);
-            Assert.False(settingsPage.EnableInMainMenu);
-            Assert.False(settingsPage.EnableInUserMenu);
-            Assert.Equal(page.EmbeddedResourcePath, settingsPage.EmbeddedResourcePath);
-
-            var controller = plugin.GetPages().Single(item => item.Name == "WatchTogetherUiNativeTabsV5.js");
-            Assert.False(controller.EnableInMainMenu);
-            Assert.False(controller.EnableInUserMenu);
-            Assert.Equal("Emby.Plugins.WatchTogether.Configuration.WatchTogether.js", controller.EmbeddedResourcePath);
         }
 
         private static int ReadBigEndianInt32(byte[] bytes)
@@ -90,45 +71,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherUiNativeTabsV5.js\"", html);
-            Assert.DoesNotContain("class=\"wt-title\"", html);
-            Assert.DoesNotContain("<h1>Watch Together</h1>", html);
-            Assert.DoesNotContain("wtPluginNav", html);
-            Assert.DoesNotContain("wt-pluginNav", html);
-            Assert.Contains("role=\"dialog\"", html);
-            Assert.Contains("aria-modal=\"true\"", html);
-            Assert.Contains("wtConfirmCancel", html);
-            Assert.Contains("wtConfirmSubmit", html);
-            Assert.Contains("wt-invitationCodeValue", html);
-            Assert.Contains("wt-moreMenu", html);
-            Assert.Contains("--wt-control-height: 44px", html);
-            Assert.Contains("data-require=\"emby-input,emby-select,emby-toggle,emby-button\"", html);
-            Assert.Contains("class=\"emby-toggle-label wt-toggleRow\"", html);
-            Assert.Contains("is=\"emby-toggle\"", html);
-            Assert.Contains("class=\"toggleSwitch\"", html);
-            Assert.Contains("class=\"emby-toggle\"", html);
-            Assert.DoesNotContain("is=\"emby-checkbox\"", html);
-            Assert.Contains("paperList visualCardBox vertical-list", html);
-            Assert.Contains("class=\"sectionTitleContainer\"", html);
-            Assert.Contains("class=\"sectionTitle\"", html);
-            Assert.DoesNotContain(".wt-sectionHeading h2", html);
-            Assert.Contains("listItem listItem-border wt-roomCard", javascript);
-            Assert.Contains("listItem listItem-border wt-invitationItem", javascript);
-            Assert.Contains("mainTabsManager", javascript);
-            Assert.Contains("setTabs(page", javascript);
-            Assert.Contains("Dashboard.getConfigurationPageUrl", javascript);
-            Assert.Contains("WatchTogetherUiMineV5", javascript);
-            Assert.Contains("WatchTogetherUiManageV5", javascript);
-            Assert.Contains("WatchTogetherUiSettingsV5", javascript);
-            Assert.DoesNotContain("wtPluginNav", javascript);
-            Assert.DoesNotContain("headerTop-withSectionTabs", javascript);
-            Assert.DoesNotContain("headerMiddle-withSectionTabs", javascript);
-            Assert.Contains("grid-template-columns: minmax(13em, .85fr)", html);
-            Assert.Contains("wt-roomOverview", html);
-            Assert.Contains("wt-roomSide", html);
-            Assert.Contains(".wt-roomSide .wt-roomActions", html);
-            Assert.DoesNotContain("border-bottom: 2px solid var(--wt-accent)", html);
-            Assert.Contains("--wt-accent: var(--theme-primary-color", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherSettingsV4.js\"", html);
+            Assert.DoesNotContain("WatchTogetherSettingsV3", html);
+            Assert.DoesNotContain("WatchTogetherSettingsV3", javascript);
             Assert.DoesNotContain("<h1>一起看</h1>", html);
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
@@ -150,11 +95,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("id=\"wtGitHubTokenSection\"", html);
             Assert.Contains("如何获取 Token", html);
             Assert.Contains("https://github.com/settings/personal-access-tokens/new", html);
+            Assert.Contains("id=\"wtSaveConfig\" type=\"button\" class=\"raised button-submit\"", html);
             Assert.Contains("id=\"wtSaveGitHubToken\" type=\"button\" class=\"raised button-submit\"", html);
             Assert.Contains("id=\"wtClearGitHubToken\" type=\"button\" class=\"button-flat\"", html);
-            Assert.DoesNotContain("wt-settingsButton--primary", html);
-            Assert.DoesNotContain("wt-settingsButton--secondary", html);
-            Assert.DoesNotContain(".wt-settingsButton {", html);
+            Assert.Contains("is=\"emby-checkbox\"", html);
             Assert.Contains("min-height: 44px", html);
             Assert.Contains(".selectContainer.wt-updateSetting", html);
             Assert.Contains(".wt-tokenStatus", html);
@@ -171,9 +115,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("--wt-card: var(--theme-background", html);
             Assert.Contains("--button-background-lightness", html);
             Assert.Contains("--line-background", html);
-            Assert.Contains("width: min(100%, 727px)", html);
-            Assert.Contains("background: transparent;", html);
-            Assert.Contains("border: 0;", html);
+            Assert.DoesNotContain("wt-settingsButton", html);
+            Assert.DoesNotContain(".wt-page input::placeholder", html);
+            Assert.DoesNotContain("#wtCreate:hover:not(:disabled)", html);
+            Assert.DoesNotContain(".wt-roomActions button.wt-action--danger", html);
+            Assert.DoesNotContain(".wt-diagnosticToolbar button:hover:not(:disabled)", html);
+            Assert.Contains("background: var(--wt-card);", html);
+            Assert.DoesNotContain("background: var(--wt-button) !important;", html);
+            Assert.DoesNotContain("background: var(--wt-hover) !important;", html);
             Assert.DoesNotContain("background: #f1f4f6 !important;", html);
             Assert.DoesNotContain("background: #fff0f1 !important;", html);
             Assert.DoesNotContain("background: var(--theme-background-color, #fff)", html);
@@ -191,7 +140,6 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("statusReasonMessages", javascript);
             Assert.Contains("server_unavailable", javascript);
             Assert.Contains("snapshot_unavailable", javascript);
-            Assert.Contains("transient_recovery", javascript);
             Assert.Contains("正在同步下一集", javascript);
             Assert.Contains("正在让另一位参与者打开主用户当前视频", javascript);
             Assert.Contains("Recovering", javascript);
@@ -250,33 +198,18 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains(">创建房间</h2>", html);
             Assert.DoesNotContain(">1. 创建房间</h2>", html);
             Assert.DoesNotContain("'2. 房间'", javascript);
-            Assert.Contains("尚未检测到播放", javascript);
-            Assert.Contains("mediaStatusLabel", javascript);
-            Assert.Contains("播放状态暂无法确认", javascript);
-            Assert.Contains("已检测到播放", javascript);
-            Assert.Contains("wt-mediaCopy", javascript);
-            Assert.Contains("wt-roomOverview .wt-roomMediaPlaceholder", html);
             Assert.Contains("我的房间", javascript);
             Assert.Contains("暂无参与的房间", javascript);
-            Assert.Contains("请求重新对齐", javascript);
+            Assert.Contains("请求重新同步", javascript);
             Assert.Contains("roomUserName", javascript);
             Assert.Contains("查看诊断", javascript);
             Assert.Contains("participantResync", javascript);
-            Assert.Contains("actions.push('participantResync', 'leave')", javascript);
-            Assert.Contains("if (room.IsAdmin) desired.push('pause', 'resume', 'resync')", javascript);
-            Assert.Contains("请求重新对齐", javascript);
+            Assert.Contains("请求重新同步", javascript);
             Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync", javascript);
-            Assert.Contains("/State')", javascript);
-            Assert.Contains("CurrentUserIsParticipant === true", javascript);
-            Assert.Contains("_wtGeneration", javascript);
-            Assert.Contains("sequence", javascript);
-            Assert.Contains("数据可能已过期", javascript);
-            Assert.Contains("page._wtIsAdmin === true ? loadPluginInfo(page) : null", javascript);
-            Assert.DoesNotContain("setStatus(page, '当前账号没有管理员权限", javascript);
             Assert.Contains("status === 'accepted'", javascript);
             Assert.Contains("status === 'busy'", javascript);
             Assert.Contains("status === 'unavailable'", javascript);
-            Assert.Contains("room.CurrentUserIsParticipant === true && room.CurrentUserJoined", javascript);
+            Assert.Contains("room.CurrentUserJoined && !room.IsAdmin", javascript);
             Assert.Contains("WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Diagnostics", javascript);
             Assert.Contains("function sanitizeDiagnostic", javascript);
             Assert.Contains("SnapshotHealth", javascript);
@@ -292,11 +225,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("raw.RecoveryWindow", javascript);
             Assert.Contains("raw.TransientRecovery", javascript);
             Assert.Contains("raw.Drift", javascript);
-            Assert.Contains("driftSeconds", javascript);
+            Assert.Contains("document.createElement('button', { is: 'emby-button' })", javascript);
+            Assert.Contains("exportButton.className = 'button-flat'", javascript);
             Assert.Contains("播放漂移", javascript);
             Assert.Contains("预期 Session 标识", javascript);
             Assert.Contains("drift_auto_repair_started", javascript);
-            Assert.Contains("var transientRecovery", javascript);
             Assert.Contains("raw.LastAction", javascript);
             Assert.Contains("raw.Events", javascript);
             Assert.Contains("导出诊断 JSON", javascript);
@@ -315,39 +248,6 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("session.SessionHash", javascript);
             Assert.DoesNotContain("session.ItemHash", javascript);
             Assert.DoesNotContain("innerHTML", javascript);
-            Assert.DoesNotContain("window.confirm", javascript);
-            Assert.Contains("requestConfirmation", javascript);
-            Assert.Contains("pageAccountMatches", javascript);
-            Assert.Contains("invalidateGitHubTokenRequests", javascript);
-            Assert.Contains("clearGitHubTokenConfirmed", javascript);
-            Assert.Contains("event.key === 'Tab'", javascript);
-            Assert.Contains("event.shiftKey", javascript);
-            Assert.Contains("focusables[next].focus()", javascript);
-            Assert.Contains("setPluginView", javascript);
-            Assert.Contains("wtConfigDirty", javascript);
-            Assert.Contains("Accepted === true", javascript);
-            Assert.Contains("房间已建立，请回到当前房间。", javascript);
-            Assert.Contains("房间状态尚未确认", javascript);
-            Assert.Contains("Deleted === false", javascript);
-            Assert.Contains("_wtInvitationTimer", javascript);
-            Assert.Contains("_wtDiagnosticLastSuccessUtc", javascript);
-            Assert.Contains("原始清洗 JSON", javascript);
-            Assert.Contains("resourceState(page, 'invitations')", javascript);
-            Assert.Contains("canWritePage(page, generation, 'invitations', sequence)", javascript);
-            Assert.Contains("resource.sequence === sequence", javascript);
-            Assert.Contains("shouldPollInvitations", javascript);
-            Assert.DoesNotContain("data-wt-view", html);
-            Assert.Contains("menu.setAttribute('role', 'menu')", javascript);
-            Assert.Contains("role', 'menuitem'", javascript);
-            Assert.Contains("existing[item.dataset.act]", javascript);
-            Assert.Contains("邀请已不在有效列表，房间状态暂无法确认。", javascript);
-            Assert.Contains("保留上次成功读取的数据", javascript);
-            Assert.Contains("TargetItemHash", javascript);
-            Assert.Contains("SourceItemHash", javascript);
-            Assert.Contains("aria-expanded", javascript);
-            Assert.Contains("aria-controls", javascript);
-            Assert.Contains("populateMoreMenu", javascript);
-            Assert.Contains("applyPluginConfiguration(page, page._wtPluginConfiguration || {})", javascript);
             Assert.Contains("wtInvitationSection", html);
             Assert.Contains("wtInvitationName", html);
             Assert.Contains("wtInvitationAcceptCode", html);

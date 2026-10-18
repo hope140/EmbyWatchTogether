@@ -3,8 +3,8 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherUiNativeTabsV5.js"
-     data-require="emby-input,emby-select,emby-toggle,emby-button">
+     data-controller="__plugin/WatchTogetherSettingsV4.js"
+     data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
             --wt-text: var(--theme-text-color, hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)));
@@ -43,6 +43,10 @@
 
         .wt-section {
             margin-bottom: 1.25em;
+            padding: 1.2em 1.3em 1.3em;
+            border: 1px solid var(--wt-border);
+            border-radius: .35em;
+            background: var(--wt-surface);
         }
 
         .wt-sectionHeading {
@@ -51,6 +55,11 @@
             justify-content: space-between;
             gap: 1em;
             margin-bottom: .8em;
+        }
+
+        .wt-sectionHeading h2 {
+            margin: 0;
+            color: var(--wt-text);
         }
 
         .wt-sectionDescription {
@@ -171,41 +180,21 @@
 
         .wt-refresh {
             min-height: 44px;
-            flex: 0 0 auto;
             white-space: nowrap;
-        }
-
-        .wt-roomRefresh {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            gap: .65em;
-        }
-
-        .wt-staleMarker {
-            color: #9a6a00 !important;
-            font-size: .86em;
-            font-weight: 600;
         }
 
         .wt-roomList {
             display: flex;
             flex-direction: column;
-        }
-
-        .wt-roomGroup + .wt-roomGroup {
-            margin-top: 1.2em;
-        }
-
-        .wt-roomGroupHeading {
-            margin: 0 0 .6em;
-            color: var(--wt-text);
-            font-size: 1.02em;
+            gap: .75em;
         }
 
         .wt-roomCard {
-            padding: 1em 0;
+            padding: 1.1em 1.25em;
+            border: 1px solid var(--wt-border);
+            border-radius: .3em;
+            background: var(--wt-card);
+            box-shadow: 0 1px 3px rgba(20, 29, 36, .08);
         }
 
         .wt-roomHeader {
@@ -230,48 +219,6 @@
 
         .wt-roomMeta + .wt-roomMeta {
             margin-top: .55em;
-        }
-
-        .wt-roomMediaPlaceholder {
-            margin-top: .8em;
-            padding-top: .65em;
-            border-top: 1px solid var(--wt-border);
-        }
-
-        .wt-roomParticipants {
-            display: flex;
-            flex-direction: column;
-            gap: 0;
-            margin-top: .7em;
-        }
-
-        .wt-roomParticipant {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: .7em;
-            padding: .55em .7em;
-            border: 0;
-            border-bottom: 1px solid var(--wt-border);
-            border-radius: 0;
-            background: transparent;
-        }
-
-        .wt-roomParticipant:last-child {
-            border-bottom: 0;
-        }
-
-        .wt-roomParticipantName {
-            color: var(--wt-text);
-            font-weight: 600;
-        }
-
-        .wt-roomParticipantStatus {
-            white-space: nowrap;
-        }
-
-        .wt-roomUpdated {
-            margin-top: .65em;
         }
 
         .wt-roomStateDescription {
@@ -309,9 +256,9 @@
         }
 
         .wt-roomState-recovering {
-            border-color: var(--theme-primary-color, var(--wt-primary));
-            background: var(--wt-accent-soft);
-            color: var(--wt-text);
+            border-color: #c58a4a;
+            background: #fff3e4;
+            color: #80501e;
         }
 
         .wt-roomState-watching {
@@ -347,15 +294,13 @@
             border-top: 1px solid var(--wt-border);
         }
 
-        .wt-moreMenu {
-            display: inline-flex;
-            flex-wrap: wrap;
-            gap: .45em;
-            align-items: center;
-            padding: .35em;
-            border: 1px solid var(--wt-border);
-            border-radius: .35em;
-            background: var(--wt-card);
+        .wt-roomActions button.wt-action {
+            flex: 0 0 auto;
+            min-width: 7.25em;
+            min-height: 44px;
+            margin: 0;
+            font-size: .94em;
+            line-height: 1.2;
         }
 
         .wt-diagnostics {
@@ -503,314 +448,6 @@
             width: 1.2em;
             height: 1.2em;
         }
-
-        /* UI VNext surface: keep the host shell intact and scope all styling to this page. */
-        .wt-page {
-            --wt-accent: var(--theme-primary-color, hsla(var(--theme-primary-color-hue, 140), var(--theme-primary-color-saturation, 56%), var(--theme-primary-color-lightness, 39%), var(--theme-primary-color-alpha, 1)));
-            --wt-accent-soft: hsla(var(--theme-primary-color-hue, 140), var(--theme-primary-color-saturation, 56%), var(--theme-primary-color-lightness, 39%), .1);
-            --wt-focus: hsla(var(--theme-primary-color-hue, 140), var(--theme-primary-color-saturation, 56%), var(--theme-primary-color-lightness, 39%), .55);
-            --wt-radius: 8px;
-            --wt-control-height: 44px;
-        }
-
-        .wt-page .settingsContainer {
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            width: min(100%, 727px);
-            max-width: 727px;
-            margin: 0 auto 0 0;
-            align-self: flex-start;
-        }
-
-        .wt-page #wtAdminSection,
-        .wt-page #wtSettingsSection,
-        .wt-page #wtRoomsSection {
-            order: 1;
-        }
-
-        .wt-page #wtInvitationSection {
-            order: 2;
-        }
-
-        .wt-page .wt-help {
-            order: 3;
-        }
-
-        .wt-pageHeader {
-            margin-bottom: 1.1em;
-            padding: .2em 0 .8em;
-            border-bottom: 1px solid var(--wt-border);
-        }
-
-        .wt-lead {
-            max-width: 56em;
-            margin: .35em 0 0;
-            line-height: 1.55;
-        }
-
-        .wt-confirmOverlay {
-            position: fixed;
-            inset: 0;
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1em;
-            background: rgba(0, 0, 0, .45);
-        }
-
-        .wt-confirmOverlay[hidden],
-        .wt-moreMenu[hidden] {
-            display: none !important;
-        }
-
-        .wt-confirmDialog {
-            width: min(32em, 100%);
-            padding: 1.2em;
-            border: 1px solid var(--wt-border);
-            border-radius: var(--wt-radius);
-            background: var(--wt-card);
-            box-shadow: 0 8px 28px rgba(0, 0, 0, .25);
-        }
-
-        .wt-confirmDialog h2 { margin: 0 0 .55em; font-size: 1.15em; }
-        .wt-confirmDialog p { margin: 0; color: var(--wt-muted); line-height: 1.5; }
-        .wt-confirmActions { display: flex; justify-content: flex-end; gap: .6em; margin-top: 1em; }
-        .wt-confirmActions button { min-height: 2.4em; padding: .45em .9em; }
-
-        .wt-invitationCodeValue {
-            display: block;
-            max-width: 100%;
-            overflow-wrap: anywhere;
-            user-select: text;
-            white-space: pre-wrap;
-            letter-spacing: .08em;
-        }
-
-        .wt-viewHidden { display: none !important; }
-
-        .wt-page .wt-sectionHeading {
-            margin-bottom: .9em;
-        }
-
-        .wt-page .wt-refresh,
-        .wt-page .wt-formActions .button-flat {
-            min-height: var(--wt-control-height);
-        }
-
-        .wt-roomOverview {
-            display: grid;
-            grid-template-columns: minmax(13em, .85fr) minmax(0, 1.15fr);
-            gap: 1em;
-            margin-top: .85em;
-        }
-
-        .wt-roomOverview .wt-roomMediaPlaceholder {
-            min-height: 8em;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: .8em;
-            margin-top: 0;
-            padding: 1em;
-            border: 1px solid var(--wt-border);
-            border-radius: 6px;
-            background: var(--wt-surface);
-            text-align: center;
-        }
-
-        .wt-mediaIcon {
-            flex: 0 0 auto;
-            width: 2.8em;
-            height: 2.8em;
-            color: var(--wt-muted);
-        }
-
-        .wt-mediaIcon svg {
-            width: 100%;
-            height: 100%;
-        }
-
-        .wt-mediaCopy {
-            display: flex;
-            flex-direction: column;
-            gap: .2em;
-            align-items: center;
-        }
-
-        .wt-mediaStatus {
-            color: var(--wt-text);
-            font-weight: 600;
-        }
-
-        .wt-mediaHint {
-            color: var(--wt-muted) !important;
-        }
-
-        .wt-roomOverview .wt-roomParticipants {
-            margin-top: 0;
-            align-content: start;
-        }
-
-        .wt-roomSide {
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: stretch;
-        }
-
-        .wt-roomSide .wt-roomUpdated {
-            margin-top: .65em;
-        }
-
-        .wt-roomSide .wt-roomActions {
-            margin-top: .8em;
-        }
-
-        .wt-roomSide .wt-roomMembership {
-            margin-top: .65em;
-        }
-
-        .wt-roomIdentityMeta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: .25em 1em;
-        }
-
-        .wt-roomOverview + .wt-roomMeta {
-            margin-top: .85em;
-        }
-
-        @media (max-width: 40em) {
-            .wt-page .settingsContainer {
-                padding-left: 1em;
-                padding-right: 1em;
-            }
-
-            .wt-roomOverview {
-                grid-template-columns: minmax(0, 1fr);
-            }
-
-            .wt-roomParticipant {
-                min-width: 0;
-                flex-wrap: wrap;
-                gap: .25em .75em;
-            }
-
-            .wt-roomParticipantName,
-            .wt-roomParticipantStatus {
-                min-width: 0;
-                overflow-wrap: anywhere;
-            }
-
-            .wt-roomParticipantStatus {
-                white-space: normal;
-            }
-        }
-
-        /* Keep the host's native controls and list surfaces authoritative. */
-        .wt-page .wt-section {
-            margin-bottom: 1.6em;
-            padding: 0;
-            border: 0;
-            border-radius: 0;
-            background: transparent;
-            box-shadow: none;
-        }
-
-        .wt-page .wt-sectionHeading {
-            margin-bottom: .65em;
-        }
-
-        .wt-page input:not([type="checkbox"]),
-        .wt-page select {
-            min-height: 44px;
-        }
-
-        .wt-page button {
-            min-height: 44px;
-        }
-
-        .wt-page .wt-roomList.paperList,
-        .wt-page .wt-invitationList.paperList {
-            display: block;
-            margin: 0;
-            padding: 0;
-        }
-
-        .wt-page .wt-roomCard,
-        .wt-page .wt-invitationItem {
-            box-sizing: border-box;
-            width: 100%;
-            max-width: 727px;
-            margin: 0;
-            padding: 1em 0;
-            border: 0;
-            border-bottom: 1px solid var(--wt-border);
-            border-radius: 0;
-            background: transparent;
-            box-shadow: none;
-        }
-
-        .wt-page .wt-roomCard:first-child,
-        .wt-page .wt-invitationItem:first-child {
-            border-top: 1px solid var(--wt-border);
-        }
-
-        .wt-page .wt-roomActions,
-        .wt-page .wt-diagnosticToolbar,
-        .wt-page .wt-formActions {
-            gap: .6em;
-        }
-
-        .wt-page .wt-roomActions button.wt-action,
-        .wt-page .wt-diagnosticToolbar button,
-        .wt-page .wt-refresh {
-            min-width: 0;
-            min-height: 44px;
-        }
-
-        .wt-page .wt-moreMenu {
-            display: flex;
-            flex-wrap: wrap;
-            gap: .35em;
-            padding: .35em 0;
-            border: 0;
-            border-radius: 0;
-            background: transparent;
-        }
-
-        .wt-page .wt-roomMediaPlaceholder {
-            border: 1px solid var(--wt-border);
-            border-radius: .25em;
-            background: transparent;
-        }
-
-        .wt-page .wt-toggleRow {
-            min-height: 44px;
-            margin: .7em 0;
-        }
-
-        .wt-page .wt-emptyState {
-            padding: 1em 0;
-            border: 0;
-            border-top: 1px solid var(--wt-border);
-            border-bottom: 1px solid var(--wt-border);
-            border-radius: 0;
-            background: transparent;
-        }
-
-        @media (max-width: 40em) {
-            .wt-page .settingsContainer {
-                width: calc(100% - 2em);
-                max-width: none;
-                padding-left: 0;
-                padding-right: 0;
-            }
-        }
     </style>
 
     <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
@@ -821,10 +458,10 @@
             <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite">正在加载…</p>
         </div>
 
-        <div class="verticalSection wt-section" id="wtAdminSection" data-wt-section="manage">
+        <div class="verticalSection wt-section" id="wtAdminSection">
             <div class="wt-sectionHeading">
-                <div class="sectionTitleContainer">
-                    <h2 class="sectionTitle">创建房间</h2>
+                <div>
+                    <h2>创建房间</h2>
                     <p class="fieldDescription wt-sectionDescription">
                         选择两名参与者，再指定一人为主用户（以主用户的播放进度为准）。
                     </p>
@@ -854,10 +491,10 @@
             </div>
         </div>
 
-        <div class="verticalSection wt-section" id="wtInvitationSection" data-wt-section="mine">
+        <div class="verticalSection wt-section" id="wtInvitationSection">
             <div class="wt-sectionHeading">
-                <div class="sectionTitleContainer">
-                    <h2 class="sectionTitle">邀请一起观看</h2>
+                <div>
+                    <h2>邀请一起观看</h2>
                     <p class="fieldDescription wt-sectionDescription">
                         创建一次性邀请码，发送给另一位已登录 Emby 的用户。邀请码有效期为 15 分钟。
                     </p>
@@ -876,7 +513,7 @@
 
             <div id="wtInvitationCodePanel" class="wt-invitationCode" hidden>
                 <div class="wt-roomMeta">
-                    <div>本次邀请码：<strong id="wtInvitationCode" class="wt-invitationCodeValue"></strong></div>
+                    <div>本次邀请码：<strong id="wtInvitationCode"></strong></div>
                     <div id="wtInvitationExpires"></div>
                 </div>
                 <div class="wt-formActions">
@@ -892,27 +529,22 @@
             <div class="wt-formActions">
                 <button is="emby-button" id="wtAcceptInvitation" type="button" class="raised button-submit">接受邀请</button>
             </div>
-            <div id="wtInvitations" class="paperList visualCardBox vertical-list wt-roomList wt-invitationList" aria-live="polite"></div>
+            <div id="wtInvitations" class="wt-roomList" aria-live="polite"></div>
         </div>
 
-        <div class="verticalSection wt-section" id="wtRoomsSection" data-wt-section="mine manage">
+        <div class="verticalSection wt-section">
             <div class="wt-sectionHeading">
-                <div class="sectionTitleContainer">
-                    <h2 id="wtRoomsHeading" class="sectionTitle">房间</h2>
+                <div>
+                    <h2 id="wtRoomsHeading">房间</h2>
                     <p class="fieldDescription wt-sectionDescription">状态变为“同步中”后，两位参与者会自动保持一致。</p>
                 </div>
-                <div class="wt-roomRefresh">
-                    <span id="wtRoomsStale" class="fieldDescription wt-staleMarker" role="status" aria-live="polite" hidden>数据可能已过期</span>
-                    <button is="emby-button" id="wtRefresh" type="button" class="button-flat wt-refresh">刷新</button>
-                </div>
+                <button is="emby-button" id="wtRefresh" type="button" class="button-flat wt-refresh">刷新</button>
             </div>
             <div id="wtRooms" class="wt-roomList" aria-live="polite" aria-busy="true"></div>
         </div>
 
-        <div class="verticalSection wt-section wt-help" data-wt-section="mine manage">
-            <div class="sectionTitleContainer">
-                <h2 id="wtHelpTitle" class="sectionTitle">使用方法</h2>
-            </div>
+        <div class="verticalSection wt-section wt-help">
+            <h2 id="wtHelpTitle">使用方法</h2>
             <ol id="wtHelpSteps">
                 <li id="wtHelpStep1">创建房间并选择两名参与者。</li>
                 <li id="wtHelpStep2">两人分别登录 Emby，打开同一视频。</li>
@@ -921,11 +553,11 @@
             <p class="fieldDescription">一方暂时不在线时，房间会等待；恢复后会继续尝试同步。</p>
         </div>
 
-        <div class="verticalSection wt-section" id="wtSettingsSection" data-wt-section="settings">
+        <div class="verticalSection wt-section" id="wtSettingsSection">
             <div class="wt-sectionHeading">
-                <div class="sectionTitleContainer">
-                    <h2 class="sectionTitle">设置</h2>
-                    <p class="fieldDescription wt-sectionDescription">播放停止行为与插件信息。</p>
+                <div>
+                    <h2>设置</h2>
+                    <p class="fieldDescription wt-sectionDescription">播放行为、更新通道与插件信息。</p>
                 </div>
             </div>
 
@@ -935,23 +567,17 @@
                     停止或退出视频时，选择是否暂停另一方播放，以及是否向另一方发送文字提示。
                 </p>
 
-                <label class="emby-toggle-label wt-toggleRow">
-                    <input is="emby-toggle" class="emby-toggle" id="wtPauseOtherOnPlaybackStop" type="checkbox" />
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" id="wtPauseOtherOnPlaybackStop" type="checkbox" />
                     <span>停止或退出视频时暂停另一方</span>
-                    <span class="toggleLabel flex-grow"></span>
-                    <div class="toggleSwitch"></div>
                 </label>
-                <label class="emby-toggle-label wt-toggleRow">
-                    <input is="emby-toggle" class="emby-toggle" id="wtNotifyOtherOnPlaybackStop" type="checkbox" />
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" id="wtNotifyOtherOnPlaybackStop" type="checkbox" />
                     <span>停止或退出视频时发送文字提示</span>
-                    <span class="toggleLabel flex-grow"></span>
-                    <div class="toggleSwitch"></div>
                 </label>
-                <label class="emby-toggle-label wt-toggleRow">
-                    <input is="emby-toggle" class="emby-toggle" id="wtNotifyOnSyncActions" type="checkbox" />
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" id="wtNotifyOnSyncActions" type="checkbox" />
                     <span>同步操作时向播放端发送文字提示</span>
-                    <span class="toggleLabel flex-grow"></span>
-                    <div class="toggleSwitch"></div>
                 </label>
                 <div class="fieldDescription">覆盖暂停、继续、进度调整、重新同步、加入、退出、视频不一致和同步完成提示；播放端提示约 3 秒自动消失。</div>
                 <h3 class="wt-subHeading wt-updateSetting">更新通道</h3>
@@ -964,7 +590,7 @@
                 </div>
                 <div class="fieldDescription">此设置由 Emby 服务器保存，仅管理员可以修改。</div>
                 <div class="wt-formActions">
-                    <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit block" disabled>保存设置</button>
+                    <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
                     <p class="fieldDescription wt-formHint" id="wtConfigStatus" role="status" aria-live="polite">正在读取配置…</p>
                 </div>
             </div>
@@ -1002,17 +628,6 @@
                     <p class="fieldDescription wt-formHint">
                         插件更新由 Emby 计划任务自动处理（服务器 → 计划任务 → “Watch Together 更新检查”），可在那里调整检测时间或手动执行；安装后重启 Emby 生效。
                     </p>
-                </div>
-            </div>
-        </div>
-
-        <div id="wtConfirmOverlay" class="wt-confirmOverlay" role="presentation" hidden>
-            <div id="wtConfirmDialog" class="wt-confirmDialog" role="dialog" aria-modal="true" aria-labelledby="wtConfirmTitle" aria-describedby="wtConfirmMessage">
-                <h2 id="wtConfirmTitle">确认操作</h2>
-                <p id="wtConfirmMessage"></p>
-                <div class="wt-confirmActions">
-                    <button is="emby-button" id="wtConfirmCancel" type="button" class="button-flat">取消</button>
-                    <button is="emby-button" id="wtConfirmSubmit" type="button" class="raised button-submit">继续</button>
                 </div>
             </div>
         </div>

@@ -1,5 +1,7 @@
 # Watch Together UI VNext 验证记录
 
+本文件记录已撤回布局候选的历史证据。2026-10-18 用户确认以原服务器单页布局仅调整控件，当前验收以 `native-controls-plan.md` 和 `client-compatibility.md` 为准；这里的分页/媒体布局结果不代表当前 UI 交付。
+
 本文件在各 Stack 完成后追加经真实代码、测试或渲染验证的结果。模拟宿主证据与真实 Emby 验收必须分开记录。
 
 ## S111/S113 基线

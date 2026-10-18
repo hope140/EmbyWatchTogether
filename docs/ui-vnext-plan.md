@@ -1,6 +1,8 @@
 # Watch Together UI VNext 实施契约
 
-本文把 UI VNext 设计材料收敛为当前仓库可执行的实现边界。设计材料是方案输入，真实代码、测试和本文件记录的基线优先。
+本文件为历史候选记录。用户于 2026-10-18 明确要求保持原服务器单页布局，仅替换部分原生控件；当前方案以 [`native-controls-plan.md`](native-controls-plan.md) 为准。
+
+以下保留当时 UI VNext 的实现契约及基线，供历史追溯。
 
 ## 历史基线
 
