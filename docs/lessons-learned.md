@@ -166,7 +166,7 @@
 
 ## 23. 原生宽度和按钮必须复用当前宿主实际定义的类
 
-- 事实：此次 NAS 宿主的 `modules/layout/layout.css` 将 `form, .readOnlyContent` 限为 `80ch`，`.auto-center` 负责双侧 auto margin，路由模板在 padded 容器内使用 `readOnlyContent auto-center`。只有 padded 容器不会自动套用此限宽。
+- 事实：此次 NAS 宿主的 `modules/layout/layout.css` 将 `form, .readOnlyContent` 限为 `80ch`，`.auto-center` 负责双侧 auto margin，路由模板在 padded 容器内使用 `readOnlyContent auto-center`。只有 padded 容器不会自动套用此限宽。`layout_nontv.css` 的 `.page-withDockedDrawer .auto-center` 将侧栏布局的 margin 覆盖为 0；真实 Web 测得宽 727.19px 且靠左，这是宿主规则，不能凭类名宣称所有宿主状态均居中。
 - 事实：当前宿主 `emby-button.css` 提供控件基础结构并继承文字色；浅色及深色渐变主题由 `.raised` 同时定义背景和文字，`.button-submit` 进一步应用主题强调色。旧 `button-flat` 没有提供相同的主题背景配对，用户截图出现浅底白字。
 - 规则：复用原生结构和类之前核对当前宿主 CSS；避免只保留原生属性而缺失主题类。主题按钮含透明色时，对比度检查应合成 alpha 与下层表面，不能把透明白色当不透明白色，也不能忽略文字 alpha。
 - 验证：真实宿主文件只读检查与用户截图、S116 当前类交叉确认；S117 通过回归及真实宿主复核分别记录，模拟渐变代表区域不等同于所有客户端背景位置验收。

@@ -117,6 +117,7 @@ function page() {
     button { min-height: 44px; padding: 0 16px; color: inherit; cursor: pointer; }
     .readOnlyContent { max-width: 80ch; }
     .auto-center { margin-inline: auto; }
+    .page-withDockedDrawer .auto-center { margin-inline: 0; }
     button.raised { border: 0; border-radius: 100em; background: hsla(var(--button-background-hue, 0), var(--button-background-saturation, 0%), var(--button-background-lightness, 95%), var(--button-background-alpha, 1)); color: hsla(var(--theme-text-color-hue, 204), var(--theme-text-color-saturation, 20%), var(--theme-text-color-lightness, 20%), var(--theme-text-color-alpha, 1)); }
     button.raised.button-submit { border-color: var(--theme-primary-color, #20a956); color: #fff; background: var(--theme-primary-color, #20a956); }
     button:disabled { cursor: default; opacity: .55; }

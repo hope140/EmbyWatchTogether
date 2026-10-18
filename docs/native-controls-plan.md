@@ -4,7 +4,7 @@
 
 用户在 2026-10-18 明确要求以本轮部署前服务器上的单页界面为基线，只将按钮、输入框、选择框、checkbox 等已有控件交给 Emby 原生样式。保留原区域顺序、房间布局和操作方式。
 
-后续宽度与配色反馈进入 S117：采用宿主设置内容区的限宽/居中规则，修正深色渐变主题的普通按钮背景与文字配对，原区域和交互继续保留。
+后续宽度与配色反馈进入 S117：采用宿主设置内容区的限宽/对齐规则，修正深色渐变主题的普通按钮背景与文字配对，原区域和交互继续保留。
 
 基线证据：部署前 NAS 安装 DLL 与原 S110 本机产物 SHA-256 一致，为 `513dda4032d3c06c1d66091610e83e5569fcc810c2982abb05aed2adcb36d535`；S110 没有修改 Web 资源，原 UI 对应 beta `a1408e0`。`f294c67` 的 Web 资源相对该基线只增加 Phase E 的状态/诊断展示，结构仍相同，作为本次 UI 输入。
 
@@ -43,13 +43,22 @@
 
 - 目标：按用户要求采用其他插件页同类的原生内容宽度，修正深色主题普通按钮浅底白字；保留 S116 单页结构和业务。
 - 基础分支/commit：`beta@d97b82a7cb435f9ea2c7cbfeb5d7d199c0fd7501`；前置依赖：S116 已审核并部署。
-- 真实宿主依据：当前 NAS `layout.css` 的 `form, .readOnlyContent { max-width: 80ch; }` 与 `.auto-center` 双侧 auto margin，路由模板使用 `readOnlyContent auto-center`；按钮主题定义 `.raised` 的背景/文字配对及 `.button-submit` 的主题强调色，`emby-button.css` 未定义 `button-flat` 的背景。
-- 允许修改/文件所有权：原 UI worker 独占 HTML/JS、`Plugin.cs` 的 `GetPages`、`PluginPagesTests.cs`、`tests/ui/fixture/server.js` / `specs/watchtogether.spec.js`；主线程独占本契约、架构/排期/验收和经验文档及本地部署 receipt。
+- 真实宿主依据：当前 NAS `layout.css` 的 `form, .readOnlyContent { max-width: 80ch; }` 与 `.auto-center` 双侧 auto margin，路由模板使用 `readOnlyContent auto-center`；`layout_nontv.css` 的 `.page-withDockedDrawer .auto-center` 在侧栏展开时将双侧 margin 覆盖为 0，实际沿用该靠左对齐规则。按钮主题定义 `.raised` 的背景/文字配对及 `.button-submit` 的主题强调色，`emby-button.css` 未定义 `button-flat` 的背景。
+- 允许修改/文件所有权：原 UI worker 独占 HTML/JS、`Plugin.cs` 的 `GetPages`、`PluginPagesTests.cs`、`tests/ui/fixture/server.js` / `specs/watchtogether.spec.js`；主线程独占 README、本契约、架构/排期/验收和经验文档及本地部署 receipt。worker 交接停止后，主线程接管最终真实宿主相关的 fixture/spec 集成。
 - 禁止修改：其余 C#、同步/Session/Room/邀请/Token API 和业务、版本、依赖/锁文件、签名与发布工作流。
 - 实现边界：在现有 padded scroll 容器内复用宿主 `readOnlyContent auto-center` 包裹原内容，区域/ID/顺序保持；普通按钮采用宿主 `raised` 背景/文字配对，创建/接受/保存及加入采用原生 `button-submit`；保留动态构造器类与旧确认方式。无自绘按钮颜色、红色方案、新分页、操作收纳或业务变更。页面/控制器键同步 V6。
-- 验收：宽屏内容受宿主 80ch 约束并居中，手机随可用宽度收缩；所有原区域与角色规则保留，普通按钮在浅/深/渐变及 HSL 主题背景与文字可辨，动态按钮保留宿主类，主操作与普通操作区分。
+- 验收：宽屏内容受宿主 80ch 约束并按宿主对齐（侧栏展开时靠左），手机随可用宽度收缩；所有原区域与角色规则保留，普通按钮复用浅/深/渐变及 HSL 主题配对，动态按钮保留宿主类，主操作与普通操作区分。渐变透明色的对比度目标与实际值分别记录，不把原生样式正确当作所有背景点位对比度达标。
 - 测试命令：`node --check`、页面/服务 .NET 窄测；`npm ci` / `npm test`（`tests/ui`），夹具模拟 80ch 原生规则及 HSL 按钮配色，包含浅/深按钮对比度；最终 build/test/publish、四组 PowerShell 门禁与真实宿主只读复核。
 - 回滚：revert S117 commit；NAS 使用精确备份恢复。旧 S116 与其他工作区保留。
 - 允许并行：否，共享文件和最终构建串行。
 - 子代理：沿用原 Luna High UI worker 处理宿主兼容性修正；主线程设计、审核、集成与部署；Max 理由不适用。
 - Knowledge context：当前架构、经验 10/18/21/22、S116 原布局与按钮构造类边界；本轮只读取得的真实宿主 CSS/路由证据。
+
+### S117 验证与部署结果
+
+- 产品源码 `75b061559fe5a0193ddd062c0a0fb60043b4e5ab`，程序集 `1.6.0.5`；DLL 1,159,680 bytes，SHA-256 `b939594b28a9c48871e12d31aa83a41efe39640484fda58f2aa65051b5c3aad1`。
+- 主线程独立执行 .NET 545/545、最终 UI 浏览器 39/39、Release build/publish（0 warning/error）、四组脚本门禁、单 DLL ZIP 内容/哈希和 diff 检查；源 HTML 的原 ID/控件顺序保留且标签平衡，后台业务相对 `d97b82a` 无改动。
+- NAS 于 2026-10-18 21:30:42（东八区）部署；上传、安装及备份哈希核对，容器运行、插件加载、EntryPoint/SyncEngine 启动和 HTTP 302 已确认。原始及本次替换前备份保留，精确临时上传已移除，机器路径仅存被忽略的本地 receipt。
+- 真实 Web V6：内容区实测 727.19px、计算 max-width 727.196px；当前展开侧栏时 margin 为 0，靠左与 `layout_nontv.css` 一致。原五个区域顺序、配置读取、Token 配置状态保留；房间动态按钮有 `raised` 与原生构造类，浅色下背景 `rgba(236,236,243,.7)`、文字 `rgba(0,0,0,.87)`。未执行房间控制、邀请或配置写入。
+- 对比度边界：模拟 light/dark/HSL 普通按钮达到 4.5:1；采用当前宿主 darkgradient 透明色变量与代表背景点进行 alpha 合成，结果约 3.868:1，优于旧浅底白字但低于 4.5:1。此项不是全部背景/客户端可读性通过，保留原生主题配对，等用户实机反馈。
+- Knowledge Review：经验 23 记录原生内容宽度、侧栏对齐覆盖和按钮主题配对；架构已同步，无新增同步或业务架构决策，不需新 ADR。正式发布仍等待 UI 与真实双端验收，未执行远端分支/tag/Release 写入。

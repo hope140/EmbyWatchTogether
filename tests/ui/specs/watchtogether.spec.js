@@ -49,6 +49,18 @@ test('单页保留原区域顺序和宿主控件，并隐藏自绘导航', async
   expect(sections).toEqual(['wtAdminSection', 'wtInvitationSection', 'verticalSection wt-section', 'verticalSection wt-section wt-help', 'wtSettingsSection']);
 });
 
+test('展开原生侧栏时内容按宿主规则靠左并保持限宽', async ({ page }) => {
+  await open(page, 'admin-member', 'light', 1440, 1000);
+  await page.locator('.wt-page').evaluate(el => el.classList.add('page-withDockedDrawer'));
+  const layout = await page.locator('.wt-nativeContent').evaluate(el => {
+    const rect = el.getBoundingClientRect();
+    const parent = el.parentElement;
+    return { left: rect.left, width: rect.width, maxWidth: parseFloat(getComputedStyle(el).maxWidth), expectedLeft: parent.getBoundingClientRect().left + parseFloat(getComputedStyle(parent).paddingLeft) };
+  });
+  expect(Math.abs(layout.left - layout.expectedLeft)).toBeLessThanOrEqual(1);
+  expect(layout.width).toBeLessThanOrEqual(layout.maxWidth + 1);
+});
+
 test('浅色、深色和仅 HSL 单页主体均满足 4.5:1 对比度并保留管理员截图', async ({ page }) => {
   for (const theme of ['light', 'dark', 'hsl']) {
     await open(page, 'admin-member', theme, 1440, 1000);
@@ -217,6 +229,7 @@ test('管理员成员保留原有房间动作，动态按钮使用 Emby 原生�
   await open(page, 'admin-manage', 'light', 1024, 900);
   await expect(page.locator('.wt-roomCard .wt-action[data-act="participantResync"]')).toHaveCount(0);
   await expect(page.locator('.wt-roomCard .wt-action[data-act="join"]')).toHaveCount(1);
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="join"]')).toHaveClass(/button-submit/);
 });
 
 test('已有房间和无房间均保留原单页帮助与邀请区域', async ({ page }) => {
