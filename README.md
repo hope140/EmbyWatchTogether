@@ -45,6 +45,11 @@ Watch Together 是运行在 Emby Server 内的双人同步观看插件。两位�
 
 邀请码有效期为 15 分钟且只能接受一次。服务器重启后未接受的邀请码会失效，需要重新创建。
 
+### 暂离与结束
+
+- “暂离房间”停止参与同步，但保留房间成员关系，之后可以重新加入。
+- “结束房间”解除双方的房间关系，之后才能加入或创建其他房间；不会删除媒体文件。
+
 ## 插件更新
 
 更新由 Emby 的“Watch Together 更新检查”计划任务处理。服务器启动后，可在 **Dashboard → 计划任务** 中调整运行时间、禁用任务或手动执行。插件配置页可以选择 `stable` 或 `beta` 通道；stable 使用 [GitHub Latest](https://github.com/hope140/EmbyWatchTogether/releases/latest)，beta 会在公开 Releases 中从非 draft 的 stable 和 prerelease 里选择最高规范版本。
