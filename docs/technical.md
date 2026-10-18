@@ -43,6 +43,8 @@
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
+独立发布准备分支的本地候选为 `1.6.1.0`，三项项目版本同步；公开 stable/beta 仍保持上述版本。候选尚未创建 tag 或 GitHub Release，本地包及未签名 manifest 草稿以 `release-preparation-v1.6.1.0.md` 和本地 receipt 为准；生产签名由既有 `release` Environment 的正式 workflow 生成。
+
 ## 构建、测试和打包
 
 要求：PowerShell、可用的 .NET SDK，以及能够还原 `MediaBrowser.Server.Core` `4.9.0.52-beta` 的 NuGet 源。首次构建可先执行 `dotnet restore`，然后运行：

@@ -14,6 +14,8 @@
 
 ## 基线与证据
 
+S119 本地正式候选已整理为 `1.6.1.0`，当前 UI/业务源码与 S118 相同，只调整版本元数据与发布文档。候选在独立发布准备分支冻结；本地最终构建及可发布状态以该 worktree 的 `dist/release-readiness.json` 为准。公开 main/beta、tag、Release 和 NAS 均不由这次准备操作提升。准备清单见 [`release-preparation-v1.6.1.0.md`](release-preparation-v1.6.1.0.md)。
+
 - 远端 `beta`：`a1408e03203201501690544df64509d0926164ec`，版本 `1.6.0.5`。
 - 远端 `main` / Latest stable：`c6568f56b16e03fa62a45265ddb7589006418847` / `v1.5.0.0`。
 - Phase E：`codex/playback-stability`，`5730084b791a63867ebf50571681c7eb230db08d`；已有历史部署记录，自动测试与真实客户端验收分别记录。
