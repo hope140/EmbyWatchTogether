@@ -8,6 +8,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         Barrier: '正在对齐',
         Watching: '同步中',
         Handoff: '正在同步下一集',
+        Recovering: '正在等待临时掉线的参与者恢复',
         Unavailable: '暂不可用'
     };
     var stateDescriptions = {
@@ -15,6 +16,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         Barrier: '正在对齐两位参与者的播放位置',
         Watching: '两位参与者已连接，播放会自动同步',
         Handoff: '正在让另一位参与者打开主用户当前视频',
+        Recovering: '正在等待临时掉线的参与者恢复',
         Unavailable: '当前房间暂时无法使用，请刷新后重试'
     };
     var actionLabels = {
@@ -63,6 +65,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         Barrier: '正在对齐',
         Watching: '同步中',
         Handoff: '正在同步下一集',
+        Recovering: '临时掉线恢复中',
         Unavailable: '暂不可用'
     };
     var diagnosticReasonLabels = {
@@ -86,7 +89,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         watching: '两位参与者已连接',
         remote_control_unavailable: '当前客户端不支持远程控制',
         unsupported_playback_rate: '播放速度不是 1 倍',
-        waiting_for_playback: '等待双方打开同一视频并开始播放'
+        waiting_for_playback: '等待双方打开同一视频并开始播放',
+        transient_recovery: '正在等待临时掉线的参与者恢复'
     };
     var diagnosticHealthLabels = {
         fresh: '新鲜',
@@ -103,6 +107,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         entered: '已进入',
         recovered: '已恢复',
         changed: '已变化',
+        cleared: '已清除',
         observed: '已记录'
     };
     var diagnosticBarrierStageLabels = {
@@ -142,6 +147,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         handoff_failed: '媒体切换失败',
         handoff_superseded: '媒体切换目标变化',
         primary_item_changed: '主用户视频变化',
+        recovery_started: '开始临时掉线恢复',
+        recovery_confirmed: '临时掉线恢复成功',
+        recovery_timed_out: '临时掉线恢复超时',
+        recovery_session_changed: '恢复会话发生变化',
+        recovery_item_changed: '恢复视频发生变化',
+        drift_threshold_entered: '进入漂移阈值',
+        drift_threshold_cleared: '漂移阈值已清除',
+        drift_auto_repair_started: '开始漂移自动纠偏',
+        drift_auto_repair_completed: '漂移自动纠偏完成',
+        drift_auto_repair_failed: '漂移自动纠偏失败',
         observed: '观察事件'
     };
 
@@ -220,6 +235,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             positionSeconds: event.PositionTicks === null || event.PositionTicks === undefined
                 ? null : diagnosticSecondsFromTicks(event.PositionTicks),
             latencySeconds: diagnosticFiniteNumber(event.LatencySeconds),
+            driftSeconds: diagnosticFiniteNumber(event.DriftSeconds),
             atUtc: typeof event.AtUtc === 'string' ? event.AtUtc : null
         };
     }
@@ -276,6 +292,38 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             affectedAliases: (Array.isArray(raw.RecoveryWindow.AffectedAliases) ? raw.RecoveryWindow.AffectedAliases : [])
                 .slice(0, 2).map(diagnosticAlias)
         } : { active: false, ageSeconds: null, affectedAliases: [] };
+        var transientRecovery = raw.TransientRecovery && typeof raw.TransientRecovery === 'object' ? {
+            active: raw.TransientRecovery.Active === true,
+            ageSeconds: diagnosticFiniteNumber(raw.TransientRecovery.AgeSeconds),
+            remainingSeconds: diagnosticFiniteNumber(raw.TransientRecovery.RemainingSeconds),
+            missingAliases: (Array.isArray(raw.TransientRecovery.MissingAliases) ? raw.TransientRecovery.MissingAliases : [])
+                .slice(0, 2).map(diagnosticAlias),
+            participants: (Array.isArray(raw.TransientRecovery.Participants) ? raw.TransientRecovery.Participants : [])
+                .slice(0, 2).map(function (participant) {
+                    participant = participant || {};
+                    return {
+                        alias: diagnosticAlias(participant.Alias),
+                        missing: participant.Missing === true,
+                        expectedSessionHash: typeof participant.ExpectedSessionHash === 'string' ? participant.ExpectedSessionHash : null,
+                        expectedItemHash: typeof participant.ExpectedItemHash === 'string' ? participant.ExpectedItemHash : null,
+                        lastKnownPositionSeconds: diagnosticFiniteNumber(participant.LastKnownPositionSeconds),
+                        lastKnownPaused: participant.LastKnownPaused === true
+                    };
+                })
+        } : { active: false, ageSeconds: null, remainingSeconds: null, missingAliases: [], participants: [] };
+        var drift = raw.Drift && typeof raw.Drift === 'object' ? {
+            currentSeconds: diagnosticFiniteNumber(raw.Drift.CurrentDriftSeconds),
+            maxAbsoluteSeconds: diagnosticFiniteNumber(raw.Drift.MaxObservedAbsoluteDriftSeconds),
+            holdAgeSeconds: diagnosticFiniteNumber(raw.Drift.HoldAgeSeconds),
+            lastRepairAtUtc: typeof raw.Drift.LastAutoRepairAtUtc === 'string' ? raw.Drift.LastAutoRepairAtUtc : null,
+            repairCount: diagnosticFiniteNumber(raw.Drift.AutoRepairCount),
+            lastRepairDriftSeconds: diagnosticFiniteNumber(raw.Drift.LastAutoRepairDriftSeconds),
+            cooldownRemainingSeconds: diagnosticFiniteNumber(raw.Drift.CooldownRemainingSeconds)
+        } : {
+            currentSeconds: null, maxAbsoluteSeconds: null, holdAgeSeconds: null,
+            lastRepairAtUtc: null, repairCount: null, lastRepairDriftSeconds: null,
+            cooldownRemainingSeconds: null
+        };
         return {
             schemaVersion: typeof raw.SchemaVersion === 'string' ? raw.SchemaVersion : null,
             pluginVersion: typeof raw.PluginVersion === 'string' ? raw.PluginVersion : null,
@@ -288,6 +336,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             handoff: handoff,
             barrier: barrier,
             recovery: recovery,
+            transientRecovery: transientRecovery,
+            drift: drift,
             lastAction: raw.LastAction && typeof raw.LastAction === 'object' ? sanitizeDiagnosticEvent(raw.LastAction) : null,
             lastError: diagnosticReasonLabels[raw.LastError] ? raw.LastError : null,
             events: (Array.isArray(raw.Events) ? raw.Events : [])
@@ -445,6 +495,37 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         diagnosticField(barrierSummary, '受影响参与者', diagnostic.recovery.affectedAliases.length > 0 ? diagnostic.recovery.affectedAliases.join('、') : '—');
         barrier.appendChild(barrierSummary);
 
+        var transientRecoveryGroup = diagnosticGroup(body, '临时掉线恢复');
+        var transientRecoverySummary = document.createElement('div');
+        transientRecoverySummary.className = 'wt-diagnosticSummary';
+        diagnosticField(transientRecoverySummary, '状态', diagnostic.transientRecovery.active ? '恢复中' : '未活动');
+        diagnosticField(transientRecoverySummary, '已等待', diagnosticFormatNumber(diagnostic.transientRecovery.ageSeconds, ' 秒'));
+        diagnosticField(transientRecoverySummary, '剩余窗口', diagnosticFormatNumber(diagnostic.transientRecovery.remainingSeconds, ' 秒'));
+        diagnosticField(transientRecoverySummary, '缺失参与者', diagnostic.transientRecovery.missingAliases.length > 0 ? diagnostic.transientRecovery.missingAliases.join('、') : '—');
+        transientRecoveryGroup.appendChild(transientRecoverySummary);
+        diagnostic.transientRecovery.participants.forEach(function (participant) {
+            var participantSummary = document.createElement('div');
+            participantSummary.className = 'wt-diagnosticSummary';
+            diagnosticField(participantSummary, participant.alias, participant.missing ? '等待该会话恢复' : '会话仍在线');
+            diagnosticField(participantSummary, '预期 Session 标识', participant.expectedSessionHash || '—');
+            diagnosticField(participantSummary, '预期视频标识', participant.expectedItemHash || '—');
+            diagnosticField(participantSummary, '上次位置', diagnosticFormatPosition(participant.lastKnownPositionSeconds));
+            diagnosticField(participantSummary, '上次播放状态', participant.lastKnownPaused ? '已暂停' : '播放中');
+            transientRecoveryGroup.appendChild(participantSummary);
+        });
+
+        var driftGroup = diagnosticGroup(body, '播放漂移');
+        var driftSummary = document.createElement('div');
+        driftSummary.className = 'wt-diagnosticSummary';
+        diagnosticField(driftSummary, '当前漂移', diagnosticFormatNumber(diagnostic.drift.currentSeconds, ' 秒'));
+        diagnosticField(driftSummary, '最大绝对漂移', diagnosticFormatNumber(diagnostic.drift.maxAbsoluteSeconds, ' 秒'));
+        diagnosticField(driftSummary, '纠偏保持计时', diagnosticFormatNumber(diagnostic.drift.holdAgeSeconds, ' 秒'));
+        diagnosticField(driftSummary, '自动纠偏次数', diagnostic.drift.repairCount === null ? '—' : String(Math.max(0, Math.floor(diagnostic.drift.repairCount))));
+        diagnosticField(driftSummary, '最近自动纠偏', diagnostic.drift.lastRepairAtUtc ? diagnosticFormatTime(diagnostic.drift.lastRepairAtUtc) : '—');
+        diagnosticField(driftSummary, '最近纠偏漂移', diagnosticFormatNumber(diagnostic.drift.lastRepairDriftSeconds, ' 秒'));
+        diagnosticField(driftSummary, '冷却剩余', diagnosticFormatNumber(diagnostic.drift.cooldownRemainingSeconds, ' 秒'));
+        driftGroup.appendChild(driftSummary);
+
         var last = diagnosticGroup(body, '最近结果');
         var lastSummary = document.createElement('div');
         lastSummary.className = 'wt-diagnosticSummary';
@@ -469,6 +550,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 if (event.alias !== 'unknown') detail += '（' + event.alias + '）';
                 if (event.command) detail += '：' + (diagnosticCommandLabels[event.command] || '未知控制');
                 if (event.result) detail += '，' + diagnosticLabel(diagnosticResultLabels, event.result, '已记录');
+                if (event.driftSeconds !== null) detail += '，漂移 ' + diagnosticFormatNumber(event.driftSeconds, ' 秒');
                 eventItem.textContent = diagnosticFormatTime(event.atUtc) + ' · ' + detail;
                 eventList.appendChild(eventItem);
             });

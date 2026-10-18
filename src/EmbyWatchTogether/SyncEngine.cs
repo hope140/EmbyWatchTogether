@@ -342,6 +342,12 @@ namespace Emby.Plugins.WatchTogether
                             continue;
                         }
 
+                        ReleaseTransientRecoveryForPrimaryIdentityChange(
+                            runtime,
+                            room,
+                            snapshots,
+                            now);
+
                         bool primaryItemTransition = IsPrimaryItemTransition(runtime, room, snapshots, now);
                         if ((runtime.State == RoomState.Watching && primaryItemTransition) ||
                             runtime.State == RoomState.Handoff)
@@ -365,6 +371,18 @@ namespace Emby.Plugins.WatchTogether
                                 snapshots,
                                 eligibility,
                                 now))
+                        {
+                            results.Add(Result(room, runtime, eligible));
+                            continue;
+                        }
+
+                        if (TryProcessTransientSessionRecovery(
+                            runtime,
+                            room,
+                            candidates,
+                            snapshots,
+                            eligibility,
+                            now))
                         {
                             results.Add(Result(room, runtime, eligible));
                             continue;
@@ -974,7 +992,7 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now)
         {
             if (runtime == null || room == null || snapshots == null ||
-                runtime.State != RoomState.Watching ||
+                (runtime.State != RoomState.Watching && runtime.State != RoomState.Recovering) ||
                 room.JoinedParticipantUserIds == null || room.JoinedParticipantUserIds.Count != 2 ||
                 (runtime.MissingSessionSinceUtc.HasValue &&
                  (now - runtime.MissingSessionSinceUtc.Value).TotalSeconds >
@@ -991,6 +1009,62 @@ namespace Emby.Plugins.WatchTogether
             return string.Equals(current.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(previous.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(previous.ItemId, current.ItemId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void ReleaseTransientRecoveryForPrimaryIdentityChange(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            if (runtime?.State != RoomState.Recovering ||
+                runtime.Recovery == null ||
+                room?.JoinedParticipantUserIds == null ||
+                !runtime.Recovery.Participants.TryGetValue(room.PrimaryUserId, out var expected))
+            {
+                return;
+            }
+
+            SessionSnapshot current = null;
+            bool primaryIdentityValid =
+                snapshots != null &&
+                snapshots.TryGetValue(room.PrimaryUserId, out current) &&
+                current != null &&
+                current.Online &&
+                !current.Stopped &&
+                string.Equals(current.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(current.SessionId, expected.ExpectedSessionId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(current.ItemId, expected.ExpectedItemId, StringComparison.OrdinalIgnoreCase);
+            if (primaryIdentityValid &&
+                !runtime.Recovery.MissingUserIds.Contains(
+                    room.PrimaryUserId,
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            string eventType = "recovery_session_changed";
+            if (current != null &&
+                current.Online &&
+                !current.Stopped &&
+                string.Equals(current.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(current.SessionId, expected.ExpectedSessionId, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(current.ItemId, expected.ExpectedItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                eventType = "recovery_item_changed";
+            }
+
+            runtime.RecordDiagnosticEvent(
+                eventType,
+                room.PrimaryUserId,
+                null,
+                "changed",
+                null,
+                null,
+                now);
+            runtime.ClearTransientSessionRecovery();
+            runtime.State = RoomState.Watching;
+            runtime.MissingSessionSinceUtc = null;
         }
 
         private bool TryProcessLatePrimaryItemTransition(
@@ -1085,6 +1159,287 @@ namespace Emby.Plugins.WatchTogether
                 eligibility,
                 primaryItemTransition: false,
                 now);
+        }
+
+        private bool TryProcessTransientSessionRecovery(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyList<SessionSnapshot> candidates,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            RoomEligibilityEvaluation eligibility,
+            DateTimeOffset now)
+        {
+            if (runtime == null || room == null || snapshots == null)
+            {
+                return false;
+            }
+
+            if (runtime.State == RoomState.Recovering)
+            {
+                return ContinueTransientSessionRecovery(
+                    runtime, room, candidates, snapshots, eligibility, now);
+            }
+
+            if (runtime.State != RoomState.Watching ||
+                runtime.Recovery != null ||
+                runtime.Barrier != null ||
+                runtime.Handoff != null ||
+                runtime.Pending.Count != 0 ||
+                room.JoinedParticipantUserIds == null ||
+                room.JoinedParticipantUserIds.Count != 2 ||
+                runtime.Previous.Count != room.JoinedParticipantUserIds.Count ||
+                string.IsNullOrEmpty(runtime.SyncItemId))
+            {
+                return false;
+            }
+
+            var missingUserIds = room.JoinedParticipantUserIds
+                .Where(userId => !snapshots.ContainsKey(userId))
+                .ToList();
+            if (missingUserIds.Count == 0)
+            {
+                return false;
+            }
+
+            // Primary disappearance remains owned by the beta stop debounce
+            // and late-primary handoff candidate. Recovery is only for a
+            // temporarily missing non-primary participant.
+            if (missingUserIds.Contains(room.PrimaryUserId, StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // SessionSelector intentionally omits stopped and offline records.
+            // A missing selected session is a transient disappearance only when
+            // the raw provider result contains no record for that user at all.
+            // This preserves the existing explicit-Stop debounce and avoids
+            // treating selector ambiguity or an offline record as recovery.
+            if (missingUserIds.Any(userId => HasRawCandidateForUser(candidates, userId)))
+            {
+                return false;
+            }
+
+            foreach (var userId in room.JoinedParticipantUserIds)
+            {
+                if (missingUserIds.Contains(userId, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!snapshots.TryGetValue(userId, out var current) ||
+                    current == null ||
+                    !runtime.Previous.TryGetValue(userId, out var previous) ||
+                    previous == null ||
+                    !HasSameIdentity(previous.SessionId, previous.ItemId, current) ||
+                    !string.Equals(current.ItemId, runtime.SyncItemId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            runtime.BeginTransientSessionRecovery(now, missingUserIds, runtime.Previous);
+            if (runtime.Recovery == null ||
+                runtime.Recovery.MissingUserIds.Count != missingUserIds.Count ||
+                runtime.Recovery.Participants.Count != runtime.Previous.Count)
+            {
+                runtime.ClearTransientSessionRecovery();
+                return false;
+            }
+
+            runtime.State = RoomState.Recovering;
+            runtime.Error = null;
+            runtime.MissingSessionSinceUtc = null;
+            runtime.RecordDiagnosticEvent(
+                "recovery_started",
+                runtime.Recovery.MissingUserId,
+                null,
+                "entered",
+                runtime.Recovery.LastKnownPositionTicks,
+                null,
+                now);
+            _logger?.Info(
+                $"Room {room.Id}: transient session recovery started; " +
+                $"missing={string.Join(",", missingUserIds)}");
+            return true;
+        }
+
+        private bool ContinueTransientSessionRecovery(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyList<SessionSnapshot> candidates,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            RoomEligibilityEvaluation eligibility,
+            DateTimeOffset now)
+        {
+            var recovery = runtime.Recovery;
+            if (recovery == null || recovery.Participants.Count == 0)
+            {
+                runtime.ResetToWaiting();
+                return true;
+            }
+
+            if ((now - recovery.StartedAtUtc).TotalSeconds >=
+                SyncConstants.TransientRecoveryTimeoutSeconds)
+            {
+                return FailTransientSessionRecovery(
+                    runtime,
+                    room,
+                    snapshots,
+                    "recovery_timed_out",
+                    null,
+                    now);
+            }
+
+            foreach (var expected in recovery.Participants.Values)
+            {
+                var userCandidates = CandidatesForUser(candidates, expected.UserId);
+                if (userCandidates.Any(candidate =>
+                    candidate.Stopped &&
+                    string.Equals(candidate.SessionId, expected.ExpectedSessionId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    // Let the established Stop debounce handle an explicit
+                    // stopped snapshot. Recovery must not turn Stop into a
+                    // successful reconnect.
+                    runtime.ClearTransientSessionRecovery();
+                    runtime.State = RoomState.Watching;
+                    runtime.MissingSessionSinceUtc = null;
+                    return false;
+                }
+
+                if (userCandidates.Any(candidate =>
+                    candidate.Online &&
+                    !string.Equals(candidate.SessionId, expected.ExpectedSessionId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return FailTransientSessionRecovery(
+                        runtime,
+                        room,
+                        snapshots,
+                        "recovery_session_changed",
+                        expected.UserId,
+                        now);
+                }
+
+                if (userCandidates.Any(candidate =>
+                    candidate.Online &&
+                    string.Equals(candidate.SessionId, expected.ExpectedSessionId, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(candidate.ItemId, expected.ExpectedItemId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return FailTransientSessionRecovery(
+                        runtime,
+                        room,
+                        snapshots,
+                        "recovery_item_changed",
+                        expected.UserId,
+                        now);
+                }
+            }
+
+            foreach (var expected in recovery.Participants.Values)
+            {
+                if (!snapshots.TryGetValue(expected.UserId, out var current) || current == null)
+                {
+                    return true;
+                }
+
+                if (!string.Equals(current.UserId, expected.UserId, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(current.SessionId, expected.ExpectedSessionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return FailTransientSessionRecovery(
+                        runtime,
+                        room,
+                        snapshots,
+                        "recovery_session_changed",
+                        expected.UserId,
+                        now);
+                }
+
+                if (!string.Equals(current.ItemId, expected.ExpectedItemId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return FailTransientSessionRecovery(
+                        runtime,
+                        room,
+                        snapshots,
+                        "recovery_item_changed",
+                        expected.UserId,
+                        now);
+                }
+            }
+
+            if (!IsTransientRecoveryPlaybackIdentityValid(recovery, snapshots) ||
+                eligibility == null ||
+                !eligibility.IsEligible)
+            {
+                return true;
+            }
+
+            runtime.RecordDiagnosticEvent(
+                "recovery_confirmed",
+                recovery.MissingUserId,
+                null,
+                "confirmed",
+                recovery.LastKnownPositionTicks,
+                null,
+                now);
+            runtime.ClearTransientSessionRecovery();
+            runtime.MissingSessionSinceUtc = null;
+            runtime.Error = null;
+            runtime.State = RoomState.Barrier;
+            StartBarrier(runtime, room, snapshots, now);
+            BarrierTick(runtime, room, snapshots, now);
+            return true;
+        }
+
+        private bool FailTransientSessionRecovery(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            string eventType,
+            string userId,
+            DateTimeOffset now)
+        {
+            runtime.RecordDiagnosticEvent(eventType, userId, null, "changed", null, null, now);
+            runtime.ClearTransientSessionRecovery();
+            runtime.MissingSessionSinceUtc = null;
+            runtime.ResetToWaiting();
+            PauseOtherWhenWaiting(runtime, room, snapshots, now);
+            return true;
+        }
+
+        private static bool IsTransientRecoveryPlaybackIdentityValid(
+            TransientSessionRecoveryState recovery,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots)
+        {
+            foreach (var expected in recovery.Participants.Values)
+            {
+                if (!snapshots.TryGetValue(expected.UserId, out var current) ||
+                    current == null ||
+                    !current.Online ||
+                    current.Stopped ||
+                    current.RunTimeTicks <= 0 ||
+                    Math.Abs(current.PlaybackRate - 1.0) > SyncConstants.PlaybackRateTolerance)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool HasRawCandidateForUser(
+            IReadOnlyList<SessionSnapshot> candidates,
+            string userId)
+        {
+            return CandidatesForUser(candidates, userId).Count != 0;
+        }
+
+        private static List<SessionSnapshot> CandidatesForUser(
+            IReadOnlyList<SessionSnapshot> candidates,
+            string userId)
+        {
+            return (candidates ?? Array.Empty<SessionSnapshot>())
+                .Where(candidate => candidate != null &&
+                    string.Equals(candidate.UserId, userId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
         }
 
         private bool TryProcessParticipantResync(
@@ -1456,6 +1811,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.PauseAlign.Clear();
             runtime.SyncItemId = null;
             runtime.MissingSessionSinceUtc = null;
+            runtime.ClearTransientSessionRecovery();
             runtime.ClearRemoteControlRecovery();
             runtime.ClearPrimaryItemTransitionCandidate();
             HandoffTrace.Started(_logger, room, room.Id, handoff, now);
@@ -2425,7 +2781,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     if (IsSeekRetryBudgetExpired(runtime.Barrier, now))
                     {
-                        FailSeekBarrier(runtime, room.Id);
+                        FailSeekBarrier(runtime, room.Id, now);
                     }
                     else
                     {
@@ -2452,6 +2808,7 @@ namespace Emby.Plugins.WatchTogether
             string error,
             DateTimeOffset now)
         {
+            RecordAutomaticDriftRepairFailure(runtime, now);
             runtime.ResetToWaiting();
             runtime.Error = error;
             runtime.BarrierRetryAtUtc = now.AddSeconds(SyncConstants.AutomaticBarrierRetryDelaySeconds);
@@ -2479,7 +2836,7 @@ namespace Emby.Plugins.WatchTogether
             EnsureSeekRetryDeadline(barrier, now);
             if (IsSeekRetryBudgetExpired(barrier, now))
             {
-                FailSeekBarrier(runtime, roomId);
+                FailSeekBarrier(runtime, roomId, now);
                 return;
             }
 
@@ -2510,12 +2867,32 @@ namespace Emby.Plugins.WatchTogether
                 now >= barrier.SeekRetryDeadlineAtUtc.Value;
         }
 
-        private void FailSeekBarrier(RoomRuntime runtime, string roomId)
+        private void FailSeekBarrier(
+            RoomRuntime runtime,
+            string roomId,
+            DateTimeOffset now)
         {
+            RecordAutomaticDriftRepairFailure(runtime, now);
             runtime.ResetToWaiting();
             runtime.Error = BarrierSeekRetryBudgetError;
             runtime.BarrierRetryAtUtc = null;
             _logger?.Warn($"Room {roomId}: {BarrierSeekRetryBudgetError}");
+        }
+
+        private static void RecordAutomaticDriftRepairFailure(
+            RoomRuntime runtime,
+            DateTimeOffset now)
+        {
+            if (runtime?.Barrier?.FromAutomaticDriftRepair != true)
+            {
+                return;
+            }
+
+            runtime.RecordDriftDiagnosticEvent(
+                "drift_auto_repair_failed",
+                "failed",
+                runtime.Barrier.AutomaticDriftSeconds.GetValueOrDefault(),
+                now);
         }
 
         private bool TryIssuePlayItem(
@@ -3035,11 +3412,14 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now,
             string anchorUserId = null,
             bool? primaryPausedOverride = null,
-            bool fromMediaHandoff = false)
+            bool fromMediaHandoff = false,
+            bool fromAutomaticDriftRepair = false,
+            double? automaticDriftSeconds = null)
         {
             string anchorUser = anchorUserId ?? room.PrimaryUserId;
             var anchor = snapshots[anchorUser];
             runtime.ClearMediaHandoff();
+            runtime.ClearDriftTelemetry(clearAutoRepairHistory: false);
             runtime.State = RoomState.Barrier;
             runtime.Error = null;
             runtime.Barrier = new BarrierState
@@ -3055,6 +3435,8 @@ namespace Emby.Plugins.WatchTogether
                 SeekRetryDeadlineAtUtc = null,
                 RestoreSent = false,
                 FromMediaHandoff = fromMediaHandoff,
+                FromAutomaticDriftRepair = fromAutomaticDriftRepair,
+                AutomaticDriftSeconds = automaticDriftSeconds,
             };
             runtime.SyncItemId = anchor.ItemId;
             runtime.RecordDiagnosticEvent(
@@ -3103,6 +3485,7 @@ namespace Emby.Plugins.WatchTogether
                     !barrier.SessionIds.TryGetValue(user, out var sessionId) ||
                     !HasSameIdentity(sessionId, barrier.ItemId, snapshot)))
             {
+                RecordAutomaticDriftRepairFailure(runtime, now);
                 runtime.ResetToWaiting();
                 return;
             }
@@ -3217,7 +3600,7 @@ namespace Emby.Plugins.WatchTogether
 
                     if (IsSeekRetryBudgetExpired(barrier, now))
                     {
-                        FailSeekBarrier(runtime, room.Id);
+                        FailSeekBarrier(runtime, room.Id, now);
                         return;
                     }
 
@@ -3513,7 +3896,11 @@ namespace Emby.Plugins.WatchTogether
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
         {
+            bool completedAutomaticDriftRepair = barrier?.FromAutomaticDriftRepair == true;
+            double? automaticDriftSeconds = barrier?.AutomaticDriftSeconds;
+            runtime.ClearTransientSessionRecovery();
             runtime.ClearRemoteControlRecovery();
+            runtime.ClearDriftTelemetry(clearAutoRepairHistory: false);
             runtime.State = RoomState.Watching;
             runtime.Barrier = null;
             runtime.Pending.Clear();
@@ -3534,6 +3921,14 @@ namespace Emby.Plugins.WatchTogether
             {
                 runtime.RecordDiagnosticEvent(
                     "handoff_completed", null, RemoteCommands.PlayItem, "completed", null, null, now);
+            }
+            if (completedAutomaticDriftRepair)
+            {
+                runtime.RecordDriftDiagnosticEvent(
+                    "drift_auto_repair_completed",
+                    "completed",
+                    automaticDriftSeconds.GetValueOrDefault(),
+                    now);
             }
             NotifyParticipants(
                 room,
@@ -3919,6 +4314,16 @@ namespace Emby.Plugins.WatchTogether
                     excludeUserId: winner.userId);
             }
 
+            if (seekChanges.Count > 0 || pauseChanges.Count > 0)
+            {
+                runtime.CurrentDriftSeconds = null;
+                runtime.DriftAboveRepairThresholdSinceUtc = null;
+            }
+            else if (TryObserveDriftAndMaybeRepair(runtime, room, snapshots, now))
+            {
+                return;
+            }
+
             AlignPausedPeers(runtime, room, snapshots, now);
 
             runtime.Previous.Clear();
@@ -3928,6 +4333,121 @@ namespace Emby.Plugins.WatchTogether
             }
 
             runtime.PreviousAtUtc = now;
+        }
+
+        private bool TryObserveDriftAndMaybeRepair(
+            RoomRuntime runtime,
+            Room room,
+            IReadOnlyDictionary<string, SessionSnapshot> snapshots,
+            DateTimeOffset now)
+        {
+            if (runtime == null || room == null || snapshots == null ||
+                runtime.State != RoomState.Watching ||
+                runtime.Barrier != null ||
+                runtime.Handoff != null ||
+                runtime.Pending.Count != 0 ||
+                runtime.Suppressed.Count != 0 ||
+                runtime.Recovery != null ||
+                room.JoinedParticipantUserIds == null ||
+                room.JoinedParticipantUserIds.Count != 2)
+            {
+                if (runtime != null)
+                {
+                    runtime.DriftAboveRepairThresholdSinceUtc = null;
+                    runtime.CurrentDriftSeconds = null;
+                }
+                return false;
+            }
+
+            string primaryUserId = room.PrimaryUserId;
+            string participantUserId = room.JoinedParticipantUserIds.FirstOrDefault(
+                userId => !string.Equals(userId, primaryUserId, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(participantUserId) ||
+                !snapshots.TryGetValue(primaryUserId, out var primary) ||
+                !snapshots.TryGetValue(participantUserId, out var participant) ||
+                primary == null ||
+                participant == null ||
+                !primary.Online ||
+                !participant.Online ||
+                primary.Stopped ||
+                participant.Stopped ||
+                primary.IsPaused ||
+                participant.IsPaused ||
+                Math.Abs(primary.PlaybackRate - 1.0) > SyncConstants.PlaybackRateTolerance ||
+                Math.Abs(participant.PlaybackRate - 1.0) > SyncConstants.PlaybackRateTolerance ||
+                !string.Equals(primary.ItemId, participant.ItemId, StringComparison.OrdinalIgnoreCase) ||
+                primary.RunTimeTicks <= 0 ||
+                participant.RunTimeTicks <= 0)
+            {
+                runtime.DriftAboveRepairThresholdSinceUtc = null;
+                runtime.CurrentDriftSeconds = null;
+                return false;
+            }
+
+            double previousAbsoluteDrift = runtime.CurrentDriftSeconds.HasValue
+                ? Math.Abs(runtime.CurrentDriftSeconds.Value)
+                : 0;
+            double driftSeconds =
+                (participant.PositionTicks - primary.PositionTicks) /
+                (double)SessionSnapshot.TicksPerSecond;
+            double absoluteDriftSeconds = Math.Abs(driftSeconds);
+            runtime.CurrentDriftSeconds = driftSeconds;
+            runtime.MaxObservedAbsoluteDriftSeconds = Math.Max(
+                runtime.MaxObservedAbsoluteDriftSeconds,
+                absoluteDriftSeconds);
+
+            if (previousAbsoluteDrift < SyncConstants.DriftObserveThresholdSeconds &&
+                absoluteDriftSeconds >= SyncConstants.DriftObserveThresholdSeconds)
+            {
+                runtime.RecordDriftDiagnosticEvent(
+                    "drift_threshold_entered", "entered", driftSeconds, now);
+            }
+            else if (previousAbsoluteDrift >= SyncConstants.DriftObserveThresholdSeconds &&
+                     absoluteDriftSeconds < SyncConstants.DriftObserveThresholdSeconds)
+            {
+                runtime.RecordDriftDiagnosticEvent(
+                    "drift_threshold_cleared", "cleared", driftSeconds, now);
+            }
+
+            if (absoluteDriftSeconds < SyncConstants.DriftRepairThresholdSeconds)
+            {
+                runtime.DriftAboveRepairThresholdSinceUtc = null;
+                return false;
+            }
+
+            if (runtime.LastAutoRepairAtUtc.HasValue &&
+                (now - runtime.LastAutoRepairAtUtc.Value).TotalSeconds <
+                    SyncConstants.DriftRepairCooldownSeconds)
+            {
+                runtime.DriftAboveRepairThresholdSinceUtc = null;
+                return false;
+            }
+
+            if (!runtime.DriftAboveRepairThresholdSinceUtc.HasValue)
+            {
+                runtime.DriftAboveRepairThresholdSinceUtc = now;
+                return false;
+            }
+
+            if ((now - runtime.DriftAboveRepairThresholdSinceUtc.Value).TotalSeconds <
+                SyncConstants.DriftRepairHoldSeconds)
+            {
+                return false;
+            }
+
+            runtime.DriftAboveRepairThresholdSinceUtc = null;
+            runtime.RecordAutoRepairStarted(now, driftSeconds);
+            runtime.RecordDriftDiagnosticEvent(
+                "drift_auto_repair_started", "started", driftSeconds, now);
+            StartBarrier(
+                runtime,
+                room,
+                snapshots,
+                now,
+                fromAutomaticDriftRepair: true,
+                automaticDriftSeconds: driftSeconds);
+            BarrierTick(runtime, room, snapshots, now);
+            return true;
         }
 
         private static void CancelSupersededPausePending(
