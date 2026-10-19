@@ -1,16 +1,18 @@
 # Watch Together 当前排期
 
-更新日期：2026-10-18。
+更新日期：2026-10-19。
 
 ## 当前已确认目标
 
 当前正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，已于 2026-10-18 完成验收、签名发布与下载后独立核验，Latest 指向该版本。原服务器单页界面、同步、诊断和更新设置为当前基线。
 
-当前 UI 来源为 `a1408e0` 的原服务器页面，`f294c67` 仅提供其上的 Phase E 诊断增量；S116 控件契约见 [`native-controls-plan.md`](native-controls-plan.md)。UI VNext 的三页布局为已撤回的历史候选，现行 Token 设置、更新通道及已确认同步修复继续保留。
+正式版 UI 来源为 `a1408e0` 的原服务器页面，`f294c67` 仅提供其上的 Phase E 诊断增量；S116 控件契约见 [`native-controls-plan.md`](native-controls-plan.md)。早期 UI VNext 为已撤回的历史候选。
+
+用户后续确认 S122 的原生分页、媒体与头像布局并授权测试发布；当前 beta 为 `v1.7.0.0`，在正式版同步核心上增加上述界面能力，现行 Token、更新通道和诊断功能保留。S122 契约见 [`native-pages-media-plan.md`](native-pages-media-plan.md)，发布与真实双端待验收范围见[测试版维护记录](maintenance/v1.7.0.0-beta-publication.md)。
 
 本轮排期已完成：S116–S118 原生控件与页面适配 → S119 候选准备 → S120 文档受众整理 → S121 stable 发布与核验。具体验收边界见 [`client-compatibility.md`](client-compatibility.md)，发布证据见[维护记录](maintenance/v1.6.1.0-publication.md)。
 
-后续以真实客户端反馈和 [`roadmap.md`](roadmap.md) 中的候选为输入，具体新功能尚未排入实施。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；发布后的文档状态同步不移动该 tag。构建身份与 UI 验证边界见 `native-controls-plan.md`。
+下一步收集本测试版的真实双端操作与客户端显示反馈，长期候选仍见 [`roadmap.md`](roadmap.md)。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；测试发布与文档同步不移动该 tag。构建身份与 UI 验证边界分别见 `native-controls-plan.md` 和本轮 S122 契约。
 
 ## 基线与证据
 

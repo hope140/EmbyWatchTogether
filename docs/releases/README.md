@@ -6,6 +6,10 @@
 
 - [v1.6.1.0 发布说明](v1.6.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)：2026-10-18 正式发布，当前 Latest stable。
 
+## 当前测试版
+
+- [v1.7.0.0 测试版说明](v1.7.0.0.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.0)：原生分页、视频信息与用户头像展示，真实双端功能仍需实际验收。
+
 ## 历史发布
 
 ### Stable

@@ -4,6 +4,8 @@
 
 当前正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)。用户于 2026-10-18 确认本轮验收通过，签名资产、tag 与 Latest 已独立核验；操作证据见[发布维护记录](maintenance/v1.6.1.0-publication.md)。
 
+当前 beta 源码版本为 `1.7.0.0`，增加下文的原生分页、媒体与头像展示；测试发布和验证边界见[测试版维护记录](maintenance/v1.7.0.0-beta-publication.md)。正式版资产仍保持原有内容。
+
 ## 运行时边界
 
 插件目标为 `netstandard2.0`，由 Emby 服务器加载。`Plugin` 暴露插件元数据和嵌入式配置页；`WatchTogetherEntryPoint` 负责启动、配置热更新和停止时释放运行时对象。仓库不依赖外部同步服务。

@@ -4,6 +4,8 @@ Watch Together 是运行在 Emby Server 内的双人同步观看插件。两位�
 
 本文面向 Emby Server 管理员和普通使用者。当前正式版为 [v1.6.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，变化见[发布说明](docs/releases/v1.6.1.0.md)。开发者和维护者请从[开发者文档索引](docs/README.md)进入。
 
+测试通道提供 [v1.7.0.0 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.0)，包含分页、视频信息与用户头像展示，变化和测试重点见[测试版说明](docs/releases/v1.7.0.0.md)。测试版使用“房间 / 创建与邀请 / 设置”三个页面，完整的真实双端功能验收仍在进行。
+
 ## 功能
 
 - 管理员可以创建两人房间并指定主用户；普通用户可以通过一次性邀请码创建自助房间。

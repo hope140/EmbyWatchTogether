@@ -33,5 +33,7 @@
 
 - [发布日志索引](releases/README.md)
 - [v1.6.1.0 Release Notes](releases/v1.6.1.0.md)
+- [v1.7.0.0 测试版说明](releases/v1.7.0.0.md)
+- [v1.7.0.0 测试版发布记录](maintenance/v1.7.0.0-beta-publication.md)
 
 发布操作、tag、GitHub Release 和发布后状态同步由维护者按维护记录执行；本索引只提供文档入口，相关边界见 [`v1.6.1.0 发布维护记录`](maintenance/v1.6.1.0-publication.md)。
