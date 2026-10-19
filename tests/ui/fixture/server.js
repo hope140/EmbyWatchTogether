@@ -18,6 +18,7 @@ function room(overrides) {
   return Object.assign({
     RoomId: 'room-1', Name: '周末一起看', State: 'Watching',
     StatusReason: 'watching', ParticipantUserIds: ['user-a', 'user-b'], PrimaryUserId: 'user-a',
+    JoinedParticipantUserIds: ['user-a', 'user-b'],
     Participants: [
       { Id: 'user-a', Name: 'hope', Joined: true, IsPrimary: true },
       { Id: 'user-b', Name: 'qsm', Joined: true, IsPrimary: false }
@@ -123,6 +124,8 @@ function page() {
     button.raised-outline { background: transparent; border: .08em solid var(--line-background); backdrop-filter: none; }
     button.raised.button-submit { border-color: var(--theme-primary-color, #20a956); color: #fff; background: var(--theme-primary-color, #20a956); }
     button:disabled { cursor: default; opacity: .55; }
+    .tabs-viewmenubar .emby-tab-button { justify-content: center; color: var(--theme-secondary-text-color, #667789); text-decoration: none; }
+    .tabs-viewmenubar .emby-tab-button-active { color: var(--theme-background-color, #fff); }
     input:not([type="checkbox"]),select { width: min(100%, 32rem); min-height: 44px; padding: 0 12px; border: 1px solid var(--line-background, #c8d0d8); border-radius: 5px; color: var(--theme-text-color, #1e2933); background: var(--wt-card, #fff); }
     .emby-toggle-label { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--theme-text-color, #1e2933); cursor: pointer; }
     .emby-toggle-label input { position: absolute; opacity: 0; pointer-events: none; }
@@ -139,7 +142,13 @@ function page() {
     var diagnosticData = ${JSON.stringify(diagnostic('recovering'))};
     if (scenario !== 'recovering') diagnosticData = ${JSON.stringify(diagnostic('active'))};
     if (scenario === 'drift-positive') diagnosticData = ${JSON.stringify(diagnostic('drift-positive'))};
-    var apiCalls = []; var accountId = 'mock-admin'; var tokenConfigured = false;
+    var apiCalls = []; var accountId = scenario === 'admin-manage' ? 'admin-other' : 'user-a'; var tokenConfigured = false; var serverAddress = location.origin;
+    var stateOverride = null; var stateFailure = false; var roomsFailure = false;
+    var mediaOverrides = {}; var mediaFailure = 0; var mediaDelay = 0; var stateDelay = 0;
+    var imageUrlOverride; var imageDelay = 0; var imageCalls = [];
+    var avatarUrlOverride; var avatarCalls = []; var avatarStatuses = {};
+    var avatarDelay = Number(params.get('avatar_delay')) || 0;
+    if (params.get('avatar_missing')) avatarStatuses[params.get('avatar_missing')] = Number(params.get('avatar_status')) || 404;
     var config = { PauseOtherOnPlaybackStop: true, NotifyOtherOnPlaybackStop: true, NotifyOnSyncActions: true, UpdateChannel: 'stable' };
     var nativeCreateElement = document.createElement.bind(document);
     document.createElement = function (tagName, options) {
@@ -154,14 +163,40 @@ function page() {
     function isAdminScenario() { return ['admin-manage', 'admin-member', 'save-fail', 'token-read-fail', 'token-save-fail', 'token-clear-fail', 'token-slow'].indexOf(scenario) >= 0; }
     function delay(value) { return new Promise(function (resolve) { setTimeout(function () { resolve(value); }, scenario === 'late' || scenario === 'token-slow' ? 900 : 0); }); }
     function fail(status) { var e = new Error('mock'); e.status = status; return Promise.reject(e); }
+    function roomState(room) {
+      var sessions = room._wtState && room._wtState.Sessions || [];
+      return Object.assign({ RoomId: room.RoomId, State: room.State, StatusReason: room.StatusReason,
+        Eligible: room.State === 'Watching' || room.State === 'Barrier', SyncItemId: 'item-a',
+        PrimaryUserId: room.PrimaryUserId, ParticipantUserIds: room.ParticipantUserIds,
+        JoinedParticipantUserIds: room.JoinedParticipantUserIds,
+        Sessions: sessions.map(function (s) { return Object.assign({ SessionId: 'session-' + s.UserId, ItemId: 'item-a' }, s); })
+      }, stateOverride || {});
+    }
+    function item(userId, itemId) {
+      apiCalls.push({ method: 'GET', path: 'Users/' + userId + '/Items/' + itemId });
+      var status = mediaFailure;
+      var value = Object.assign({ Id: itemId, Type: 'Episode', Name: '第三集', SeriesName: '山海之间', ParentIndexNumber: 1, IndexNumber: 3, BackdropImageTags: ['own-tag'] }, mediaOverrides[itemId] || {});
+      return new Promise(function (resolve, reject) { setTimeout(function () { if (status) { var e = new Error('media'); e.status = status; reject(e); } else resolve(value); }, mediaDelay); });
+    }
+    function imageUrl(itemId, options) {
+      imageCalls.push({ itemId: itemId, options: Object.assign({}, options) });
+      if (imageUrlOverride !== undefined) return imageUrlOverride;
+      return new URL('/fixture-backdrop.svg?item=' + encodeURIComponent(itemId) + '&tag=' + encodeURIComponent(options.tag) + '&delay=' + imageDelay, serverAddress).href;
+    }
+    function userImageUrl(userId, options) {
+      avatarCalls.push({ userId: userId, options: Object.assign({}, options) });
+      if (avatarUrlOverride !== undefined) return avatarUrlOverride;
+      return new URL('/fixture-avatar.svg?user=' + encodeURIComponent(userId) + '&status=' + (avatarStatuses[userId] || 200) + '&delay=' + avatarDelay, serverAddress).href;
+    }
     function get(path) {
       apiCalls.push({ method: 'GET', path: path });
       if (path === 'WatchTogether/Users') return isAdminScenario() ? delay(${JSON.stringify(users)}) : scenario === 'users-fail' ? fail(500) : fail(403);
-      if (path === 'WatchTogether/Rooms') return delay(rooms);
+      if (path === 'WatchTogether/Rooms') return roomsFailure ? fail(503) : delay(rooms.slice());
       if (path.indexOf('/State') >= 0) {
-        if (scenario === 'state-fail') return fail(503);
+        if (scenario === 'state-fail' || stateFailure) return fail(503);
         var stateRoom = rooms.filter(function (candidate) { return path.indexOf(candidate.RoomId) >= 0; })[0];
-        return delay(stateRoom && stateRoom._wtState ? stateRoom._wtState : { Sessions: [] });
+        var stateValue = stateRoom ? roomState(stateRoom) : { Sessions: [] };
+        return new Promise(function (resolve) { setTimeout(function () { resolve(stateValue); }, stateDelay); });
       }
       if (path === 'WatchTogether/Invitations') return delay(invitations.slice());
       if (path === 'WatchTogether/Info') return delay({ CurrentVersion: '0.0.0-ui-mock', RepositoryUrl: 'https://example.invalid/mock' });
@@ -196,7 +231,17 @@ function page() {
       if (path.indexOf('/Leave') >= 0) return delay({ PauseAttempted: 1, PauseSucceeded: 1, PauseFailed: 0 });
       return delay({});
     }
-    window.__wtFixture = { apiCalls: apiCalls, errors: [], getRooms: function () { return rooms; }, config: config, switchAccount: function (id) { accountId = id; } };
+    window.__wtFixture = { apiCalls: apiCalls, errors: [], getRooms: function () { return rooms; }, config: config,
+      switchAccount: function (id) { accountId = id; }, switchServer: function (value) { serverAddress = value; },
+      setRooms: function (value) { rooms = value; }, setState: function (value) { stateOverride = value; },
+      setInvitations: function (value) { invitations = value; },
+      setStateFailure: function (value) { stateFailure = value; }, setRoomsFailure: function (value) { roomsFailure = value; },
+      setMedia: function (id, value) { mediaOverrides[id] = value; }, setMediaFailure: function (value) { mediaFailure = value; },
+      setMediaDelay: function (value) { mediaDelay = value; }, setStateDelay: function (value) { stateDelay = value; },
+      imageCalls: imageCalls, setImageUrl: function (value) { imageUrlOverride = value; }, setImageDelay: function (value) { imageDelay = value; },
+      avatarCalls: avatarCalls, setAvatarUrl: function (value) { avatarUrlOverride = value; }, setAvatarDelay: function (value) { avatarDelay = value; },
+      refresh: function () { window.__wtFixture.view.view._wtRefreshVisible(); }
+    };
     var nativeCatch = Promise.prototype.catch;
     Promise.prototype.catch = function (handler) {
       return nativeCatch.call(this, function (error) {
@@ -204,7 +249,7 @@ function page() {
         return handler(error);
       });
     };
-    window.ApiClient = { getUrl: function (path) { return path; }, getCurrentUserId: function () { return accountId; }, getJSON: get, fetch: function (o) { return send(o.url, o.type, o.data); }, getPluginConfiguration: function () { apiCalls.push({ method: 'GET', path: 'configuration' }); return isAdminScenario() ? delay(JSON.parse(JSON.stringify(config))) : fail(403); }, updatePluginConfiguration: function (id, value) { apiCalls.push({ method: 'POST', path: 'configuration', body: value }); if (scenario === 'save-fail') return fail(500); config = JSON.parse(JSON.stringify(value)); return delay(JSON.parse(JSON.stringify(config))); } };
+    window.ApiClient = { getUrl: function (path) { return path; }, serverAddress: function () { return serverAddress; }, serverId: function () { return serverAddress; }, getItem: item, getImageUrl: imageUrl, getUserImageUrl: userImageUrl, getCurrentUserId: function () { return accountId; }, getJSON: get, fetch: function (o) { return send(o.url, o.type, o.data); }, getPluginConfiguration: function () { apiCalls.push({ method: 'GET', path: 'configuration' }); return isAdminScenario() ? delay(JSON.parse(JSON.stringify(config))) : fail(403); }, updatePluginConfiguration: function (id, value) { apiCalls.push({ method: 'POST', path: 'configuration', body: value }); if (scenario === 'save-fail') return fail(500); config = JSON.parse(JSON.stringify(value)); return delay(JSON.parse(JSON.stringify(config))); } };
     window.Dashboard = { getConfigurationPageUrl: function (name) { return '#!/configurationpage?name=' + encodeURIComponent(name); } };
     function routeView(href) {
       var match = String(href || '').match(/name=([^&]+)/);
@@ -215,17 +260,20 @@ function page() {
       history.replaceState({}, '', location.pathname + location.search + href);
       if (window.__wtFixture.view) {
         window.__wtFixture.view.onPause();
-        window.__wtFixture.view.view.__mockTabsInitialized = false;
         window.__wtFixture.view.onResume();
       }
       window.__wtFixture.route = route;
     }
+    var tabOwner = null;
     var mainTabsManager = {
+      getTabsElement: function () { return document.querySelector('.tabs-viewmenubar'); },
+      selectedTabIndex: function (selected) { document.querySelectorAll('.emby-tab-button').forEach(function (link, i) { link.classList.toggle('emby-tab-button-active', i === selected); link.setAttribute('aria-current', i === selected ? 'page' : 'false'); }); },
       setTabs: function (page, selectedIndex, getTabs) {
-        if (page.__mockTabsInitialized === true) return;
-        page.__mockTabsInitialized = true;
         var middle = document.querySelector('.skinHeader .headerMiddle');
-        if (!middle) return;
+        if (!middle) throw new Error('missing host');
+        if (!page) { middle.innerHTML = ''; tabOwner = null; return { tabsContainer: middle, replaced: false }; }
+        if (tabOwner === page) return { tabsContainer: middle, replaced: false };
+        tabOwner = page;
         middle.innerHTML = '';
         var menubar = document.createElement('div');
         menubar.className = 'tabs-viewmenubar tabs-viewmenubar-backgroundcontainer emby-tabs';
@@ -234,7 +282,7 @@ function page() {
         (getTabs() || []).forEach(function (tab, index) {
           var link = document.createElement('a');
           var viewName = routeView(tab.href);
-          link.id = viewName.indexOf('Manage') >= 0 ? 'wtTabManage' : viewName.indexOf('Settings') >= 0 ? 'wtTabSettings' : 'wtTabMine';
+          link.id = viewName.indexOf('Invite') >= 0 ? 'wtTabInvite' : viewName.indexOf('Settings') >= 0 ? 'wtTabSettings' : 'wtTabRooms';
           link.setAttribute('is', 'emby-linkbutton');
           link.className = 'emby-button emby-tab-button main-tab-button' + (index === selectedIndex ? ' emby-tab-button-active' : '');
           link.href = tab.href;
@@ -248,6 +296,7 @@ function page() {
         });
         menubar.appendChild(slider);
         middle.appendChild(menubar);
+        return { tabsContainer: middle, replaced: true };
       }
     };
     window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }, {}, {}, {}, {}, mainTabsManager); };
@@ -260,6 +309,27 @@ function page() {
 }
 
 const server = http.createServer((req, res) => {
+  const parsed = new URL(req.url, 'http://127.0.0.1:4179');
+  if (parsed.pathname === '/fixture-avatar.svg') {
+    const status = Number(parsed.searchParams.get('status')) || 200;
+    return setTimeout(() => {
+      if (res.destroyed) return;
+      if (status !== 200) { res.writeHead(status); res.end('fixture avatar unavailable'); return; }
+      const color = parsed.searchParams.get('user') === 'user-a' ? '#406452' : '#405c82';
+      res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' });
+      res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><path fill="#dfe8e4" d="M0 0h96v96H0z"/><circle cx="48" cy="35" r="17" fill="' + color + '"/><ellipse cx="48" cy="91" rx="34" ry="31" fill="' + color + '"/></svg>');
+    }, Math.min(2000, Math.max(0, Number(parsed.searchParams.get('delay')) || 0)));
+  }
+  if (parsed.pathname === '/fixture-backdrop.svg') {
+    const tag = parsed.searchParams.get('tag');
+    const delayMs = Math.max(0, Math.min(3000, Number(parsed.searchParams.get('delay')) || 0));
+    return setTimeout(() => {
+      if (res.destroyed) return;
+      if (tag === 'missing') { res.writeHead(404); res.end('fixture missing'); return; }
+      res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' });
+      res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720"><defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#31546b"/><stop offset="1" stop-color="#779eab"/></linearGradient></defs><path fill="url(#sky)" d="M0 0h1280v720H0z"/><path fill="#324e5a" d="M0 430L220 170l200 290 180-170 180 230 210-260 290 230v230H0z"/><path fill="#183945" d="M0 560l270-110 220 110 280-90 230 100 280-140v290H0z"/><path fill="#12333f" d="M0 635q320-60 640 0t640 0v85H0z"/></svg>');
+    }, delayMs);
+  }
   if (req.url.split('?')[0] === '/health') return json(res, { ok: true });
   if (req.url.split('?')[0] === '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(page()); }
   res.writeHead(404); res.end('not found');

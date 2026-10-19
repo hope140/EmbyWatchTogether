@@ -13,6 +13,16 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
   const error = await page.evaluate(() => window.__wtFixture && window.__wtFixture.error);
   expect(error || '').toBe('');
+  if (scenario === 'save-fail' || scenario.startsWith('token-')) await selectView(page, 'settings');
+}
+
+async function selectView(page, view) {
+  const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V12"]').click();
+  const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
+  await expect(page.locator(panel)).toBeVisible();
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  if (view === 'settings') await expect(page.locator('#wtGitHubTokenStatus')).not.toContainText('正在读取');
 }
 
 async function calls(page) {
@@ -90,10 +100,16 @@ async function expectButtonTextCentered(page) {
   }
 }
 
-test('单页保留原区域顺序和宿主控件，并隐藏自绘导航', async ({ page }) => {
+test('原生三页导航只显示当前区域并保留原生内容限宽', async ({ page }) => {
   await open(page, 'admin-member', 'light', 1440, 1000);
-  await expect(page.locator('#wtPluginNav, #wtPluginNavSlot, .tabs-viewmenubar')).toHaveCount(0);
+  await expect(page.locator('.tabs-viewmenubar')).toHaveCount(1);
+  await expect(page.locator('.tabs-viewmenubar a')).toHaveText(['房间', '创建与邀请', '设置']);
+  await expect(page.locator('#wtAdminSection')).toBeHidden();
+  await expect(page.locator('#wtSettingsSection')).toBeHidden();
+  await selectView(page, 'invite');
   await expect(page.locator('#wtAdminSection')).toBeVisible();
+  await expect(page.locator('#wtSettingsSection')).toBeHidden();
+  await selectView(page, 'settings');
   await expect(page.locator('#wtSettingsSection')).toBeVisible();
   await expect(page.locator('input[is="emby-input"]')).toHaveCount(4);
   await expect(page.locator('select[is="emby-select"]')).toHaveCount(4);
@@ -105,7 +121,7 @@ test('单页保留原区域顺序和宿主控件，并隐藏自绘导航', async
   expect(contentLayout.width).toBeLessThanOrEqual(contentLayout.viewport + 1);
   expect(Math.abs(contentLayout.left - (contentLayout.viewport - contentLayout.width) / 2)).toBeLessThanOrEqual(2);
   const sections = await page.locator('.wt-section').evaluateAll(nodes => nodes.map(node => node.id || node.className));
-  expect(sections).toEqual(['wtAdminSection', 'wtInvitationSection', 'verticalSection wt-section', 'verticalSection wt-section wt-help', 'wtSettingsSection']);
+  expect(sections).toEqual(['wtAdminSection', 'wtInvitationSection', 'wtRoomsSection', 'wtHelpSection', 'wtSettingsSection']);
 });
 
 test('展开原生侧栏时内容按宿主规则靠左并保持限宽', async ({ page }) => {
@@ -123,6 +139,7 @@ test('展开原生侧栏时内容按宿主规则靠左并保持限宽', async ({
 test('浅色、深色和仅 HSL 单页主体均满足 4.5:1 对比度并保留管理员截图', async ({ page }) => {
   for (const theme of ['light', 'dark', 'hsl']) {
     await open(page, 'admin-member', theme, 1440, 1000);
+    await selectView(page, 'settings');
     const colors = await page.locator('#wtSettingsSection h2').evaluate(el => {
       const style = getComputedStyle(el);
       return { background: getComputedStyle(document.querySelector('.fixture-host')).backgroundColor, color: style.color };
@@ -137,7 +154,7 @@ test('浅色、深色和仅 HSL 单页主体均满足 4.5:1 对比度并保留�
 test('深色渐变原生描边按钮的文字和边界满足代表点对比度', async ({ page }) => {
   await open(page, 'admin-member', 'darkgradient', 1440, 1000);
   await page.screenshot({ path: path.join(artifactDir, 'desktop-darkgradient-native-controls.png'), fullPage: true });
-  const paint = await buttonPaint(page, '.wt-roomCard button[data-act="pause"]');
+  const paint = await buttonPaint(page, '.wt-roomCard button[data-act="resume"]');
   expect(paint.classes).toContain('raised-outline');
   expect(paint.textContrast).toBeGreaterThanOrEqual(4.5);
   expect(paint.borderContrast).toBeGreaterThanOrEqual(3);
@@ -207,9 +224,14 @@ test('原生按钮文字在浅深主题中居中，主操作保留填充', async
   for (const theme of ['light', 'dark', 'hsl', 'darkgradient']) {
     await open(page, 'admin-member', theme, 1024, 1000);
     await expectButtonTextCentered(page);
+    await selectView(page, 'invite');
+    await expectButtonTextCentered(page);
+    await selectView(page, 'settings');
+    await expectButtonTextCentered(page);
     await expect(page.locator('.wt-page button.button-submit.raised-outline')).toHaveCount(0);
     await expect(page.locator('.wt-page button.raised:not(.button-submit):not(.raised-outline)')).toHaveCount(0);
     if (theme === 'light' || theme === 'darkgradient') {
+      await selectView(page, 'rooms');
       await page.locator('.wt-roomCard').screenshot({ path: path.join(artifactDir, `room-buttons-${theme}.png`) });
     }
   }
@@ -217,7 +239,9 @@ test('原生按钮文字在浅深主题中居中，主操作保留填充', async
 
 test('管理员单页显示管理和设置，普通用户隐藏这两个区域', async ({ page }) => {
   await open(page, 'admin-manage', 'dark');
+  await selectView(page, 'invite');
   await expect(page.locator('#wtAdminSection')).toBeVisible();
+  await selectView(page, 'settings');
   await expect(page.locator('#wtSettingsSection')).toBeVisible();
   await page.screenshot({ path: path.join(artifactDir, 'desktop-dark-settings.png'), fullPage: true });
   await open(page, 'active', 'light');
@@ -241,10 +265,10 @@ test('反复进入离开单页保持结构稳定，缺少宿主容器不影响�
   }
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
   await page.evaluate(() => window.__wtFixture.view.onPause());
-  await expect(page.locator('#wtPluginNav, #wtPluginNavSlot, .tabs-viewmenubar')).toHaveCount(0);
+  await expect(page.locator('.tabs-viewmenubar')).toHaveCount(0);
 
   await open(page, 'active', 'light', 1024, 900, 'missing');
-  await expect(page.locator('#wtPluginNav, #wtPluginNavSlot, .tabs-viewmenubar')).toHaveCount(0);
+  await expect(page.locator('.tabs-viewmenubar')).toHaveCount(0);
 });
 
 test('房间卡保留原单页结构、成员信息和原生动态按钮', async ({ page }) => {
@@ -252,8 +276,11 @@ test('房间卡保留原单页结构、成员信息和原生动态按钮', async
   const card = page.locator('.wt-roomCard');
   await expect(card).toContainText('周末一起看');
   await expect(card.locator('.wt-roomHeader')).toBeVisible();
-  await expect(card.locator('.wt-roomMeta')).toHaveCount(2);
-  await expect(card.locator('.wt-roomActions')).toBeVisible();
+  await expect(card.locator('.wt-participant')).toHaveCount(2);
+  await expect(card.locator('.wt-roomActions').first()).toBeVisible();
+  await expect(card.locator('.wt-participant')).toHaveCount(2);
+  await expect(card.locator('.wt-diagnostics')).toBeHidden();
+  await card.locator('[data-act="diagnostics"]').click();
   await expect(card.locator('.wt-diagnostics')).toBeVisible();
   await expect(card.locator('button[is="emby-button"]')).not.toHaveCount(0);
   await open(page, 'active', 'light', 390, 1000);
@@ -274,31 +301,33 @@ test('管理员成员保留原有房间动作，动态按钮使用 Emby 原生�
 
   await open(page, 'admin-manage', 'light', 1024, 900);
   await expect(page.locator('.wt-roomCard .wt-action[data-act="participantResync"]')).toHaveCount(0);
-  await expect(page.locator('.wt-roomCard .wt-action[data-act="join"]')).toHaveCount(1);
-  await expect(page.locator('.wt-roomCard .wt-action[data-act="join"]')).toHaveClass(/button-submit/);
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="join"]')).toHaveCount(0);
+  await expect(page.locator('.wt-roomCard .wt-action[data-act="leave"]')).toHaveCount(0);
 });
 
 test('已有房间和无房间均保留原单页帮助与邀请区域', async ({ page }) => {
   await open(page, 'active', 'light');
   await expect(page.locator('.wt-help')).toBeVisible();
   await open(page, 'empty', 'light', 390, 900);
-  await expect(page.locator('#wtInvitationSection')).toBeVisible();
+  await expect(page.locator('#wtInvitationSection')).toBeHidden();
   await expect(page.locator('.wt-help')).toBeVisible();
+  await selectView(page, 'invite');
+  await expect(page.locator('#wtInvitationSection')).toBeVisible();
 });
 
 test('普通成员当前房间保留原房间卡结构和状态信息', async ({ page }) => {
   await open(page);
   await expect(page.locator('.wt-roomCard')).toContainText('周末一起看');
   await expect(page.locator('.wt-roomState')).toContainText('同步中');
-  await expect(page.locator('.wt-roomCard .wt-roomMeta').nth(0)).toContainText('参与者：');
-  await expect(page.locator('.wt-roomCard .wt-roomMeta').nth(0)).toContainText('主用户：');
-  await expect(page.locator('.wt-roomActions button[data-act="diagnostics"]')).toHaveAttribute('is', 'emby-button');
+  await expect(page.locator('.wt-roomCard .wt-participants')).toContainText('hope');
+  await expect(page.locator('.wt-roomCard .wt-participants')).toContainText('主用户');
+  await expect(page.locator('.wt-roomControls button[data-act="diagnostics"]')).toHaveAttribute('is', 'emby-button');
   await page.screenshot({ path: path.join(artifactDir, 'desktop-light-active-room.png'), fullPage: true });
 });
 
 test('Waiting 与 State 失败状态反馈保持原页面语义', async ({ page }) => {
   await open(page, 'waiting', 'light', 1024, 900);
-  await expect(page.locator('.wt-roomState')).toContainText('等待参与者');
+  await expect(page.locator('.wt-roomState')).toContainText('等待播放');
   await expect(page.locator('.wt-roomStateDescription')).toContainText('等待');
 
   await open(page, 'state-fail', 'dark', 1024, 900);
@@ -308,7 +337,9 @@ test('Waiting 与 State 失败状态反馈保持原页面语义', async ({ page 
 test('管理员可查看非成员管理列表并保留设置区域', async ({ page }) => {
   await open(page, 'admin-manage', 'dark');
   await expect(page.locator('#wtRooms')).toContainText('管理员长列表房间');
+  await selectView(page, 'invite');
   await expect(page.locator('#wtAdminSection')).toBeVisible();
+  await selectView(page, 'settings');
   await expect(page.locator('#wtSettingsSection')).toBeVisible();
   await expect(page.locator('#wtSaveConfig')).toBeEnabled();
   await page.screenshot({ path: path.join(artifactDir, 'desktop-dark-same-structure.png'), fullPage: true });
@@ -317,6 +348,7 @@ test('管理员可查看非成员管理列表并保留设置区域', async ({ pa
 test('无房间、邀请创建等待与接受失败都有可见状态', async ({ page }) => {
   await open(page, 'empty', 'light', 390, 900);
   await expect(page.locator('#wtRooms')).toContainText('暂无参与的房间');
+  await selectView(page, 'invite');
   await page.locator('#wtInvitationName').fill('周末邀请');
   await page.locator('#wtCreateInvitation').click();
   await expect(page.locator('#wtInvitationCodePanel')).toBeVisible();
@@ -325,6 +357,7 @@ test('无房间、邀请创建等待与接受失败都有可见状态', async ({
   await page.screenshot({ path: path.join(artifactDir, 'mobile-invitation-390.png'), fullPage: true });
 
   await open(page, 'accept-fail', 'light', 390, 900);
+  await selectView(page, 'invite');
   await page.locator('#wtInvitationAcceptCode').fill('BAD-CODE');
   await page.locator('#wtAcceptInvitation').click();
   await expect(page.locator('#wtInvitationStatus')).toContainText('邀请码无效或已过期');
@@ -332,6 +365,7 @@ test('无房间、邀请创建等待与接受失败都有可见状态', async ({
 
 test('接受邀请网络失败只读回房间且不重发 POST', async ({ page }) => {
   await open(page, 'accept-network');
+  await selectView(page, 'invite');
   await page.locator('#wtInvitationAcceptCode').fill('NETWORK-CODE');
   await page.locator('#wtAcceptInvitation').click();
   await expect(page.locator('#wtInvitationStatus')).toContainText('邀请接受失败');
@@ -346,11 +380,12 @@ test('原有 window.confirm 取消不发送请求', async ({ page }) => {
   page.once('dialog', dialog => dialog.dismiss());
   const before = await calls(page);
   await leave.click();
-  expect((await calls(page)).length).toBe(before.length);
+  expect((await calls(page)).filter(x => x.method !== 'GET')).toEqual(before.filter(x => x.method !== 'GET'));
 });
 
 test('5 秒轮询保持邀请输入', async ({ page }) => {
   await open(page, 'empty');
+  await selectView(page, 'invite');
   const accept = page.locator('#wtInvitationAcceptCode');
   await accept.fill('keep-me');
   await page.waitForTimeout(5200);
@@ -367,10 +402,12 @@ test('5 秒轮询保持诊断展开状态', async ({ page }) => {
   await expect(page.locator('.wt-roomCard details.wt-diagnostics')).toHaveAttribute('open', '');
 });
 
-test('页面暂停后保留已加载房间卡并允许已发出请求完成', async ({ page }) => {
+test('页面暂停后拒绝迟到回写且恢复重新读取', async ({ page }) => {
   await page.goto('/?scenario=late&theme=light');
   await page.evaluate(() => window.__wtFixture.view.onPause());
   await page.waitForTimeout(1200);
+  await expect(page.locator('.wt-roomCard')).toHaveCount(0);
+  await page.evaluate(() => window.__wtFixture.view.onResume());
   await expect(page.locator('.wt-roomCard')).toHaveCount(1);
 });
 
@@ -390,9 +427,11 @@ test('设置保存失败后保留修改', async ({ page }) => {
 
 test('主体复用 Emby 原生表单、checkbox 和动态按钮语义', async ({ page }) => {
   await open(page, 'admin-member', 'light', 1024, 900);
+  await selectView(page, 'settings');
   await expect(page.locator('input[is="emby-checkbox"]')).toHaveCount(3);
   await expect(page.locator('#wtUpdateChannel[is="emby-select"]')).toHaveCount(1);
   await expect(page.locator('#wtSaveConfig[is="emby-button"]')).toHaveClass(/raised/);
+  await selectView(page, 'rooms');
   await expect(page.locator('.wt-roomCard')).toHaveCount(1);
   await expect(page.locator('.wt-roomCard button[is="emby-button"]')).not.toHaveCount(0);
   await expect(page.locator('#wtSaveConfig')).not.toHaveClass(/wt-settingsButton/);
@@ -400,6 +439,7 @@ test('主体复用 Emby 原生表单、checkbox 和动态按钮语义', async ({
 
 test('GitHub Token 设置使用原生控件并保留保存、清除和取消确认语义', async ({ page }) => {
   await open(page, 'admin-member', 'light', 1024, 900);
+  await selectView(page, 'settings');
   await expect(page.locator('#wtGitHubToken')).toHaveAttribute('type', 'password');
   await expect(page.locator('#wtSaveGitHubToken')).toHaveClass(/raised/);
   await expect(page.locator('#wtClearGitHubToken')).toHaveClass(/raised/);
@@ -418,7 +458,7 @@ test('GitHub Token 设置使用原生控件并保留保存、清除和取消确�
   const beforeCancel = await calls(page);
   await page.locator('#wtClearGitHubToken').click();
   expect((await calls(page)).filter(x => x.method === 'DELETE' && x.path === 'WatchTogether/GitHubToken')).toHaveLength(0);
-  expect((await calls(page)).length).toBe(beforeCancel.length);
+  expect((await calls(page)).filter(x => x.method !== 'GET')).toEqual(beforeCancel.filter(x => x.method !== 'GET'));
   await page.once('dialog', dialog => dialog.accept());
   await page.locator('#wtClearGitHubToken').click();
   await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已清除');
@@ -427,6 +467,7 @@ test('GitHub Token 设置使用原生控件并保留保存、清除和取消确�
 test('设置页浅深主题主体背景与文字保持可读，并保留移动截图', async ({ page }) => {
   for (const theme of ['light', 'dark']) {
     await open(page, 'admin-member', theme, 1024, 1000);
+    await selectView(page, 'settings');
     const colors = await page.locator('#wtSettingsSection h2').first().evaluate(el => {
       const pageStyle = getComputedStyle(el.closest('.wt-page'));
       const textStyle = getComputedStyle(el);
@@ -437,6 +478,7 @@ test('设置页浅深主题主体背景与文字保持可读，并保留移动�
     await page.screenshot({ path: path.join(artifactDir, `desktop-${theme}-settings.png`), fullPage: true });
   }
   await open(page, 'admin-member', 'dark', 390, 1100);
+  await selectView(page, 'settings');
   await expect(page.locator('#wtSettingsSection')).toBeVisible();
   await page.screenshot({ path: path.join(artifactDir, 'mobile-settings-dark-390.png'), fullPage: true });
 });
@@ -463,9 +505,10 @@ test('Token pause 清空明文并在恢复后重新读取', async ({ page }) => 
   await page.evaluate(() => window.__wtFixture.view.onPause());
   await page.waitForTimeout(1200);
   await expect(page.locator('#wtGitHubToken')).toHaveValue('');
-  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已保存');
+  await expect(page.locator('#wtGitHubTokenStatus')).not.toContainText('Token 已保存');
 
   await page.evaluate(() => window.__wtFixture.view.onResume());
+  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('已配置');
   await expect(page.locator('#wtGitHubToken')).toHaveValue('');
 });
 
@@ -487,13 +530,13 @@ test('Recovering 状态只针对临时掉线参与者，主用户缺失仍显示
   await expect(page.locator('#wtRefresh')).toHaveText('刷新');
   const refreshMetrics = await page.locator('#wtRefresh').evaluate(button => ({ width: button.getBoundingClientRect().width, textWidth: button.scrollWidth }));
   expect(refreshMetrics.textWidth).toBeLessThanOrEqual(refreshMetrics.width);
-  await expect(page.locator('.wt-roomState')).toHaveText('正在等待临时掉线的参与者恢复');
+  await expect(page.locator('.wt-roomState')).toHaveText('等待连接恢复');
   await expect(page.locator('.wt-roomState')).toHaveClass(/wt-roomState-recovering/);
   await expect(page.locator('.wt-roomStateDescription')).toContainText('临时掉线');
   await page.screenshot({ path: path.join(artifactDir, 'mobile-recovering-room-390.png'), fullPage: true });
 
   await open(page, 'primary-missing', 'light', 390, 1000);
-  await expect(page.locator('.wt-roomState')).toHaveText('等待参与者');
+  await expect(page.locator('.wt-roomState')).toHaveText('等待播放');
   await expect(page.locator('.wt-roomState')).not.toHaveClass(/wt-roomState-recovering/);
   const narrowMetrics = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   expect(narrowMetrics.width).toBeLessThanOrEqual(narrowMetrics.client + 1);
@@ -554,6 +597,17 @@ for (const width of [320, 360, 390, 430, 768, 1024, 1440, 1920]) {
     await expectButtonTextCentered(page);
     if (width === 390) await page.screenshot({ path: path.join(artifactDir, 'mobile-active-room-390.png'), fullPage: true });
     if (width === 320) await page.screenshot({ path: path.join(artifactDir, 'mobile-long-name-code-320.png'), fullPage: true });
+    await selectView(page, 'invite');
+    const invitationMetrics = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth, client: document.documentElement.clientWidth,
+      controls: Array.from(document.querySelectorAll('button, input:not([type="checkbox"]), select, .emby-tab-button')).map(x => Math.min(x.getBoundingClientRect().width, x.getBoundingClientRect().height)).filter(Boolean),
+      headerBottom: document.querySelector('.skinHeader').getBoundingClientRect().bottom,
+      pageTop: document.querySelector('.wt-page').getBoundingClientRect().top
+    }));
+    expect(invitationMetrics.width).toBeLessThanOrEqual(invitationMetrics.client + 1);
+    expect(Math.min(...invitationMetrics.controls)).toBeGreaterThanOrEqual(44);
+    expect(invitationMetrics.headerBottom).toBeLessThanOrEqual(invitationMetrics.pageTop + 1);
+    await expectButtonTextCentered(page);
   });
 }
 

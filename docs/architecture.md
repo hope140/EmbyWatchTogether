@@ -33,9 +33,15 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 ## 嵌入式 UI
 
-UI 由原服务器单页的嵌入式 HTML 和 AMD JavaScript 实现，保留创建房间、邀请、房间、说明、设置的原有顺序。内容区复用宿主 `readOnlyContent auto-center` 的限宽与对齐规则（当前宿主为 `80ch`；展开侧栏时宿主覆盖为靠左），窄屏随可用空间收缩。`Plugin.GetPages()` 注册一个页面入口及其控制器，使用 `WatchTogetherSettingsV7` / `.js` 缓存键；原有 `emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮使用相同原生初始化并保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用原生 `raised raised-outline`，轮廓色来自已有宿主文字派生变量 `--wt-muted`，主操作保持 `raised button-submit` 主题填充；服务端继续决定所有读取和操作权限。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。页面键为 `WatchTogetherRoomsV12`、`WatchTogetherInviteV12`、`WatchTogetherSettingsV12`，共享 `WatchTogetherNativeV12.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
-页面沿用原房间列表、邀请、设置与按需诊断读取流程；Phase E 的恢复/漂移诊断保留，`/State` 的只读扩展仍向后兼容。Token 使用现有独立私有存储和 API，UI 不回显已有 Token，离页清空输入。房间操作、确认、设置保存和权限可见性沿用原页面流程；详细控件边界和验证见 `native-controls-plan.md`。
+内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
+
+房间页按约 5 秒刷新既有 `/Rooms` 和 `/State`，并在严格状态、成员、同 Item 与资格检查后，通过当前登录用户的 Emby `getItem` 接口读取片名。状态新鲜度为 10 秒，错误或过期时不显示旧片名；状态与媒体请求独立，迟到响应绑定页面代次、账号、服务器、房间与媒体目标。媒体区在可靠同步状态下显示片名及当前授权 DTO 提供的背景；等待、失效和无图时使用中性占位。背景通过宿主 `getImageUrl` 生成，仅接受绑定服务器同源 HTTP(S) 地址且不得嵌入用户名/密码；图片加载回调绑定页面、房间、目标和 URL，失效时清除 src。片名、图片标识和 URL 不进入诊断导出。`/State` 是非原子读取，其结果只用于展示，不能替代同步核心身份确认。后端逻辑及协议未修改。
+
+房间外层使用浅色细边框。参与者头像仅从当前房间两位成员及其受限摘要中取 ID，通过宿主 `getUserImageUrl` 生成同服务器地址，不新增用户资料查询。头像与同步状态独立；缺图或失败保留首字，页面代次内抑制重复失败请求。账号、服务器、房间或页面生命周期变化使旧图片回调失效，清除图片 src；头像信息不进入诊断、日志或持久缓存。
+
+邀请、房间操作、确认、配置保存和按需诊断沿用既有业务。Token 不回显，离页清空敏感输入；所有旧代次回调与操作入口都核对页面身份。清理页面时也恢复三个静态创建/接受按钮的 busy 和文字，管理员创建按钮随后按权限与当前表单重新判定可用性；旧请求不能解锁新代次操作。详细候选边界和验证见 [S122 契约](native-pages-media-plan.md)；此前原生控件验证保留在 `native-controls-plan.md`。
 
 ## 状态与持久化
 
