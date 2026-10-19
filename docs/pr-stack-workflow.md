@@ -1,12 +1,12 @@
-# 主线程 + Luna 子代理 + PR Stack 工作流
+# 主线程 + 风险分层 worker + PR Stack 工作流
 
 ## 目的与适用条件
 
-本流程用于复杂、可拆分的软件变更。主线程掌握设计、依赖、审核和集成；分级 Luna worker 只实现已设计好的窄任务。`luna_worker` 是 Medium（Level 1）默认入口，另有 `luna_high_worker`（High，Level 2）和受限的 `luna_max_worker`（Max，Level 3）。简单单文件修改不必强行拆 Stack，但仍须遵守仓库检查、最小修改和验证要求。
+本流程用于复杂、可拆分的软件变更。主线程掌握需求分析、架构、依赖、授权、审核和集成；worker 只执行已固化 contract 的窄任务。任务 Tier、模型建议和回退规则唯一详述入口是 [`ai-model-policy.md`](ai-model-policy.md)。低风险任务可由主线程单代理闭环，不为拆分而拆分。
 
-PR Stack 是一组按依赖关系排列、可独立审核和回滚的本地分支/commit。创建、push 或合并远端 PR 必须另获用户明确授权。
+PR Stack 是按依赖排列、可独立审核和回滚的分支/worktree/提交序列。创建 PR、push、合并、发布和部署仍须当前用户明确授权；派发模板中的“提交要求”必须明确写出是否允许本地 commit，不能由 worker 自授。
 
-## 阶段一：现状检查
+## 阶段一：现状与知识检查
 
 主线程先读取相关 `AGENTS.md`、README、构建与测试配置，并执行：
 
@@ -18,132 +18,115 @@ git worktree list
 git log --oneline --decorate -10
 ```
 
-记录用户已有改动、基础分支、构建工具、测试入口、共享生成物和不可并发资源。已有改动不得被覆盖、移动或混入 Stack。
+记录用户已有改动、基础分支和 commit、构建工具、测试入口、共享生成物与不可并发资源。已有改动不得覆盖、移动或混入 Stack。按范围读取 [`architecture.md`](architecture.md)、[`lessons-learned.md`](lessons-learned.md) 和相关 ADR；不要机械加载无关历史。
 
-同时按任务范围读取知识文档：架构或接口任务先查 [`architecture.md`](architecture.md)，历史坑和维护规则按需查 [`lessons-learned.md`](lessons-learned.md) 与 [`adr/README.md`](adr/README.md)，不得为一个 Stack 全量加载无关历史。
+## 阶段二：输出 Stack 计划
 
-## 阶段二：输出完整 Stack 计划
-
-实现前主线程使用以下模板逐项输出，未经规划的 Stack 不得派发：
+复杂需求实现前必须逐项输出：
 
 ```text
 Stack: S<n> - <名称>
 目标: <单一可审查结果>
-基础分支: <branch 或 commit>
-前置依赖: <无 | S<n>>
+基础分支: <branch>
+基础 commit SHA: <固定 SHA>
+前置依赖: <无 | S<n>；使用已审核 commit>
 允许修改: <精确文件或目录>
-禁止修改: <精确文件或目录；至少列出业务外和共享敏感区域>
+禁止修改: <精确文件或目录>
 文件所有权: <本 Stack 独占的文件/目录>
-实现边界: <要做与明确不做的内容>
+实现边界: <要做与明确不做>
+任务 Tier: <Tier 1 | Tier 2 | Tier 3，附风险/不确定性/跨模块/Playback-Session 依据>
+模型建议: <仅作为候选，运行时核验后由主线程选择>
 验收标准: <可观察、可验证条件>
 测试命令: <可直接运行的命令>
-回滚方式: <通常为 revert 当前 Stack commit>
+回滚方式: <revert 独立 commit 或移除补丁>
 允许并行: <是/否及依据>
-子代理: <luna_worker | luna_high_worker | luna_max_worker | deepseek_worker | 主线程>
-Max 选择理由: <仅使用 luna_max_worker 时必填；其他情况填“不适用”>
-Knowledge context: <本 Stack 读取的架构/经验文档及适用约束；无则写“无”>
+子代理: <主线程或运行时可用的明确 worker>
+提交授权: <禁止 commit | 允许仅包含本 Stack 的本地 commit>
+Knowledge context: <已读取的架构/经验文档及适用约束>
+升级原因: <无；Tier 2/3 时写证据和原因>
 ```
 
-主线程绘制依赖顺序：无依赖且所有权不重叠的 Stack 可从共同基础并行；有依赖的 Stack 从直接前置 Stack 的已审核 commit 创建。相同文件、共享生成文件、数据库迁移、锁文件、公共接口先后变更或同一可变测试环境均视为冲突，必须串行。
+无依赖且所有权不重叠的 Stack 才可并行；共享文件、生成物、迁移、公共接口或可变测试环境必须串行。Tier 选择不能仅由文件数量、任务重要性或一次失败决定；环境、权限、依赖和输入问题先补证据、缩范围或重新规划。
 
 ## 阶段三：建立真实隔离
 
-写任务必须一 Stack 一分支、一 worktree、一代理线程。建议分支名为 `codex/stack-<nn>-<slug>`，worktree 放在仓库外的明确目录。主线程可用下列方式创建：
+所有 worker 写任务必须使用独立线程、分支和 worktree；低风险主线程单代理闭环可直接在主线程工作区完成。主线程实际核验：
 
 ```bash
-git worktree add -b codex/stack-<nn>-<slug> <worktree-path> <base-branch-or-commit>
+git worktree add -b codex/stack-<nn>-<slug> <绝对路径> <base-branch-or-commit>
 git worktree list
-git -C <worktree-path> branch --show-current
-git -C <worktree-path> status --short
+git -C <绝对路径> branch --show-current
+git -C <绝对路径> status --short
 ```
 
-Windows PowerShell 中必须把 `<worktree-path>` 替换为已核验的绝对路径，并在涉及删除或移动前再次解析目标。不得在仓库工作区内嵌套 worktree。
+worktree 放在仓库外，不能在现有工作区内嵌套；Windows 下使用已核验的绝对路径，删除或移动前再次核验目标。不能确认隔离时，停止 worker 写入，由主线程接管已授权且适合单代理闭环的小任务，或等待隔离就绪；不得使用共享目录 fallback。只读研究可不建 worktree。任何依赖或所有权变化都由主线程重新规划。
 
-桌面端可以为独立任务创建托管 worktree，但自定义 agent TOML 不会自动保证每个被 spawn 的子代理拥有独立 worktree。因此每次派发都要核验真实 `git worktree list`。不能确认隔离时，禁止并行写入：改由主线程显式创建 worktree，或串行执行且同一时刻只有一个写代理使用共享目录。
+## 阶段四：固定 contract 并派发
 
-## 阶段四：派发 Luna
+派发消息必须包含基础分支/commit、绝对 worktree、分支、允许与禁止文件、任务边界、输入输出、不变量、验收标准、测试命令、提交授权和报告字段。只给完成任务所需的最小上下文，并区分事实与假设。
 
-### Luna 分级派发
+适合 worker 的范围包括文档、测试/fake snapshot/issuer/fixture、日志脱敏、构建和签名公开资产只读核查，以及已明确 contract 的 helper/mapping。涉及 SyncEngine、RoomManager、SessionBridge、SessionSelector 的核心身份链、复杂异步 race/generation/cancellation、远控恢复、鉴权/签名信任边界和整体架构时，worker 只可在主线程固化的 contract 内收证据、补测试或执行已批准的局部实现，不得自行作架构、身份或信任边界决定。
 
-agent TOML 是固定入口，不提供单个 worker 内自动动态升级；主代理必须显式选择 `luna_worker`、`luna_high_worker` 或 `luna_max_worker`。默认使用 Medium；任务复杂度超出 Medium 且仍可独立审核时使用 High。Max 仅用于跨模块高复杂度、疑难 Bug、大范围重构、高风险核心逻辑、大量上下文联合推理，或 High 因推理复杂度失败后的重派，“任务重要”不能单独作为理由。若选择 Max，派发契约必须填写明确复杂度理由。Medium/High 因环境、测试、依赖、权限、输入不足或需求不清失败时，不升级 reasoning，而应修复阻塞、补充输入或重新规划。
-
-优先并行拆成多个独立、可验证、可回滚的 Medium/High Stack，不把可拆任务合成一个 Max。每个 Stack 仍必须有独立线程、分支、worktree、基础分支、文件所有权、实现边界、验收标准、测试命令、报告和主线程真实 diff 审核。若当前运行时仍只展示旧 `luna_worker`，需重新加载或重启配置后才会看到新增入口，具体操作以实际运行时为准。
-
-每个写 Stack 使用独立代理线程，并向所选 Luna worker 发送完整契约：
-
-当主线程环境只有 DeepSeek v4 可用（OpenAI 额度用完或 `gpt-5.6-luna` 不可用）时，改派 `deepseek_worker`（DeepSeek V4 Flash）。契约字段、派发纪律与审核门禁完全相同，仅代理角色和模型不同；现有备用 agent 的 model/effort 是固定配置，不宣称与三个 Luna 等级自动一一映射。
+Worker contract 示例：
 
 ```text
 执行 Stack: S<n> - <名称>
-基础分支: <branch>
-基础 commit: <sha>
-worktree: <绝对路径>
-分支名称: codex/stack-<nn>-<slug>
-允许修改: <列表>
-禁止修改: <列表>
-任务边界: <实现内容和不做内容>
-验收标准: <列表>
-测试命令: <列表>
-提交要求: 允许创建一个或多个仅包含本 Stack 的本地 commit
-完成报告: model、reasoning level、worktree、分支、commit SHA、修改文件、已执行测试、未执行测试及原因、未解决问题、残余风险
-Knowledge Findings: 新约束、新坑、被证明错误的旧假设、建议沉淀项、是否需架构/ADR 更新（无则写“无”）
+目标: <单一可审查结果>
+基础分支/commit: <...>
+worktree/分支: <绝对路径> / <branch>
+允许修改: <...>
+禁止修改: <...>
+任务边界: <实现内容与不做内容>
+任务 Tier/原因: <Tier 1/2/3 及风险依据>
+文件所有权: <本 Stack 独占文件>
+依赖/并行/回滚: <前置依赖、是否并行及回滚方式>
+上下文事实/假设: <分别列出>
+输入/输出: <...>
+必须保持的不变量: <...>
+验收标准: <...>
+测试命令: <...>
+提交授权: <禁止 commit | 允许仅本 Stack 的本地 commit>
+完成报告: model、reasoning level、worktree、分支、commit SHA、修改文件、已执行/未执行测试及原因、未解决问题、残余风险、Knowledge Findings
 ```
 
-主线程不得用模糊任务替代上述字段。代理收到完整任务、文件范围、方案和验收标准后，应只读取相关代码及直接依赖，避免全仓扫描、重做架构设计和长篇计划，尽快完成“读取相关代码 -> 实现 -> 最小相关测试 -> 报告”。代理报告边界不清、冲突或架构问题后，主线程先修订计划和契约再继续。
+## 阶段五：worker 停止与主线程实证审核
 
-Knowledge Findings 只能写由真实代码、测试、实际运行或日志、可复现结果，或官方文档与当前实现交叉确认的事实；项目文档单独陈述不足以作为事实门槛。写入知识库前必须搜索去重，旧经验失效时更新当前事实。
+Worker 遇到 contract 与真实行为冲突、测试与静态结论冲突、需要改变架构或出现跨层生命周期风险，应停止扩大范围并返回：
 
-## 阶段五：主线程实证审核
+```text
+Observed:
+Expected:
+Evidence:
+Files involved:
+Tests:
+Why current contract may be insufficient:
+Recommended escalation:
+```
 
-分级 worker 返回后，主线程进入该 worktree，实际执行：
+Worker 完成不等于通过。主线程在真实 worktree 执行：
 
 ```bash
 git worktree list
 git branch --show-current
 git status --short
 git log --oneline --decorate -10
-git diff --stat <基础分支>...HEAD
-git diff <基础分支>...HEAD
+git diff --stat <基础 commit SHA>...HEAD
+git diff <基础 commit SHA>...HEAD
+git diff --stat
+git diff
+git diff --cached
+git ls-files --others --exclude-standard
+git status --short
 ```
 
-若基础分支是易漂移名称，同时记录派发时的基础 commit，并按需比较 `<base-sha>...HEAD`。审核必须覆盖：
+审核必须固定使用派发时的 base commit SHA，并覆盖已提交、staged、unstaged 和 untracked；执行 `git ls-files --others --exclude-standard` 后读取每个未跟踪文件内容，确认文件所有权、依赖、生成物、不变量、验收证据及 Knowledge Findings。不能只看漂移的 base 分支。发现问题时回原线程、原分支和原 worktree 修正。按影响重新运行必要的测试、构建、Lint、类型或静态检查。证据分为静态/单元/构建、隔离 Emby 测试、服务器部署/加载、真实双客户端播放远控，缺证据不得写 PASS。
 
-- 当前路径、分支、基础 commit 与派发契约一致；
-- diff 中每个文件都属于允许范围和本 Stack 所有权；
-- `git status --short` 中没有遗漏的 staged、unstaged 或 untracked 文件；
-- manifest、锁文件、生成物中没有未经批准的依赖或改动；
-- 没有格式噪声、无关重构、兼容性漂移或测试弱化；
-- 验收标准逐条有证据；
-- Knowledge Findings 已去重并有依据，且已判断是否需要更新 `architecture.md` 或 ADR；
-- 主线程按风险独立复跑测试、构建、Lint、类型检查或静态检查。
+## 阶段六：推进、PR 管理与最终回归
 
-不通过时，把具体文件、现象、期望和验证命令发回原代理线程，让其在原 worktree 和原分支修正。除非原线程不可恢复或任务已被重新拆分，不新建修复代理。
+只有 Stack 审核通过后，才可从其已审核 commit 创建后继 Stack。远端 PR 必须标注前置 PR，按依赖从底到顶合并；底层 Stack 变化后，主线程重新规划依赖并重测、重审后继 Stack。无当前用户授权不得执行 push、创建 PR 或 merge。默认回滚是 revert 独立 commit 或移除本次补丁，禁止用 reset --hard、强制 push 或清理其他 worktree 替代可审计回滚。
 
-## 阶段六：Stack 推进与 PR 管理
-
-一个 Stack 审核通过后，才允许基于其 HEAD 创建直接后继 Stack。并行 Stack 合流前，主线程重新确认共同基础和冲突情况。
-
-每个远端 PR 应对应清晰 Stack，并在描述中写明前置 PR。主线程负责提交整理、push 和创建 PR；这些外部操作仅在用户明确授权后执行。合并顺序按依赖从底到顶；底层 Stack 变化后，主线程评估后继 Stack 是否需要 rebase、重测和重新审核。
-
-单个 Stack 的默认回滚方式是 revert 其独立 commit 或 PR。不得用 `git reset --hard`、强制 push 或删除未合并 worktree 代替可审计回滚，除非用户明确授权且目标已核验。
-
-## 阶段七：最终集成回归
-
-所有 Stack 完成后，主线程在最终集成状态：
-
-1. 运行完整回归验证，而非仅汇总各 Stack 的局部测试。
-2. 检查 Stack 间接口、行为、配置、生成物和迁移顺序。
-3. 获取最终 `git status --short`、完整 diff、分支和 commit 状态。
-4. 汇总实际修改文件、测试/构建证据、分支/commit/PR 状态。
-5. 明确列出未执行验证、原因和残余风险。
-6. 逐条确认总体验收条件；未满足时继续修正，不宣告完成。
-7. 对具有实质性代码修改、Bug/架构/兼容性调查的任务完成 Knowledge Review：搜索现有知识避免重复，更新失效事实；仅沉淀稳定、可复用且已验证的结论，任务日志和敏感本机信息不得进入知识库。无发现时在报告写明 Knowledge Findings/Review 为“无”，不强行修改知识文档。
+全部 Stack 完成后，主线程按影响执行适用的集成回归，不能仅汇总各 Stack 的局部测试；检查接口、行为、配置、生成物、最终状态和未跟踪文件，汇总实际修改、测试/构建证据、分支/commit/PR 状态、未执行验证原因和残余风险。治理文档任务只做规则、链接、编码和 diff 检查，不盲跑产品全量。完成 Knowledge Review；无新增事实时报告 `Knowledge Findings: 无`，不强行修改架构或 ADR。
 
 ## 能力边界
 
-- 项目配置可以启用多代理、限制并发，并定义三个固定 Luna 入口的模型、推理等级、沙箱和持久指令，以及仅有 DeepSeek v4 可用时的备用代理 `deepseek_worker`（DeepSeek V4 Flash）。
-- 三个 Luna 入口均使用 `gpt-5.6-luna`，推理等级分别为 Medium、High、Max；Max 不是默认实现入口，也不会由 worker 自动升级。
-- 模型可用性回退由主线程依据 `AGENTS.md` 判断并选择 `deepseek_worker`，Codex 不会自动探测 `gpt-5.6-luna` 是否可用。
-- Codex 桌面端和 Git 均支持 worktree；主线程也可以显式运行 `git worktree add`。
-- agent 配置不能声明文件级写权限、自动分支、自动 worktree、PR Stack 依赖图或禁止 push 的机械策略；这些由本文件、`AGENTS.md`、派发契约和主线程实证审核执行。
-- 运行时权限覆盖或组织策略可能高于 agent 文件。派发前必须检查实际权限和 worktree，不能只依赖静态配置。
+运行时提供的模型、推理档位、代理角色和权限才是实际能力；本文不会更改全局配置或自动切换模型。固定代理入口不能替代文件所有权、独立 worktree、Stack 依赖和授权核验。主线程必须实际检查隔离、权限和完整 diff，不能把配置或 worker 报告当成门禁已被自动执行。

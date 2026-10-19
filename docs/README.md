@@ -12,9 +12,11 @@
 
 ## 开发与维护
 
-- [当前开发排期](development-roadmap.md)：`v1.6.1.0` 交付状态和历史 Stack 入口。
-- [路线图](roadmap.md)：已整合能力与长期候选。
+- [当前开发排期](development-roadmap.md)：正式版、测试版、CI 状态和历史 Stack 入口。
+- [路线图](roadmap.md)：已整合能力与延期事项。
 - [贡献与 Stack/Worktree 流程](pr-stack-workflow.md)：分支、隔离、审核和回滚约定。
+- [AI / Codex 模型与任务 Tier 策略](ai-model-policy.md)：风险分层、运行时能力核验和委派边界。
+- [浏览器测试与 GitHub CI](../tests/ui/README.md)：本地 fixture 回归、CI 约束和报告查看。
 - [经验记录](lessons-learned.md)：已由代码、测试或实际运行证实的约束。
 - [v1.7.0.1 beta 发布记录](maintenance/v1.7.0.1-beta-publication.md)：V16 界面反馈、签名发布与独立核验。
 - [ADR 索引](adr/README.md)：需要长期保留的架构决策。

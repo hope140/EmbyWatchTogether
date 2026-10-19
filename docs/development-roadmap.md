@@ -14,7 +14,9 @@
 
 S124 的 V16 页面修正完成本地部署及用户界面确认后，已完成 [v1.7.0.1 beta 签名发布与下载核验](maintenance/v1.7.0.1-beta-publication.md)。客户端原始临时卡住过程尚未复现，真实双端功能继续收集实际反馈。
 
-后续长期候选仍见 [`roadmap.md`](roadmap.md)。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；测试发布与文档同步不移动该 tag。构建身份与 UI 验证边界分别见 `native-controls-plan.md` 和本轮 S122 契约。
+浏览器回归已通过 [PR #24](https://github.com/hope140/EmbyWatchTogether/pull/24) 合入 `beta`，与 .NET 检查并行运行；首次云端检查的 89 项浏览器测试、545 项 .NET 测试、构建与四组脚本门禁通过，报告已上传并下载核验。运行和报告查看方式见[浏览器测试说明](../tests/ui/README.md)。
+
+strict-follow 和多人同步观看已无限期延期，状态见 [`roadmap.md`](roadmap.md)。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；测试发布与文档同步不移动该 tag。构建身份与 UI 验证边界分别见 `native-controls-plan.md` 和本轮 S122 契约。
 
 ## 基线与证据
 
