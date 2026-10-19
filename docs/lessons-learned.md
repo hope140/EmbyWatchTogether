@@ -23,6 +23,7 @@
 - 现象：版本号或 MD5 正确不代表发布资产可信。
 - 原因：未签名或未知 key 的资产可能被替换。
 - 结论：更新前必须验证 canonical manifest、大小、SHA-256、程序集身份、tag 和 RSA detached signature；未知 key 或任一失败都拒绝更新。
+- 独立下载核验时，`.release.manifest.sig` 为严格 Base64 ASCII 文件，必须先按项目格式解码，再对 manifest 原始字节执行 RSA PKCS#1 v1.5/SHA-256 验证；不能把签名文件的文本字节直接当作 RSA 签名。此规则由签名脚本、验证器和 v1.7.0.1 公开资产交叉核对。
 - 规则：不得把 installer 的 MD5 二次校验当作信任根，也不得把私钥或 secret 写入仓库文档。
 - 验证：`ReleaseTrustStoreTests`、`release-signing.tests.ps1` 与 `release-workflow.tests.ps1`。
 - 补充规则：beta 更新检查应先在 GitHub API 返回的非 draft stable 与 prerelease 中选择最高规范版本，再验证该版本的固定资产；历史低版本缺少 manifest 或 signature 不得阻断最高版本选择，但最高版本自身缺少固定资产仍必须 fail closed。当前 GitHub API 的 35 个 Release、早期 `v1.0`/`v1.1`/`v1.2` 资产情况，以及 `GitHubReleaseClientTests` 的两个选择/缺资产测试共同确认了这一边界。

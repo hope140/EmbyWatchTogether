@@ -8,11 +8,11 @@
 
 正式版 UI 来源为 `a1408e0` 的原服务器页面，`f294c67` 仅提供其上的 Phase E 诊断增量；S116 控件契约见 [`native-controls-plan.md`](native-controls-plan.md)。早期 UI VNext 为已撤回的历史候选。
 
-用户后续确认 S122 的原生分页、媒体与头像布局并授权测试发布；当前 beta 为 `v1.7.0.0`，在正式版同步核心上增加上述界面能力，现行 Token、更新通道和诊断功能保留。S122 契约见 [`native-pages-media-plan.md`](native-pages-media-plan.md)，发布与真实双端待验收范围见[测试版维护记录](maintenance/v1.7.0.0-beta-publication.md)。
+用户后续确认 S122 的原生分页、媒体与头像布局并授权测试发布；当前 beta 为 `v1.7.0.1`，在正式版同步核心上增加上述界面能力并修正页面兼容性，现行 Token、更新通道和诊断功能保留。S122 契约见 [`native-pages-media-plan.md`](native-pages-media-plan.md)，发布与真实双端待验收范围见[测试版维护记录](maintenance/v1.7.0.1-beta-publication.md)。
 
 本轮排期已完成：S116–S118 原生控件与页面适配 → S119 候选准备 → S120 文档受众整理 → S121 stable 发布与核验。具体验收边界见 [`client-compatibility.md`](client-compatibility.md)，发布证据见[维护记录](maintenance/v1.6.1.0-publication.md)。
 
-S124 的 V16 页面修正已完成本地部署，用户确认最终普通单选外观与箭头方案，并明确授权 [v1.7.0.1 beta 修订发布](maintenance/v1.7.0.1-beta-preparation.md)。发布流程执行中；发布前公开 beta 为 v1.7.0.0。客户端原始临时卡住过程尚未复现，真实双端功能继续收集实际反馈。
+S124 的 V16 页面修正完成本地部署及用户界面确认后，已完成 [v1.7.0.1 beta 签名发布与下载核验](maintenance/v1.7.0.1-beta-publication.md)。客户端原始临时卡住过程尚未复现，真实双端功能继续收集实际反馈。
 
 后续长期候选仍见 [`roadmap.md`](roadmap.md)。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；测试发布与文档同步不移动该 tag。构建身份与 UI 验证边界分别见 `native-controls-plan.md` 和本轮 S122 契约。
 

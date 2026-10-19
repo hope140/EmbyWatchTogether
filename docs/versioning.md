@@ -52,9 +52,9 @@ Git tag：v1.6.0.5
 
 ## 发布通道
 
-当前测试线为 `1.7.0.0`：原生分页、房间媒体和头像展示构成一组兼容的用户功能，按 MINOR 递增并将右侧归零；其测试属性由 beta/prerelease 标记决定。测试版并不固定递增第二段，小范围修正仍按影响使用 PATCH 或 REVISION。正式版与 Latest 继续保持 `1.6.1.0`。
+当前测试线为 `1.7.0.1`：此前 1.7.0.0 的原生分页、房间媒体和头像展示构成一组兼容的用户功能，按 MINOR 递增并将右侧归零；其测试属性由 beta/prerelease 标记决定。测试版并不固定递增第二段，小范围修正仍按影响使用 PATCH 或 REVISION。正式版与 Latest 继续保持 `1.6.1.0`。
 
-S124 修订版为 `1.7.0.1`，对既有分页及单选控件做小范围兼容修正，按 REVISION 递增；已获 beta 发布授权，正在执行发布流程，最终状态见[维护记录](maintenance/v1.7.0.1-beta-preparation.md)。发布前核查时公开 beta 为 `1.7.0.0`。
+S124 修订版 `1.7.0.1` 对既有分页及单选控件做小范围兼容修正，按 REVISION 递增；已于 2026-10-19 完成签名 prerelease 和公开下载独立核验，见[维护记录](maintenance/v1.7.0.1-beta-publication.md)。
 
 - `main` 只用于 `stable` 正式发布；`stable` workflow 创建普通 GitHub Release。
 - `beta` 只用于 `beta` 测试发布；`beta` workflow 创建 GitHub prerelease。
