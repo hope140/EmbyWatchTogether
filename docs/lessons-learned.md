@@ -213,3 +213,21 @@
 - 规则：生命周期清理恢复静态按钮文字并移除 aria-busy，再由新页面的权限与表单规则判断可用性；保留旧回调隔离，不能用允许旧 finally 回写来解锁按钮。
 - 验证：创建邀请码、接受邀请、管理员创建房间三项浏览器回归修正前均失败、修正后通过；同时确认返回后可重试，旧响应不会解除新请求的 busy，也不会自动重发 POST。
 - 同类事件边界：DOM 节点移除后仍可能有已排队的 details toggle；读写新页面状态前需要身份、generation 和当前 panel 引用校验。新增回归修正前检测到旧面板触发的 Diagnostics 查询。
+
+## 31. 插件分页不能依赖旧宿主的 Dashboard 全局
+
+- 事实：2026-10-19 只读打开当前 Emby Web 4.10.0.40 的 V12 页面，控制台出现 `ReferenceError: Dashboard is not defined`；调用链为 `nativeTabs → applyRoute → setAdminVisibility → clearPageData → onResume`。初始化中断时保留“正在加载…”；同一清理函数也由 onPause 调用，会阻断离页。原 fixture 主动注入 Dashboard，掩盖了这个兼容问题。
+- 修正：S124 V14 候选构造与当前宿主 `pluginManager.getConfigurationPageUrl` 相同的相对链接 `configurationpage?name=`，并编码当前账号和服务器参数；默认 fixture 不再注入 Dashboard。页面、控制器注册、HTML 声明与浏览器测试同步更新缓存键。
+- 真实宿主返修：首次 V13 部署后，页面初始化恢复，但 emby-linkbutton 将 `#!/configurationpage` 链接按 anchor pathname 改写为 `#!/index.html/configurationpage`，切页无效。V14 改为宿主相对链接；fixture 导航改为解析 anchor pathname/query 后交给路由，不能再原样复制 href 到地址栏掩盖这种差异。
+- 下拉规则：`fillSelect` 仅在选项 ID、名称或顺序变化时重建 option，避免 5 秒刷新、窗口 focus 刷新和房间名称输入替换打开中的主用户菜单。保留当前有效选择，参与者改变使旧选择失效时回退首项；继续使用宿主 emby-select，不自绘箭头或选择菜单。
+- 验证：缺少 Dashboard 的初始化/切页/离页回归、保留未变化选项及参与者变化回归，均验证修正前失败、修正后通过；完整浏览器 84/84、.NET 545/545，Release 构建打包通过。
+- 边界：用户观察到客户端三个下拉框当时均不能打开、重启后恢复；本轮没有复现该客户端卡住的原始过程，不能把选项重建修正记为其已证实根因。V13 曾部署并由真实宿主检查发现上述切页问题，V14 的部署/验收以本地 receipt 为准；没有架构或后端同步语义变更。
+
+## 32. 原生单选模式与跨宿主箭头定位需要分别核对
+
+- 事实：当前 Server Web 与已安装 Theater 的 `enableNativeMenu` 均会在普通单选、非 TV 且未指定 `data-menu="custom"` 时使用系统菜单。2026-10-19 用户最终以 Madby“元数据语言”的普通单选截图确认目标；房间参与者、主用户和更新通道沿用这种默认单选模式。较早的多选参考不能作为强制主题浮层的依据。
+- 箭头差异：当前 Web 在独立 `.emby-select-wrapper` 内用 top/bottom 与 flex 居中；旧 Theater 把 label、select、带隐藏占位的 `.selectArrowContainer` 放在同一父节点，依赖顶部偏移和 margin-top。客户端 GenericEdit 适配层已有基于控件 grid 行的修正，但其作用域不覆盖本插件页面。
+- 修正：V16 四个 select 与 Madby 普通单选一样使用 `is="emby-select"`，菜单由宿主默认规则选择。插件自己的 `.wt-selectField` 仅将旧版直属 label、select、说明与原有箭头放到对应 grid 行，隐藏旧箭头占位并清除其 margin-top；新版 wrapper 内的箭头继续由宿主管理，不绘制第二个箭头，不改客户端安装文件。V15 曾错误地强制 custom，现已按用户最终参考撤回。
+- 验证：菜单模式与旧版 390px 长标签几何回归修正前失败，后者偏差约 64.88px；修正后旧/新两种 DOM、390/1280px 与四个控件的中线偏差小于 1px。完整浏览器 89/89、.NET 545/545，构建打包通过。fixture 只模拟两种实际结构及定位规则，不模拟真实菜单运行；真实 Web 和客户端证据必须单独记录。
+- 真实 Web 对照：神医与 Madby 的表单由 `genericui / GenericEdit` 生成。神医“搜索范围”为 multiple select，展开的是带复选框的虚拟滚动 actionSheet；Madby“元数据语言 / 图片语言 / 国家地区”为普通单选，未指定 custom，沿用系统单选菜单。不能用前者的多选展开形态定义全部原生单选的默认外观。V15 一起看显式 custom 的单选使用同一宿主 actionSheet 的单选形态；其闭合态实测高度约 34.615px、字号 14.424px、内边距与 Madby 单选相同，Web 箭头偏差约 0.0052px。这些测量只证明相应几何与组件事实，最终外观反馈见下条。
+- 最终反馈：用户在 V16 部署后确认“可以了，进行下一步”。本轮最终普通单选外观与箭头方案据此记为用户确认；该反馈不扩大为原始客户端临时卡住已复现、真实双端播放已验收或公开发布授权。后续本地 1.7.0.1 包和已部署的 1.7.0.0/V16 候选保持身份区分。

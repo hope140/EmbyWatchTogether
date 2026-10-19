@@ -1165,9 +1165,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV12',
-        invite: 'WatchTogetherInviteV12',
-        settings: 'WatchTogetherSettingsV12'
+        rooms: 'WatchTogetherRoomsV16',
+        invite: 'WatchTogetherInviteV16',
+        settings: 'WatchTogetherSettingsV16'
     };
 
     function currentRoute(page) {
@@ -1177,12 +1177,22 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return 'rooms';
     }
 
+    function configurationPageUrl(page, name) {
+        // Match pluginManager's relative href. emby-linkbutton routes the anchor
+        // pathname; a hash href incorrectly includes index.html in that route.
+        var identity = page._wtIdentity || pageIdentity();
+        var href = 'configurationpage?name=' + encodeURIComponent(name);
+        if (identity && identity.user) href += '&userId=' + encodeURIComponent(identity.user);
+        if (identity && identity.serverId) href += '&serverId=' + encodeURIComponent(identity.serverId);
+        return href;
+    }
+
     function nativeTabs(page) {
         var tabs = [
-            { href: Dashboard.getConfigurationPageUrl(routePageNames.rooms), name: '房间' },
-            { href: Dashboard.getConfigurationPageUrl(routePageNames.invite), name: page._wtIsAdmin === true ? '创建与邀请' : '邀请' }
+            { href: configurationPageUrl(page, routePageNames.rooms), name: '房间' },
+            { href: configurationPageUrl(page, routePageNames.invite), name: page._wtIsAdmin === true ? '创建与邀请' : '邀请' }
         ];
-        if (page._wtIsAdmin === true) tabs.push({ href: Dashboard.getConfigurationPageUrl(routePageNames.settings), name: '设置' });
+        if (page._wtIsAdmin === true) tabs.push({ href: configurationPageUrl(page, routePageNames.settings), name: '设置' });
         return tabs;
     }
 
@@ -1516,20 +1526,27 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
-        clearChildren(select);
-        options.forEach(function (user) {
-            var opt = document.createElement('option');
-            opt.value = user.Id;
-            opt.textContent = user.Name;
-            select.appendChild(opt);
+        var unchanged = select.options.length === options.length && options.every(function (user, index) {
+            var option = select.options[index];
+            return option.value === user.Id && option.textContent === user.Name;
         });
+        // Polls and name edits must not replace options under an open native menu.
+        if (!unchanged) {
+            clearChildren(select);
+            options.forEach(function (user) {
+                var opt = document.createElement('option');
+                opt.value = user.Id;
+                opt.textContent = user.Name;
+                select.appendChild(opt);
+            });
+        }
 
         var selectedExists = options.some(function (user) {
             return user.Id === selected;
         });
-        if (selectedExists) {
+        if (selectedExists && select.value !== selected) {
             select.value = selected;
-        } else if (options.length > 0) {
+        } else if (!selectedExists && options.length > 0 && select.selectedIndex !== 0) {
             select.selectedIndex = 0;
         }
     }

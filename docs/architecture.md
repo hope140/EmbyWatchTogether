@@ -4,7 +4,7 @@
 
 当前正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)。用户于 2026-10-18 确认本轮验收通过，签名资产、tag 与 Latest 已独立核验；操作证据见[发布维护记录](maintenance/v1.6.1.0-publication.md)。
 
-当前 beta 源码版本为 `1.7.0.0`，增加下文的原生分页、媒体与头像展示；测试发布和验证边界见[测试版维护记录](maintenance/v1.7.0.0-beta-publication.md)。正式版资产仍保持原有内容。
+当前公开 beta 为 `1.7.0.0`，增加下文的原生分页、媒体与头像展示；发布和验证边界见[测试版维护记录](maintenance/v1.7.0.0-beta-publication.md)。本地源码正准备 `1.7.0.1` 修订候选，用户已确认 V16 界面方案，状态见[准备记录](maintenance/v1.7.0.1-beta-preparation.md)。正式版资产仍保持原有内容。
 
 ## 运行时边界
 
@@ -38,6 +38,8 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。页面键为 `WatchTogetherRoomsV12`、`WatchTogetherInviteV12`、`WatchTogetherSettingsV12`，共享 `WatchTogetherNativeV12.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
+
+S124 本地候选使用 V16 页面/控制器缓存键，去除 Dashboard 全局依赖并使用宿主相对路由链接；四个单选控件沿用 Madby 普通单选的宿主默认菜单模式。旧 Theater 的直属箭头按控件 grid 行居中，新版 Web 保留其包装层定位；变更证据和真实验收边界见经验记录第 31、32 节。这些本地候选不改变已发布的 v1.7.0.0 资产。
 
 房间页按约 5 秒刷新既有 `/Rooms` 和 `/State`，并在严格状态、成员、同 Item 与资格检查后，通过当前登录用户的 Emby `getItem` 接口读取片名。状态新鲜度为 10 秒，错误或过期时不显示旧片名；状态与媒体请求独立，迟到响应绑定页面代次、账号、服务器、房间与媒体目标。媒体区在可靠同步状态下显示片名及当前授权 DTO 提供的背景；等待、失效和无图时使用中性占位。背景通过宿主 `getImageUrl` 生成，仅接受绑定服务器同源 HTTP(S) 地址且不得嵌入用户名/密码；图片加载回调绑定页面、房间、目标和 URL，失效时清除 src。片名、图片标识和 URL 不进入诊断导出。`/State` 是非原子读取，其结果只用于展示，不能替代同步核心身份确认。后端逻辑及协议未修改。
 

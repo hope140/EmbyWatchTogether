@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherNativeV12.js"
+     data-controller="__plugin/WatchTogetherNativeV16.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -46,6 +46,16 @@
         .wt-formGrid > div { min-width: 0; }
         .wt-fieldWide { grid-column: 1 / -1; }
         .wt-page .inputContainer, .wt-page .selectContainer { margin-top: 1.25em; }
+        /* Legacy Theater places its arrow beside the label and select; newer
+           Web wraps the select. Share the legacy control row without moving
+           the newer host's wrapper or drawing a second arrow. */
+        .wt-page .wt-selectField { display: grid; grid-template-columns: minmax(0, 1fr); }
+        .wt-page .wt-selectField > .selectLabelText { grid-row: 1; grid-column: 1; }
+        .wt-page .wt-selectField > select { grid-row: 2; grid-column: 1; min-width: 0; }
+        .wt-page .wt-selectField > .fieldDescription { grid-row: 3; grid-column: 1; }
+        .wt-page .wt-selectField > .selectArrowContainer { position: static; grid-row: 2; grid-column: 1; align-self: center; justify-self: end; margin-inline-end: .3em; }
+        .wt-page .wt-selectField > .selectArrowContainer > div:first-child { display: none; }
+        .wt-page .wt-selectField > .selectArrowContainer .selectArrow { margin-top: 0; }
         .wt-formActions { display: flex; flex-wrap: wrap; align-items: center; gap: .75em; margin-top: 1.25em; }
         .wt-formHint { margin: 0; overflow-wrap: anywhere; }
         .wt-page #wtConfigSection .checkboxContainer { margin: 1.5em 0; }
@@ -205,13 +215,13 @@
                     <input is="emby-input" id="wtRoomName" label="房间名称" placeholder="例如：今晚的电影" autocomplete="off" />
                     <div class="fieldDescription">名称只用于在本页识别房间。</div>
                 </div>
-                <div class="selectContainer">
+                <div class="selectContainer wt-selectField">
                     <select is="emby-select" id="wtUserA" label="参与者 1"></select>
                 </div>
-                <div class="selectContainer">
+                <div class="selectContainer wt-selectField">
                     <select is="emby-select" id="wtUserB" label="参与者 2"></select>
                 </div>
-                <div class="selectContainer wt-fieldWide">
+                <div class="selectContainer wt-fieldWide wt-selectField">
                     <select is="emby-select" id="wtPrimary" label="主用户"></select>
                     <div class="fieldDescription">主用户的播放位置作为同步基准。</div>
                 </div>
@@ -319,7 +329,7 @@
                 </label>
                 <div class="fieldDescription">覆盖暂停、继续、进度调整、重新同步、加入、退出、视频不一致和同步完成提示；播放端提示约 3 秒自动消失。</div>
                 <h3 class="wt-subHeading wt-updateSetting">更新通道</h3>
-                <div class="selectContainer wt-fieldWide wt-updateSetting">
+                <div class="selectContainer wt-fieldWide wt-updateSetting wt-selectField">
                     <select is="emby-select" id="wtUpdateChannel" label="更新通道">
                         <option value="stable" selected>正式版 / stable</option>
                         <option value="beta">测试版 / beta</option>

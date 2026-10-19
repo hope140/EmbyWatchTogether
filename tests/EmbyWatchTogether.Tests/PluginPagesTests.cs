@@ -21,9 +21,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV12");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV12");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV12");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV16");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV16");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV16");
             Assert.Equal(4, pages.Count);
             Assert.Single(pages, page => page.EnableInUserMenu);
             Assert.All(pages.Where(page => !page.Name.EndsWith(".js")), page =>
@@ -31,7 +31,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV7");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV12.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV16.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
@@ -58,7 +58,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV12");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV16");
             Assert.Equal("sync", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
@@ -78,7 +78,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV12.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV16.js\"", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", javascript);
             Assert.DoesNotContain("WatchTogetherSettingsV5", html);
@@ -287,7 +287,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain("邀请码创建失败：' + errorMessage(error)", javascript);
             Assert.DoesNotContain("AdminUserId", javascript);
             Assert.Contains("mainTabsManager.setTabs(page", javascript);
-            Assert.Contains("Dashboard.getConfigurationPageUrl", javascript);
+            Assert.Contains("'configurationpage?name='", javascript);
+            Assert.DoesNotContain("#!/configurationpage?name=", javascript);
+            Assert.DoesNotContain("Dashboard.getConfigurationPageUrl", javascript);
             Assert.Contains("wtNavigation", html);
             Assert.Contains("wtRoomsSection", html);
             Assert.Contains("wtHelpSection", html);

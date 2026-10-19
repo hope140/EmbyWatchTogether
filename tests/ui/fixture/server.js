@@ -127,6 +127,17 @@ function page() {
     .tabs-viewmenubar .emby-tab-button { justify-content: center; color: var(--theme-secondary-text-color, #667789); text-decoration: none; }
     .tabs-viewmenubar .emby-tab-button-active { color: var(--theme-background-color, #fff); }
     input:not([type="checkbox"]),select { width: min(100%, 32rem); min-height: 44px; padding: 0 12px; border: 1px solid var(--line-background, #c8d0d8); border-radius: 5px; color: var(--theme-text-color, #1e2933); background: var(--wt-card, #fff); }
+    /* Geometry-only host contracts; menus still need real-host acceptance. */
+    [data-select-host] .selectContainer { position: relative; }
+    [data-select-host] select { width: 100%; }
+    [data-select-host] .selectLabelText { display: flex; align-items: center; margin-bottom: .1em; }
+    [data-select-host] .selectArrow { font-size: 1.7em; line-height: 1; }
+    [data-select-host] .selectArrowContainer { position: absolute; right: .3em; pointer-events: none; }
+    [data-select-host="legacy"] .selectArrowContainer { top: .1em; }
+    [data-select-host="legacy"] .selectArrow { display: inline-block; margin-top: .35em; }
+    [data-select-host="modern"] .emby-select-wrapper { position: relative; height: 2.4em; }
+    [data-select-host="modern"] select { width: 100%; height: 100%; min-height: 0; }
+    [data-select-host="modern"] .selectArrowContainer { display: flex; top: .15em; bottom: .15em; right: .15em; align-items: center; }
     .emby-toggle-label { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--theme-text-color, #1e2933); cursor: pointer; }
     .emby-toggle-label input { position: absolute; opacity: 0; pointer-events: none; }
     .toggleLabel { flex: 1 1 auto; }
@@ -250,14 +261,15 @@ function page() {
       });
     };
     window.ApiClient = { getUrl: function (path) { return path; }, serverAddress: function () { return serverAddress; }, serverId: function () { return serverAddress; }, getItem: item, getImageUrl: imageUrl, getUserImageUrl: userImageUrl, getCurrentUserId: function () { return accountId; }, getJSON: get, fetch: function (o) { return send(o.url, o.type, o.data); }, getPluginConfiguration: function () { apiCalls.push({ method: 'GET', path: 'configuration' }); return isAdminScenario() ? delay(JSON.parse(JSON.stringify(config))) : fail(403); }, updatePluginConfiguration: function (id, value) { apiCalls.push({ method: 'POST', path: 'configuration', body: value }); if (scenario === 'save-fail') return fail(500); config = JSON.parse(JSON.stringify(value)); return delay(JSON.parse(JSON.stringify(config))); } };
-    window.Dashboard = { getConfigurationPageUrl: function (name) { return '#!/configurationpage?name=' + encodeURIComponent(name); } };
     function routeView(href) {
       var match = String(href || '').match(/name=([^&]+)/);
       return match ? decodeURIComponent(match[1]) : '';
     }
     function navigate(href) {
-      var route = routeView(href);
-      history.replaceState({}, '', location.pathname + location.search + href);
+      // emby-linkbutton routes the anchor pathname and query, not its hash.
+      var target = new URL(href, location.href);
+      var route = routeView(target.search);
+      history.replaceState({}, '', location.pathname + location.search + '#!' + target.pathname + target.search);
       if (window.__wtFixture.view) {
         window.__wtFixture.view.onPause();
         window.__wtFixture.view.onResume();
@@ -303,6 +315,33 @@ function page() {
     var hostHeader = hasHostHeader ? '<header class="skinHeader" data-mock-host="true"><div class="headerLeft">emby</div><div class="headerMiddle headerSection sectionTabs"></div><div class="headerRight">mock host</div></header>' : '';
     document.querySelector('.fixture-host').innerHTML = hostHeader + '<div class="fixture-main"><div class="fixture-label" data-mock="true">模拟宿主 / mock Emby host + API · 不连接真实 Emby</div>' + sourceHtml + '</div>';
     var page = document.querySelector('.wt-page');
+    var selectHost = params.get('select_host');
+    if (selectHost === 'legacy' || selectHost === 'modern') {
+      host.setAttribute('data-select-host', selectHost);
+      page.querySelectorAll('select[is="emby-select"]').forEach(function (select) {
+        select.classList.add('emby-select');
+        var label = document.createElement('label');
+        label.className = 'selectLabelText';
+        label.textContent = select.getAttribute('label');
+        label.htmlFor = select.id;
+        var arrow = document.createElement('div');
+        arrow.className = 'selectArrowContainer';
+        arrow.innerHTML = '<i class="selectArrow md-icon">&#xe313;</i>';
+        if (selectHost === 'legacy') {
+          select.before(label);
+          arrow.insertAdjacentHTML('afterbegin', '<div style="visibility:hidden">0</div>');
+          select.parentElement.appendChild(arrow);
+        } else {
+          var wrapper = document.createElement('div');
+          wrapper.className = 'emby-select-wrapper';
+          var outerLabel = document.createElement('label');
+          outerLabel.className = 'selectLabel';
+          select.replaceWith(outerLabel);
+          outerLabel.append(label, wrapper);
+          wrapper.append(select, arrow);
+        }
+      });
+    }
     try { (new Function(sourceJs))(); var view = new window.__wtViewCtor(page); view.view = page; view.onResume(); window.__wtFixture.view = view; } catch (error) { window.__wtFixture.error = String(error && error.stack || error); }
   }());
   </script></body></html>`;

@@ -54,6 +54,8 @@ Git tag：v1.6.0.5
 
 当前测试线为 `1.7.0.0`：原生分页、房间媒体和头像展示构成一组兼容的用户功能，按 MINOR 递增并将右侧归零；其测试属性由 beta/prerelease 标记决定。测试版并不固定递增第二段，小范围修正仍按影响使用 PATCH 或 REVISION。正式版与 Latest 继续保持 `1.6.1.0`。
 
+S124 修订版为 `1.7.0.1`，对既有分页及单选控件做小范围兼容修正，按 REVISION 递增；已获 beta 发布授权，正在执行发布流程，最终状态见[维护记录](maintenance/v1.7.0.1-beta-preparation.md)。发布前核查时公开 beta 为 `1.7.0.0`。
+
 - `main` 只用于 `stable` 正式发布；`stable` workflow 创建普通 GitHub Release。
 - `beta` 只用于 `beta` 测试发布；`beta` workflow 创建 GitHub prerelease。
 - 手动运行 workflow 时必须选择 `channel` 并提供规范数字 tag。workflow 会拒绝未知 channel，以及 `stable` 从非 `main` 或 `beta` 从非 `beta` 触发的请求。

@@ -16,6 +16,7 @@
 - [路线图](roadmap.md)：已整合能力与长期候选。
 - [贡献与 Stack/Worktree 流程](pr-stack-workflow.md)：分支、隔离、审核和回滚约定。
 - [经验记录](lessons-learned.md)：已由代码、测试或实际运行证实的约束。
+- [v1.7.0.1 本地 beta 修订准备](maintenance/v1.7.0.1-beta-preparation.md)：V16 界面反馈、修正范围和发布停点。
 - [ADR 索引](adr/README.md)：需要长期保留的架构决策。
 
 ## 历史记录

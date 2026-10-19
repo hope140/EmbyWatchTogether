@@ -185,7 +185,7 @@ test('切换三页保持单导航，状态未变时焦点与busy稳定', async (
   await open(page, 'admin-member');
   for (let i = 0; i < 3; i++) {
     for (const name of ['Invite', 'Settings', 'Rooms']) {
-      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V12"]').click();
+      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V16"]').click();
       await expect(page.locator('.tabs-viewmenubar a')).toHaveCount(3);
     }
   }

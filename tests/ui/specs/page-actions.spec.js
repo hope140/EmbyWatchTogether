@@ -1,5 +1,43 @@
 const { test, expect } = require('@playwright/test');
 
+test('宿主没有 Dashboard 全局时可以初始化、切页和离页', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/?scenario=admin-member&theme=light');
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.error || '')).toBe('');
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  expect(await page.evaluate(() => typeof window.Dashboard)).toBe('undefined');
+  await navigate(page, 'Invite');
+  await expect(page.locator('#wtUserA option')).toHaveCount(3);
+  await navigate(page, 'Settings');
+  await navigate(page, 'Rooms');
+  await page.evaluate(() => window.__wtFixture.view.onPause());
+  await expect(page.locator('.tabs-viewmenubar')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('刷新房间与编辑名称不重建未变化的下拉选项', async ({ page }) => {
+  // Also exercise a legacy host that exposes Dashboard.
+  await page.addInitScript(() => {
+    window.Dashboard = { getConfigurationPageUrl: name => '#!/configurationpage?name=' + encodeURIComponent(name) };
+  });
+  await page.goto('/?scenario=admin-member&theme=light');
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await navigate(page, 'Invite');
+  await page.locator('#wtPrimary').selectOption('user-b');
+  await page.evaluate(() => {
+    window.__wtFixture.primaryOption = document.querySelector('#wtPrimary option');
+  });
+  await page.locator('#wtRoomName').fill('新的房间名称');
+  await page.evaluate(() => window.__wtFixture.view.view._wtRefreshVisible());
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  expect(await page.evaluate(() => window.__wtFixture.primaryOption === document.querySelector('#wtPrimary option'))).toBe(true);
+  await expect(page.locator('#wtPrimary')).toHaveValue('user-b');
+  await page.locator('#wtUserB').selectOption('user-c');
+  await expect(page.locator('#wtPrimary option')).toHaveText(['hope', 'very-long-user-name-for-overflow-check']);
+  await expect(page.locator('#wtPrimary')).toHaveValue('user-a');
+});
+
 const actions = [
   { name: '创建邀请码', button: '#wtCreateInvitation', path: 'WatchTogether/Invitations', input: '#wtInvitationName' },
   { name: '接受邀请', button: '#wtAcceptInvitation', path: 'WatchTogether/Invitations/FRESH-CODE/Accept', input: '#wtInvitationAcceptCode' },
@@ -7,7 +45,7 @@ const actions = [
 ];
 
 async function navigate(page, route) {
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + route + 'V12"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + route + 'V16"]').click();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
 }
 

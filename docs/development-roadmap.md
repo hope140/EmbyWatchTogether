@@ -12,7 +12,9 @@
 
 本轮排期已完成：S116–S118 原生控件与页面适配 → S119 候选准备 → S120 文档受众整理 → S121 stable 发布与核验。具体验收边界见 [`client-compatibility.md`](client-compatibility.md)，发布证据见[维护记录](maintenance/v1.6.1.0-publication.md)。
 
-下一步收集本测试版的真实双端操作与客户端显示反馈，长期候选仍见 [`roadmap.md`](roadmap.md)。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；测试发布与文档同步不移动该 tag。构建身份与 UI 验证边界分别见 `native-controls-plan.md` 和本轮 S122 契约。
+S124 的 V16 页面修正已完成本地部署，用户确认最终普通单选外观与箭头方案，并明确授权 [v1.7.0.1 beta 修订发布](maintenance/v1.7.0.1-beta-preparation.md)。发布流程执行中；发布前公开 beta 为 v1.7.0.0。客户端原始临时卡住过程尚未复现，真实双端功能继续收集实际反馈。
+
+后续长期候选仍见 [`roadmap.md`](roadmap.md)。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；测试发布与文档同步不移动该 tag。构建身份与 UI 验证边界分别见 `native-controls-plan.md` 和本轮 S122 契约。
 
 ## 基线与证据
 
