@@ -10,6 +10,28 @@ npx playwright install chromium
 npm test
 ```
 
+## GitHub CI
+
+仓库的 `Pull request and branch CI` 在 PR 和 `main` / `beta` 推送时运行独立的 `Browser UI on Windows` 检查，与 .NET 检查并行。使用 Node.js 24、现有锁文件和 Chromium，命令在 `tests/ui` 下执行；首次运行会下载浏览器，不需要 Emby 服务器或登录凭据。
+
+CI 使用一个 worker，禁止 `test.only`，测试总时限为 10 分钟，任务上限为 15 分钟。失败直接使检查失败，不配置自动重试。现有截图和 trace 仅在失败时保留，HTML 报告每次生成。
+
+在 GitHub Actions 对应运行的 Artifacts 中下载 `ui-browser-results`，其中包含 `playwright-report` 和 `test-results`，保留 7 天；测试失败也会尝试上传。将报告解压后，在本目录运行 `npx playwright show-report <解压后的 playwright-report 路径>`，可查看失败步骤、截图和 trace。若依赖安装或浏览器下载阶段失败，应查看对应步骤日志，可能尚未产生测试报告。
+
+本地复现 CI 运行约束可在 PowerShell 中执行，结束后恢复当前进程原有的 `CI` 值：
+
+```powershell
+$previousCi = $env:CI
+try {
+    $env:CI = 'true'
+    npm test
+} finally {
+    $env:CI = $previousCi
+}
+```
+
+这项检查只覆盖本地 fixture 中的真实插件 HTML/JS。真实 Emby 宿主和双客户端播放仍分别验证；仓库必需检查和手动发布门禁需另外配置，本次接入不会自动修改这些设置。
+
 截图写入 `test-results/native-controls/` 和 `test-results/native-pages/`，默认 HTML 报告在 `playwright-report/`，这些目录已被 `.gitignore` 忽略。所有邀请码、账号和 token 都是 fixture 内的 mock 值，不能作为真实服务验收证据。
 
 S122 使用 `watchtogether.spec.js` 保留原生控件、主题、宽度、邀请、设置、Token、诊断回归，适配房间/创建与邀请/设置三页。`native-media.spec.js` 覆盖当前用户媒体查询、状态门槛、迟到响应、账号/服务器变化、文本安全和 10 秒新鲜度。页签通过模拟的真实 `mainTabsManager` owner 语义切换；测试不会连接真实 Emby。
