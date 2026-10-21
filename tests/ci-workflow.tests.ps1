@@ -139,4 +139,62 @@ Assert-Matches -Text $artifactText -Pattern '(?m)^\s+if:\s*\$\{\{\s*always\(\)\s
 Assert-Matches -Text $artifactText -Pattern '(?m)^\s{10}path:\s*artifacts/test-results/\*\.trx\s*$' `
     -Message 'The artifact step must upload TRX files.'
 
+$uiJobMatch = [System.Text.RegularExpressions.Regex]::Match(
+    $workflowText, '(?ms)^  ui:\s*\n(?<body>.*?)(?=^  [a-zA-Z_][a-zA-Z0-9_-]*:\s*\n|\z)')
+Assert-True -Condition $uiJobMatch.Success -Message 'The independent browser UI job is missing.'
+$uiJobText = $uiJobMatch.Groups['body'].Value
+Assert-Matches -Text $uiJobText -Pattern '(?m)^    runs-on:\s*windows-latest\s*$' `
+    -Message 'Browser UI tests must run on Windows.'
+Assert-NotMatches -Text $uiJobText -Pattern '(?m)^    (?:if|needs):' `
+    -Message 'The browser UI job must run independently on every CI event.'
+Assert-NotMatches -Text $uiJobText -Pattern '(?m)^\s+continue-on-error:' `
+    -Message 'Browser UI failures must fail CI.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^    timeout-minutes:\s*15\s*$' `
+    -Message 'The browser UI job must have a bounded timeout.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^        shell:\s*pwsh\s*$' `
+    -Message 'Browser UI commands must use PowerShell.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^        working-directory:\s*tests/ui\s*$' `
+    -Message 'Browser UI commands must run from tests/ui.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^      CI:\s*[\x27\"]true[\x27\"]\s*$' `
+    -Message 'Browser UI tests must enable CI configuration.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^        uses:\s*actions/checkout@[0-9a-f]{40}\s+#\s*v5\s*$' `
+    -Message 'The browser UI checkout action must use a pinned v5 SHA.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^          persist-credentials:\s*false\s*$' `
+    -Message 'The browser UI checkout must not persist credentials.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^        uses:\s*actions/setup-node@[0-9a-f]{40}\s+#\s*v6\s*$' `
+    -Message 'The Node.js action must use a pinned v6 SHA.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^          node-version:\s*[\x27\"]24[\x27\"]\s*$' `
+    -Message 'Browser UI tests must use Node.js 24.'
+Assert-Matches -Text $uiJobText -Pattern '(?m)^          cache-dependency-path:\s*tests/ui/package-lock\.json\s*$' `
+    -Message 'The npm cache must be keyed by the UI lockfile.'
+
+foreach ($command in @('npm ci', 'npx playwright install chromium', 'npm test')) {
+    $commandIndex = $uiJobText.IndexOf("`n          $command`n", [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($commandIndex -ge 0) -Message ("Missing browser UI command: {0}." -f $command)
+    $nextStepIndex = $uiJobText.IndexOf("`n      - name:", $commandIndex, [System.StringComparison]::Ordinal)
+    $stepText = if ($nextStepIndex -ge 0) {
+        $uiJobText.Substring($commandIndex, $nextStepIndex - $commandIndex)
+    }
+    else {
+        $uiJobText.Substring($commandIndex)
+    }
+    Assert-Matches -Text $stepText -Pattern '(?s)if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{\s*exit\s+\$LASTEXITCODE\s*\}' `
+        -Message ("The browser UI command must propagate failure: {0}." -f $command)
+}
+
+$uiArtifactMatch = [System.Text.RegularExpressions.Regex]::Match(
+    $uiJobText, '(?ms)^      - name: Upload browser UI results\s*\n.*?(?=^      - name:|\z)')
+Assert-True -Condition $uiArtifactMatch.Success -Message 'Browser UI artifacts are missing.'
+$uiArtifactText = $uiArtifactMatch.Value
+Assert-Matches -Text $uiArtifactText -Pattern '(?m)^        if:\s*\$\{\{\s*always\(\)\s*\}\}\s*$' `
+    -Message 'Browser UI artifacts must upload even when tests fail.'
+Assert-Matches -Text $uiArtifactText -Pattern '(?m)^        uses:\s*actions/upload-artifact@[0-9a-f]{40}\s+#\s*v4\.6\.2\s*$' `
+    -Message 'Browser UI artifacts must use the approved pinned upload action.'
+foreach ($artifactPath in @('tests/ui/playwright-report/', 'tests/ui/test-results/')) {
+    Assert-Matches -Text $uiArtifactText -Pattern ('(?m)^            ' + [regex]::Escape($artifactPath) + '\s*$') `
+        -Message ("Missing browser UI artifact path: {0}." -f $artifactPath)
+}
+Assert-Matches -Text $uiArtifactText -Pattern '(?m)^          retention-days:\s*7\s*$' `
+    -Message 'Browser UI artifacts must be retained for seven days.'
+
 Write-Output 'CI workflow static tests passed'

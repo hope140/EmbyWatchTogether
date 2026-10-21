@@ -5,6 +5,9 @@ module.exports = defineConfig({
   timeout: 15000,
   expect: { timeout: 5000 },
   fullyParallel: false,
+  forbidOnly: !!process.env.CI,
+  workers: process.env.CI ? 1 : undefined,
+  globalTimeout: process.env.CI ? 10 * 60 * 1000 : undefined,
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
   use: {
     baseURL: 'http://127.0.0.1:4179',

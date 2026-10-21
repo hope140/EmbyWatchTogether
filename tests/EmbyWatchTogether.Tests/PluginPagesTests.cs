@@ -21,10 +21,17 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV7");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV16");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV16");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV16");
+            Assert.Equal(4, pages.Count);
+            Assert.Single(pages, page => page.EnableInUserMenu);
+            Assert.All(pages.Where(page => !page.Name.EndsWith(".js")), page =>
+                Assert.Equal("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", page.EmbeddedResourcePath));
+            Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV7");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV7.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV16.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
@@ -51,7 +58,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherSettingsV7");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV16");
             Assert.Equal("sync", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
@@ -71,7 +78,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherSettingsV7.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV16.js\"", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", javascript);
             Assert.DoesNotContain("WatchTogetherSettingsV5", html);
@@ -144,7 +151,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("statusReasonMessages", javascript);
             Assert.Contains("server_unavailable", javascript);
             Assert.Contains("snapshot_unavailable", javascript);
-            Assert.Contains("正在同步下一集", javascript);
+            Assert.Contains("正在同步视频", javascript);
             Assert.Contains("正在让另一位参与者打开主用户当前视频", javascript);
             Assert.Contains("Recovering", javascript);
             Assert.Contains("正在等待临时掉线的参与者恢复", javascript);
@@ -199,7 +206,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("Token 状态读取失败，可尝试清除后重新配置", javascript);
             Assert.DoesNotContain("_wtPluginConfiguration.GitHubToken", javascript);
             Assert.Contains("wtRoomsHeading", html);
-            Assert.Contains(">创建房间</h2>", html);
+            Assert.Contains(">直接创建房间</h2>", html);
             Assert.DoesNotContain(">1. 创建房间</h2>", html);
             Assert.DoesNotContain("'2. 房间'", javascript);
             Assert.Contains("我的房间", javascript);
@@ -279,6 +286,39 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("result.Status !== 'created'", javascript);
             Assert.DoesNotContain("邀请码创建失败：' + errorMessage(error)", javascript);
             Assert.DoesNotContain("AdminUserId", javascript);
+            Assert.Contains("mainTabsManager.setTabs(page", javascript);
+            Assert.Contains("'configurationpage?name='", javascript);
+            Assert.DoesNotContain("#!/configurationpage?name=", javascript);
+            Assert.DoesNotContain("Dashboard.getConfigurationPageUrl", javascript);
+            Assert.Contains("wtNavigation", html);
+            Assert.Contains("wtRoomsSection", html);
+            Assert.Contains("wtHelpSection", html);
+            Assert.Contains("function mediaItemId(state)", javascript);
+            Assert.Contains("state.Eligible !== true", javascript);
+            Assert.Contains("state.RoomId !== roomId", javascript);
+            Assert.Contains("ApiClient.getItem(identity.user, itemId", javascript);
+            Assert.Contains("state.SyncItemId", javascript);
+            Assert.Contains("function pageActionAllowed(page)", javascript);
+            Assert.Contains("current.client === owner.client", javascript);
+            Assert.Contains("page._wtGeneration !== generation", javascript);
+            Assert.Contains("正在一起观看", javascript);
+            Assert.Contains("媒体信息暂不可用", javascript);
+            Assert.Contains("max-width: 1180px", html);
+            Assert.Contains("wt-settingsGrid", html);
+            Assert.Contains("wtInviteLayout", html);
+            Assert.Contains("wt-roomBackdrop", javascript);
+            Assert.Contains("ApiClient.getImageUrl(imageId", javascript);
+            Assert.Contains("url.origin === server.origin", javascript);
+            Assert.Contains("!url.username && !url.password", javascript);
+            Assert.Contains("page._wtRoomViews[room.RoomId] === view", javascript);
+            Assert.Contains("view.backdrop.removeAttribute('src')", javascript);
+            Assert.Contains("wt-participantAvatarImage", html);
+            Assert.Contains("wt-participantAvatarFallback", javascript);
+            Assert.Contains("ApiClient.getUserImageUrl(userId, { type: 'Primary', maxWidth: 96 })", javascript);
+            Assert.Contains("roomAvatarUserId(currentRoom, record.userId)", javascript);
+            Assert.Contains("record.image.removeAttribute('src')", javascript);
+            Assert.DoesNotContain("ApiClient.getUser(", javascript);
+            Assert.DoesNotContain("/Sessions", javascript);
 
             var roomsIndex = html.IndexOf("id=\"wtRooms\"", System.StringComparison.Ordinal);
             var configIndex = html.IndexOf("id=\"wtConfigSection\"", System.StringComparison.Ordinal);

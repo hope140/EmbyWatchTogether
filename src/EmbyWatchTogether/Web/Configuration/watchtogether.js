@@ -1,13 +1,12 @@
-define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 'emby-button'], function (BaseView, dom, loading) {
+define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 'emby-button', 'mainTabsManager'], function (BaseView, dom, loading, globalize, embyInput, embySelect, embyButton, mainTabsManager) {
     'use strict';
 
-    var users = [];
     var pluginId = '0f8d1c2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f';
     var stateLabels = {
         Waiting: '等待参与者',
         Barrier: '正在对齐',
         Watching: '同步中',
-        Handoff: '正在同步下一集',
+        Handoff: '正在同步视频',
         Recovering: '正在等待临时掉线的参与者恢复',
         Unavailable: '暂不可用'
     };
@@ -32,18 +31,146 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return ApiClient.getUrl(path);
     }
 
-    function apiGet(path) {
-        return ApiClient.getJSON(apiUrl(path));
+    function pageIdentity() {
+        try {
+            return {
+                user: typeof ApiClient.getCurrentUserId === 'function' ? String(ApiClient.getCurrentUserId() || '') : '',
+                server: String(ApiClient.serverAddress() || ''),
+                serverId: typeof ApiClient.serverId === 'function' ? String(ApiClient.serverId() || '') : '',
+                client: ApiClient
+            };
+        } catch (error) {
+            return null;
+        }
     }
 
-    function apiSend(path, method, body) {
-        return ApiClient.fetch({
+    function clearPageData(page) {
+        releaseNativeTabs(page);
+        clearInterval(page._wtTimer);
+        clearAllRoomFeedback(page);
+        clearTimeout(page._wtStatusTimer);
+        Object.keys(page._wtStateExpiryTimers || {}).forEach(function (roomId) {
+            clearRoomStateExpiry(page, roomId);
+        });
+        page._wtStateExpiryTimers = {};
+        page._wtStatusTimer = null;
+        page._wtUsers = [];
+        page._wtRooms = null;
+        page._wtInvitations = [];
+        page._wtInvitationsLoaded = false;
+        page._wtInvitationCode = null;
+        page._wtInvitationCopied = false;
+        page._wtPendingCreatedFeedback = null;
+        // Retired request continuations cannot reset controls in a new lifecycle.
+        ['#wtCreate', '#wtCreateInvitation', '#wtAcceptInvitation'].forEach(function (selector) {
+            setButtonBusy(page.querySelector(selector), false);
+        });
+        Object.keys(page._wtRoomViews || {}).forEach(function (roomId) {
+            clearRoomBackdrop(page._wtRoomViews[roomId]);
+            clearRoomAvatars(page._wtRoomViews[roomId]);
+        });
+        page._wtAvatarFailures = {};
+        page._wtRoomViews = {};
+        page._wtRoomStates = {};
+        page._wtRoomSequences = {};
+        page._wtMedia = {};
+        page._wtMediaFlights = {};
+        page._wtMetadataFlights = {};
+        page._wtMediaTargets = {};
+        page._wtResources = {};
+        page._wtDiagnostics = {};
+        page._wtDiagnosticPanels = {};
+        page._wtDiagnosticRequests = {};
+        page._wtDiagnosticBusy = {};
+        page._wtDiagnosticOpen = {};
+        page._wtRoomBusy = {};
+        page._wtRoomsLoading = false;
+        page._wtRoomsSignature = null;
+        page._wtIsAdmin = undefined;
+        page._wtTabsPermissionReady = false;
+        page._wtConfigReady = false;
+        page._wtPluginConfiguration = null;
+        page._wtGitHubTokenReady = false;
+        page._wtGitHubTokenCanClear = false;
+        page._wtNativeTabsKey = null;
+        clearGitHubTokenInput(page);
+        ['#wtRoomName', '#wtInvitationName', '#wtInvitationAcceptCode'].forEach(function (selector) {
+            var input = page.querySelector(selector);
+            if (input) input.value = '';
+        });
+        ['#wtUserA', '#wtUserB', '#wtPrimary', '#wtRooms', '#wtInvitations'].forEach(function (selector) {
+            clearChildren(page.querySelector(selector));
+        });
+        renderInvitationCode(page);
+        setAdminVisibility(page, false);
+        setConfigBusy(page, true);
+        setGitHubTokenBusy(page, true, 'read');
+    }
+
+    function pageActionAllowed(page) {
+        if (!page._wtActive) return false;
+        var current = pageIdentity();
+        var owner = page._wtIdentity;
+        if (current && owner && current.user && current.user.toLowerCase() === owner.user.toLowerCase() &&
+            current.server === owner.server && current.serverId === owner.serverId && current.client === owner.client) return true;
+        page._wtActive = false;
+        page._wtGeneration += 1;
+        clearPageData(page);
+        loading.hide();
+        setStatus(page, '账号或服务器已变化，请重新打开一起看。', true);
+        return false;
+    }
+
+    // Guard every continuation, including catch/finally and chained mutations.
+    // A retired generation never completes into the next page lifecycle.
+    function scopedPromise(page, promise, generation) {
+        generation = generation === undefined ? page._wtGeneration : generation;
+        function guard(callback) {
+            return function (value) {
+                if (!pageActionAllowed(page) || page._wtGeneration !== generation) return new Promise(function () {});
+                return callback(value);
+            };
+        }
+        return {
+            then: function (fulfilled, rejected) {
+                return scopedPromise(page, Promise.resolve(promise).then(
+                    guard(typeof fulfilled === 'function' ? fulfilled : function (value) { return value; }),
+                    guard(typeof rejected === 'function' ? rejected : function (error) { throw error; })), generation);
+            },
+            catch: function (rejected) { return this.then(null, rejected); },
+            finally: function (callback) {
+                return this.then(function (value) { callback(); return value; }, function (error) { callback(); throw error; });
+            }
+        };
+    }
+
+    function pageRequest(page, key, request) {
+        if (!pageActionAllowed(page)) return scopedPromise(page, new Promise(function () {}));
+        var resources = page._wtResources;
+        if (resources[key]) return resources[key];
+        var generation = page._wtGeneration;
+        var promise = Promise.resolve().then(function () {
+            if (!pageActionAllowed(page) || page._wtGeneration !== generation) return new Promise(function () {});
+            return request();
+        });
+        resources[key] = scopedPromise(page, promise, generation);
+        function release() { delete resources[key]; }
+        promise.then(release, release);
+        return resources[key];
+    }
+
+    function apiGet(page, path) {
+        return pageRequest(page, 'GET:' + path, function () { return ApiClient.getJSON(apiUrl(path)); });
+    }
+
+    function apiSend(page, path, method, body) {
+        return pageRequest(page, method + ':' + path, function () { return ApiClient.fetch({
             url: apiUrl(path),
             type: method,
             data: body === undefined ? null : JSON.stringify(body),
             contentType: 'application/json',
             dataType: 'json'
-        });
+        }); });
     }
 
     function errorMessage(error) {
@@ -64,7 +191,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         Waiting: '等待参与者',
         Barrier: '正在对齐',
         Watching: '同步中',
-        Handoff: '正在同步下一集',
+        Handoff: '正在同步视频',
         Recovering: '临时掉线恢复中',
         Unavailable: '暂不可用'
     };
@@ -404,6 +531,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         exportButton.type = 'button';
         exportButton.setAttribute('is', 'emby-button');
         exportButton.classList.add('raised', 'raised-outline');
+        exportButton.dataset.action = 'exportDiagnostics';
         exportButton.textContent = '导出诊断 JSON';
         exportButton.addEventListener('click', function () {
             exportDiagnostic(page, roomId);
@@ -569,6 +697,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function createDiagnosticPanel(page, room) {
+        var generation = page._wtGeneration;
         page._wtDiagnosticPanels = page._wtDiagnosticPanels || {};
         page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
         var details = document.createElement('details');
@@ -580,7 +709,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         body.className = 'wt-diagnosticBody';
         details.appendChild(body);
         details.addEventListener('toggle', function () {
+            var current = page._wtDiagnosticPanels && page._wtDiagnosticPanels[room.RoomId];
+            if (!pageActionAllowed(page) || page._wtGeneration !== generation || !current || current.details !== details) return;
             page._wtDiagnosticOpen[room.RoomId] = details.open;
+            details.hidden = !details.open;
+            if (details.open && !page._wtDiagnostics[room.RoomId]) loadRoomDiagnostics(page, room.RoomId);
         });
         page._wtDiagnosticPanels[room.RoomId] = { details: details, body: body };
         var diagnostic = page._wtDiagnostics && page._wtDiagnostics[room.RoomId];
@@ -588,10 +721,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             renderDiagnosticDetails(page, room.RoomId, diagnostic, body);
         }
         details.open = page._wtDiagnosticOpen[room.RoomId] === true;
+        details.hidden = !details.open;
         return details;
     }
 
     function loadRoomDiagnostics(page, roomId, button) {
+        if (!pageActionAllowed(page)) return;
         var panel = page._wtDiagnosticPanels && page._wtDiagnosticPanels[roomId];
         if (!panel || (page._wtDiagnosticBusy && page._wtDiagnosticBusy[roomId])) return;
         page._wtDiagnosticBusy = page._wtDiagnosticBusy || {};
@@ -599,6 +734,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var requestToken = String(Date.now()) + ':' + String(Math.random());
         page._wtDiagnosticRequests[roomId] = requestToken;
         page._wtDiagnosticBusy[roomId] = true;
+        panel.details.hidden = false;
         panel.details.open = true;
         clearChildren(panel.body);
         var loadingText = document.createElement('p');
@@ -606,7 +742,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         loadingText.textContent = '正在读取诊断…';
         panel.body.appendChild(loadingText);
         setButtonBusy(button, true, '读取中…');
-        return apiGet('WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Diagnostics').then(function (raw) {
+        return apiGet(page, 'WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Diagnostics').then(function (raw) {
             var diagnostic = sanitizeDiagnostic(raw);
             if (!diagnostic) {
                 throw { name: 'InvalidDiagnostic' };
@@ -621,6 +757,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             page._wtDiagnosticOpen[roomId] = true;
             var currentPanel = page._wtDiagnosticPanels[roomId];
             renderDiagnosticDetails(page, roomId, diagnostic, currentPanel.body);
+            currentPanel.details.hidden = false;
             currentPanel.details.open = true;
         }).catch(function (error) {
             if (page._wtDiagnosticRequests[roomId] !== requestToken ||
@@ -634,6 +771,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             errorText.setAttribute('role', 'alert');
             errorText.textContent = diagnosticErrorMessage(error);
             currentPanel.body.appendChild(errorText);
+            currentPanel.details.hidden = false;
             currentPanel.details.open = true;
         }).finally(function () {
             if (page._wtDiagnosticRequests[roomId] === requestToken) {
@@ -644,6 +782,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function exportDiagnostic(page, roomId) {
+        if (!pageActionAllowed(page)) return;
         var diagnostic = page._wtDiagnostics && page._wtDiagnostics[roomId];
         if (!diagnostic || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
             setTransientStatus(page, '当前浏览器不支持导出诊断 JSON。', true);
@@ -769,7 +908,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function loadInvitations(page) {
-        return apiGet('WatchTogether/Invitations').then(function (list) {
+        return apiGet(page, 'WatchTogether/Invitations').then(function (list) {
             page._wtInvitations = Array.isArray(list) ? list : [];
             page._wtInvitationsLoaded = true;
             renderInvitations(page, page._wtInvitations);
@@ -785,12 +924,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function createInvitation(page) {
+        if (!pageActionAllowed(page)) return;
         var input = page.querySelector('#wtInvitationName');
         var button = page.querySelector('#wtCreateInvitation');
         var name = input ? input.value.trim() : '';
         setButtonBusy(button, true, '创建中…');
         setInvitationStatus(page, '正在创建邀请码…', false);
-        apiSend('WatchTogether/Invitations', 'POST', { Name: name || null }).then(function (result) {
+        apiSend(page, 'WatchTogether/Invitations', 'POST', { Name: name || null }).then(function (result) {
             result = result || {};
             if (result.Status === 'creator_already_in_room') {
                 setInvitationStatus(page, '你已属于一个房间，请先结束当前房间后再创建邀请码。', true);
@@ -824,6 +964,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function copyInvitationCode(page, button) {
+        if (!pageActionAllowed(page)) return;
         var value = page._wtInvitationCode && page._wtInvitationCode.code;
         if (!value) {
             setInvitationStatus(page, '当前没有可复制的邀请码。', true);
@@ -832,7 +973,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var copied = window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText
             ? window.navigator.clipboard.writeText(value)
             : Promise.reject(new Error('clipboard_unavailable'));
-        copied.then(function () {
+        scopedPromise(page, copied).then(function () {
             page._wtInvitationCopied = true;
             renderInvitationCode(page);
             setInvitationStatus(page, '邀请码已复制。', false);
@@ -846,11 +987,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function revokeInvitation(page, invitation, button) {
+        if (!pageActionAllowed(page)) return;
         if (!invitation || !invitation.InvitationId) {
             return;
         }
         setButtonBusy(button, true, '撤销中…');
-        apiSend('WatchTogether/Invitations/' + encodeURIComponent(invitation.InvitationId), 'DELETE').then(function () {
+        apiSend(page, 'WatchTogether/Invitations/' + encodeURIComponent(invitation.InvitationId), 'DELETE').then(function () {
             setInvitationStatus(page, '邀请码已撤销。', false);
             return loadInvitations(page);
         }).catch(function (error) {
@@ -871,6 +1013,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function acceptInvitation(page) {
+        if (!pageActionAllowed(page)) return;
         var input = page.querySelector('#wtInvitationAcceptCode');
         var button = page.querySelector('#wtAcceptInvitation');
         var code = input ? input.value.trim() : '';
@@ -883,7 +1026,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
         setButtonBusy(button, true, '接受中…');
         setInvitationStatus(page, '正在接受邀请…', false);
-        apiSend('WatchTogether/Invitations/' + encodeURIComponent(code) + '/Accept', 'POST').then(function (result) {
+        apiSend(page, 'WatchTogether/Invitations/' + encodeURIComponent(code) + '/Accept', 'POST').then(function (result) {
             result = result || {};
             setInvitationStatus(page, invitationAcceptMessage(result.Status), result.Status !== 'accepted');
             if (result.Status === 'accepted') {
@@ -949,7 +1092,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         clearGitHubTokenInput(page);
         setGitHubTokenStatus(page, '正在读取 Token 状态…');
         setGitHubTokenBusy(page, true, 'read');
-        return apiGet('WatchTogether/GitHubToken').then(function (result) {
+        return apiGet(page, 'WatchTogether/GitHubToken').then(function (result) {
             page._wtGitHubTokenReady = true;
             page._wtGitHubTokenCanClear = true;
             setGitHubTokenStatus(page, result && result.Configured ? 'Token 已配置。' : '尚未配置 Token。');
@@ -965,6 +1108,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function saveGitHubToken(page) {
+        if (!pageActionAllowed(page)) return;
+        if (page._wtIsAdmin !== true) return;
         var input = page.querySelector('#wtGitHubToken');
         var value = input ? String(input.value || '').trim() : '';
         if (!value) {
@@ -977,7 +1122,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
         setGitHubTokenBusy(page, true, 'save');
         setGitHubTokenStatus(page, '正在保存 Token…');
-        return apiSend('WatchTogether/GitHubToken', 'POST', { Token: value }).then(function (result) {
+        return apiSend(page, 'WatchTogether/GitHubToken', 'POST', { Token: value }).then(function (result) {
             clearGitHubTokenInput(page);
             setGitHubTokenStatus(page, result && result.Configured ? 'Token 已保存。' : 'Token 未配置。');
         }).catch(function (error) {
@@ -990,13 +1135,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function clearGitHubToken(page) {
+        if (!pageActionAllowed(page)) return;
+        if (page._wtIsAdmin !== true) return;
         if (!window.confirm('清除 GitHub Token 后，beta 更新查询将恢复使用匿名 API，确认清除吗？')) {
             return;
         }
 
         setGitHubTokenBusy(page, true, 'clear');
         setGitHubTokenStatus(page, '正在清除 Token…');
-        return apiSend('WatchTogether/GitHubToken', 'DELETE').then(function (result) {
+        return apiSend(page, 'WatchTogether/GitHubToken', 'DELETE').then(function (result) {
             clearGitHubTokenInput(page);
             if (result && result.Configured === false) {
                 page._wtGitHubTokenReady = true;
@@ -1015,6 +1162,106 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function isPermissionError(error) {
         return !!(error && (error.status === 401 || error.status === 403 ||
             error.statusCode === 401 || error.statusCode === 403));
+    }
+
+    var routePageNames = {
+        rooms: 'WatchTogetherRoomsV16',
+        invite: 'WatchTogetherInviteV16',
+        settings: 'WatchTogetherSettingsV16'
+    };
+
+    function currentRoute(page) {
+        var href = String((page.ownerDocument.defaultView || window).location.href || '');
+        if (href.indexOf(routePageNames.settings) >= 0) return 'settings';
+        if (href.indexOf(routePageNames.invite) >= 0) return 'invite';
+        return 'rooms';
+    }
+
+    function configurationPageUrl(page, name) {
+        // Match pluginManager's relative href. emby-linkbutton routes the anchor
+        // pathname; a hash href incorrectly includes index.html in that route.
+        var identity = page._wtIdentity || pageIdentity();
+        var href = 'configurationpage?name=' + encodeURIComponent(name);
+        if (identity && identity.user) href += '&userId=' + encodeURIComponent(identity.user);
+        if (identity && identity.serverId) href += '&serverId=' + encodeURIComponent(identity.serverId);
+        return href;
+    }
+
+    function nativeTabs(page) {
+        var tabs = [
+            { href: configurationPageUrl(page, routePageNames.rooms), name: '房间' },
+            { href: configurationPageUrl(page, routePageNames.invite), name: page._wtIsAdmin === true ? '创建与邀请' : '邀请' }
+        ];
+        if (page._wtIsAdmin === true) tabs.push({ href: configurationPageUrl(page, routePageNames.settings), name: '设置' });
+        return tabs;
+    }
+
+    function ownsNativeTabs(page) {
+        return !!(page._wtNativeTabsElement && mainTabsManager &&
+            typeof mainTabsManager.getTabsElement === 'function' &&
+            mainTabsManager.getTabsElement() === page._wtNativeTabsElement);
+    }
+
+    function releaseNativeTabs(page) {
+        try {
+            // The host replaces the actual tabs element when another view owns it.
+            // Never clear a newer owner's tabs from this view's pause or reset.
+            if (ownsNativeTabs(page)) mainTabsManager.setTabs(null);
+        } catch (error) {
+            // A missing host header still has the route-link fallback.
+        }
+        page._wtNativeTabsElement = null;
+        page._wtNativeTabsKey = null;
+    }
+
+    function applyRoute(page) {
+        var route = page._wtRoute || 'rooms';
+        if (route === 'settings' && page._wtIsAdmin !== true) route = 'rooms';
+        page._wtVisibleRoute = route;
+        page.classList.toggle('wt-page--rooms', route === 'rooms');
+        var inviteLayout = page.querySelector('#wtInviteLayout');
+        inviteLayout.hidden = route !== 'invite';
+        inviteLayout.classList.toggle('wt-pageColumns--single', page._wtIsAdmin !== true);
+        page.querySelector('#wtInviteHeading').textContent = page._wtIsAdmin === true ? '创建与邀请' : '邀请';
+        page.querySelector('#wtRoomsSection').hidden = route !== 'rooms';
+        page.querySelector('#wtHelpSection').hidden = route !== 'rooms';
+        page.querySelector('#wtInvitationSection').hidden = route !== 'invite';
+        page.querySelector('#wtAdminSection').hidden = route !== 'invite' || page._wtIsAdmin !== true;
+        page.querySelector('#wtSettingsSection').hidden = route !== 'settings' || page._wtIsAdmin !== true;
+        var fallback = page.querySelector('#wtNavigation');
+        if (!fallback) return;
+        clearChildren(fallback);
+        var tabs = nativeTabs(page);
+        tabs.forEach(function (tab) {
+            var link = document.createElement('a');
+            link.href = tab.href;
+            link.textContent = tab.name;
+            if (tab.href.indexOf(routePageNames[route]) >= 0) link.setAttribute('aria-current', 'page');
+            fallback.appendChild(link);
+        });
+        fallback.hidden = false;
+        var key = route + ':' + String(page._wtIsAdmin);
+        fallback.hidden = page._wtNativeTabsKey === key && ownsNativeTabs(page);
+        if (!page._wtActive || !page._wtTabsPermissionReady || fallback.hidden) return;
+        if (mainTabsManager && typeof mainTabsManager.setTabs === 'function') {
+            try {
+                // setTabs with the same owner only selects a tab. Rebuild our
+                // own element when the resolved permission changes the list.
+                releaseNativeTabs(page);
+                var selected = route === 'invite' ? 1 : route === 'settings' ? 2 : 0;
+                var result = mainTabsManager.setTabs(page, selected, function () { return nativeTabs(page); });
+                if (result && result.replaced === false && typeof mainTabsManager.selectedTabIndex === 'function') {
+                    mainTabsManager.selectedTabIndex(selected);
+                }
+                page._wtNativeTabsKey = key;
+                page._wtNativeTabsElement = typeof mainTabsManager.getTabsElement === 'function'
+                    ? mainTabsManager.getTabsElement() : null;
+                // Without a host header the route links keep all permitted pages reachable.
+                fallback.hidden = ownsNativeTabs(page);
+            } catch (error) {
+                fallback.hidden = false;
+            }
+        }
     }
 
     function setAdminVisibility(page, isAdmin) {
@@ -1044,6 +1291,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             '播放、暂停和进度会自动同步。',
             '需要重新对齐时，点击“请求重新同步”。'
         ];
+        applyRoute(page);
         helpSteps.forEach(function (step, index) {
             if (step) {
                 step.textContent = helpText[index];
@@ -1114,9 +1362,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function loadPluginConfiguration(page) {
         setConfigStatus(page, '正在读取配置…');
         setConfigBusy(page, true);
-        return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+        return pageRequest(page, 'config:read', function () { return ApiClient.getPluginConfiguration(pluginId); }).then(function (config) {
             applyPluginConfiguration(page, config);
-            setAdminVisibility(page, true);
             setConfigStatus(page, '配置已读取');
             return loadGitHubTokenStatus(page).then(function () {
                 return config;
@@ -1158,6 +1405,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function savePluginConfiguration(page) {
+        if (!pageActionAllowed(page)) return;
+        if (page._wtIsAdmin !== true) return;
         var pauseCheckbox = page.querySelector('#wtPauseOtherOnPlaybackStop');
         var notifyCheckbox = page.querySelector('#wtNotifyOtherOnPlaybackStop');
         var syncNotifyCheckbox = page.querySelector('#wtNotifyOnSyncActions');
@@ -1168,15 +1417,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
         setConfigBusy(page, true);
         setConfigStatus(page, '正在保存配置…');
-        return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+        return pageRequest(page, 'config:read', function () { return ApiClient.getPluginConfiguration(pluginId); }).then(function (config) {
             config = config || {};
             config.PauseOtherOnPlaybackStop = pauseCheckbox.checked;
             config.NotifyOtherOnPlaybackStop = notifyCheckbox.checked;
             config.NotifyOnSyncActions = syncNotifyCheckbox.checked;
             config.UpdateChannel = updateChannel.value === 'beta' ? 'beta' : 'stable';
-            return ApiClient.updatePluginConfiguration(pluginId, config);
+            return pageRequest(page, 'config:save', function () { return ApiClient.updatePluginConfiguration(pluginId, config); });
         }).then(function () {
-            return ApiClient.getPluginConfiguration(pluginId);
+            return pageRequest(page, 'config:read', function () { return ApiClient.getPluginConfiguration(pluginId); });
         }).then(function (config) {
             applyPluginConfiguration(page, config);
             setConfigStatus(page,
@@ -1194,7 +1443,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function loadPluginInfo(page) {
-        return apiGet('WatchTogether/Info').then(function (info) {
+        return apiGet(page, 'WatchTogether/Info').then(function (info) {
             info = info || {};
             var version = page.querySelector('#wtPluginVersion');
             if (version) {
@@ -1212,14 +1461,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         });
     }
 
-    function findUser(id) {
-        return users.filter(function (user) {
+    function findUser(page, id) {
+        return page._wtUsers.filter(function (user) {
             return user.Id === id;
         })[0] || null;
     }
 
-    function userName(id) {
-        var user = findUser(id);
+    function userName(page, id) {
+        var user = findUser(page, id);
         return user ? user.Name : (id || '未知用户');
     }
 
@@ -1235,12 +1484,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         })[0] || null;
     }
 
-    function roomUserName(room, id) {
+    function roomUserName(page, room, id) {
         var participant = roomParticipant(room, id);
         if (participant && participant.Name) {
             return participant.Name;
         }
-        var user = findUser(id);
+        var user = findUser(page, id);
         return user && user.Name ? user.Name : '未知用户';
     }
 
@@ -1267,8 +1516,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return null;
     }
 
-    function conflictMessage(conflict) {
-        return '用户“' + userName(conflict.userId) + '”已在房间“' + roomName(conflict.room) +
+    function conflictMessage(page, conflict) {
+        return '用户“' + userName(page, conflict.userId) + '”已在房间“' + roomName(conflict.room) +
             '”中，请先退出或删除原房间，或者选择其他用户。';
     }
 
@@ -1277,20 +1526,27 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return;
         }
 
-        clearChildren(select);
-        options.forEach(function (user) {
-            var opt = document.createElement('option');
-            opt.value = user.Id;
-            opt.textContent = user.Name;
-            select.appendChild(opt);
+        var unchanged = select.options.length === options.length && options.every(function (user, index) {
+            var option = select.options[index];
+            return option.value === user.Id && option.textContent === user.Name;
         });
+        // Polls and name edits must not replace options under an open native menu.
+        if (!unchanged) {
+            clearChildren(select);
+            options.forEach(function (user) {
+                var opt = document.createElement('option');
+                opt.value = user.Id;
+                opt.textContent = user.Name;
+                select.appendChild(opt);
+            });
+        }
 
         var selectedExists = options.some(function (user) {
             return user.Id === selected;
         });
-        if (selectedExists) {
+        if (selectedExists && select.value !== selected) {
             select.value = selected;
-        } else if (options.length > 0) {
+        } else if (!selectedExists && options.length > 0 && select.selectedIndex !== 0) {
             select.selectedIndex = 0;
         }
     }
@@ -1308,7 +1564,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
         });
 
-        fillSelect(primary, ids.map(findUser).filter(function (user) {
+        fillSelect(primary, ids.map(function (id) { return findUser(page, id); }).filter(function (user) {
             return !!user;
         }), selectedPrimary);
     }
@@ -1328,7 +1584,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
         var hint;
         var isError = false;
-        if (users.length < 2) {
+        if (page._wtUsers.length < 2) {
             hint = '至少需要两名用户才能创建房间。';
             isError = true;
         } else if (!name) {
@@ -1343,7 +1599,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         } else {
             var conflict = findRoomConflict(page, [a, b]);
             if (conflict) {
-                hint = conflictMessage(conflict);
+                hint = conflictMessage(page, conflict);
                 isError = true;
             }
         }
@@ -1363,25 +1619,27 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function loadUsers(page) {
-        return apiGet('WatchTogether/Users').then(function (list) {
+        return apiGet(page, 'WatchTogether/Users').then(function (list) {
             page._wtIsAdmin = true;
+            page._wtTabsPermissionReady = true;
             setAdminVisibility(page, true);
-            users = Array.isArray(list) ? list : [];
+            page._wtUsers = Array.isArray(list) ? list : [];
             page._wtRooms = null;
-            fillSelect(page.querySelector('#wtUserA'), users, users.length > 0 ? users[0].Id : null);
-            fillSelect(page.querySelector('#wtUserB'), users, users.length > 1 ? users[1].Id : null);
+            fillSelect(page.querySelector('#wtUserA'), page._wtUsers, page._wtUsers.length > 0 ? page._wtUsers[0].Id : null);
+            fillSelect(page.querySelector('#wtUserB'), page._wtUsers, page._wtUsers.length > 1 ? page._wtUsers[1].Id : null);
             syncForm(page);
         }).catch(function (err) {
             page._wtIsAdmin = isPermissionError(err) ? false : undefined;
+            page._wtTabsPermissionReady = true;
             page._wtRooms = null;
-            users = [];
+            page._wtUsers = [];
             fillSelect(page.querySelector('#wtUserA'), [], null);
             fillSelect(page.querySelector('#wtUserB'), [], null);
             syncForm(page);
+            setAdminVisibility(page, false);
             if (isPermissionError(err)) {
-                setAdminVisibility(page, false);
                 setFormHint(page, '只有管理员可以创建房间。', true);
-                setStatus(page, '当前账号没有管理员权限，已隐藏管理设置。', true);
+                setStatus(page, '');
             } else {
                 setFormHint(page, '用户列表暂时无法加载，请稍后重试。', true);
                 setStatus(page, '用户列表加载失败：' + errorMessage(err), true);
@@ -1409,6 +1667,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         watching: '两位参与者已连接，播放会自动同步。',
         remote_control_unavailable: '当前客户端不支持远程控制，请更换或更新客户端。',
         media_mismatch: '两位参与者的媒体信息不一致，请打开同一视频。',
+        media_handoff: '正在让另一位参与者打开主用户当前视频，请稍候。',
         unsupported_playback_rate: '播放速度不是 1 倍，请恢复正常速度后重试。',
         waiting_for_playback: '等待双方打开同一视频并开始播放。',
         transient_recovery: '正在等待临时掉线的参与者恢复。'
@@ -1429,6 +1688,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         page._wtRoomFeedback[roomId] = { text: text, isError: !!isError, token: token };
         if (!isError && !persistent) {
             page._wtRoomFeedbackTimers[roomId] = setTimeout(function () {
+                if (!pageActionAllowed(page)) return;
                 if (page._wtRoomFeedback[roomId] && page._wtRoomFeedback[roomId].token === token) {
                     delete page._wtRoomFeedback[roomId];
                     renderRooms(page, page._wtRooms || []);
@@ -1461,6 +1721,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function setTransientStatus(page, text, isError) {
         setStatus(page, text, isError);
         page._wtStatusTimer = setTimeout(function () {
+            if (!pageActionAllowed(page)) return;
             page._wtStatusTimer = null;
             var el = page.querySelector('#wtStatus');
             if (el) {
@@ -1542,18 +1803,388 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         });
     }
 
+    function idKey(value) { return value === null || value === undefined ? '' : String(value).toLowerCase(); }
+
+    function mediaItemId(state) {
+        if (!state || state.Eligible !== true ||
+            !((state.State === 'Watching' && state.StatusReason === 'watching') ||
+                (state.State === 'Barrier' && state.StatusReason === 'aligning'))) return null;
+        var members = Array.isArray(state.ParticipantUserIds) ? state.ParticipantUserIds.map(idKey) : null;
+        var joined = Array.isArray(state.JoinedParticipantUserIds) ? state.JoinedParticipantUserIds.map(idKey) : null;
+        var sessions = state.Sessions;
+        if (!Array.isArray(members) || members.length !== 2 || !members[0] || !members[1] || members[0] === members[1] ||
+            members.indexOf(idKey(state.PrimaryUserId)) < 0 || !Array.isArray(joined) || joined.length !== 2 ||
+            joined[0] === joined[1] || !members.every(function (id) { return joined.indexOf(id) >= 0; }) ||
+            !Array.isArray(sessions) || sessions.length !== 2 || !state.SyncItemId) return null;
+        if (!members.every(function (id) {
+            return sessions.filter(function (session) {
+                return session && idKey(session.UserId) === id && session.Online === true &&
+                    session.ItemId && idKey(session.ItemId) === idKey(state.SyncItemId);
+            }).length === 1;
+        })) return null;
+        return String(state.SyncItemId);
+    }
+
+    function mediaTitle(item) {
+        function index(value) { return typeof value === 'number' && isFinite(value) && value >= 0 && Math.floor(value) === value; }
+        function name(value) { return typeof value === 'string' ? value.trim() : ''; }
+        var title = name(item.Name);
+        if (item.Type !== 'Episode') return title;
+        title = name(item.SeriesName) || title;
+        var parts = [];
+        if (title) parts.push(title);
+        if (index(item.ParentIndexNumber)) parts.push(item.ParentIndexNumber === 0 ? '特别篇' : '第 ' + item.ParentIndexNumber + ' 季');
+        if (index(item.IndexNumber)) parts.push('第 ' + item.IndexNumber + ' 集');
+        return title ? parts.join(' · ') : '';
+    }
+
+    function roomPresentation(page, room) {
+        var entry = page._wtRoomStates[room.RoomId];
+        var state = entry && entry.state;
+        if (!state) return { label: entry && entry.failed ? '状态暂不可用' : '正在读取状态', description: entry && entry.expired ? '播放状态已过期，正在等待重新读取。' : entry && entry.failed ? '状态读取失败，请刷新后重试。' : '正在读取当前播放状态…', className: 'unavailable' };
+        var info = getStateInfo(state.State);
+        info.description = statusReasonMessage(state.StatusReason);
+        if (state.StatusReason === 'different_video' || state.StatusReason === 'media_mismatch') info.label = '视频不一致';
+        else if (state.StatusReason === 'transient_recovery' || state.State === 'Recovering') info.label = '等待连接恢复';
+        else if (state.StatusReason === 'member_left') info.label = '等待参与者';
+        else if (['snapshot_unavailable', 'snapshot_stale', 'server_unavailable'].indexOf(state.StatusReason) >= 0) info.label = '状态暂不可用';
+        else if (state.State === 'Waiting') info.label = '等待播放';
+        else if (state.State === 'Unavailable') info.label = '状态暂不可用';
+        return info;
+    }
+
+    function safeImagePart(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value); }
+
+    function sameServerImageUrl(page, raw) {
+        if (typeof raw !== 'string' || !raw.trim()) return null;
+        try {
+            var server = new URL(page._wtIdentity.server);
+            var url = new URL(raw, server.href);
+            return (url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password &&
+                url.origin === server.origin ? url.href : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function roomBackdropUrl(page, item) {
+        if (typeof ApiClient.getImageUrl !== 'function') return null;
+        var imageId = item.Id;
+        var tag = Array.isArray(item.BackdropImageTags) ? item.BackdropImageTags[0] : null;
+        if (!safeImagePart(imageId) || !safeImagePart(tag)) {
+            imageId = item.ParentBackdropItemId;
+            tag = Array.isArray(item.ParentBackdropImageTags) ? item.ParentBackdropImageTags[0] : null;
+        }
+        if (!safeImagePart(imageId) || !safeImagePart(tag)) return null;
+        try {
+            var raw = ApiClient.getImageUrl(imageId, { type: 'Backdrop', index: 0, tag: tag, maxWidth: 1280 });
+            return sameServerImageUrl(page, raw);
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function roomAvatarUserId(room, userId) {
+        if (!safeImagePart(userId) || !room || !Array.isArray(room.ParticipantUserIds) ||
+            room.ParticipantUserIds.length !== 2 || idKey(room.ParticipantUserIds[0]) === idKey(room.ParticipantUserIds[1]) ||
+            !room.ParticipantUserIds.some(function (id) { return idKey(id) === idKey(userId); })) return null;
+        var participant = roomParticipant(room, userId);
+        return participant && safeImagePart(participant.Id) ? participant.Id : null;
+    }
+
+    function roomAvatarUrl(page, room, userId) {
+        if (typeof ApiClient.getUserImageUrl !== 'function') return null;
+        userId = roomAvatarUserId(room, userId);
+        if (!userId) return null;
+        try {
+            return sameServerImageUrl(page, ApiClient.getUserImageUrl(userId, { type: 'Primary', maxWidth: 96 }));
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function clearRoomAvatars(view) {
+        (view && view.avatars || []).forEach(function (record) {
+            record.image.onload = null;
+            record.image.onerror = null;
+            record.image.removeAttribute('src');
+            record.image.hidden = true;
+            record.fallback.hidden = false;
+            record.url = null;
+        });
+    }
+
+    function startRoomAvatars(page, room, view) {
+        var generation = page._wtGeneration;
+        function currentMember(record) {
+            if (!pageActionAllowed(page) || page._wtGeneration !== generation ||
+                page._wtRoomViews[room.RoomId] !== view || view.avatars.indexOf(record) < 0 ||
+                record.image.parentNode !== record.element || !page.contains(record.element)) return false;
+            var currentRoom = (page._wtRooms || []).filter(function (value) { return value.RoomId === room.RoomId; })[0];
+            return !!(roomAvatarUserId(room, record.userId) && roomAvatarUserId(currentRoom, record.userId));
+        }
+        view.avatars.forEach(function (record) {
+            if (!currentMember(record)) return;
+            var url = roomAvatarUrl(page, room, record.userId);
+            if (!url || record.url === url) return;
+            var failureKey = JSON.stringify([room.RoomId, idKey(record.userId), url]);
+            if (page._wtAvatarFailures[failureKey]) return;
+            record.url = url;
+            function current() {
+                return currentMember(record) && record.url === url && record.image.getAttribute('src') === url;
+            }
+            record.image.onload = function () {
+                if (!current()) return;
+                record.image.hidden = false;
+                record.fallback.hidden = true;
+            };
+            record.image.onerror = function () {
+                if (!current()) return;
+                // Failures are suppressed only for this page generation.
+                page._wtAvatarFailures[failureKey] = true;
+                record.image.hidden = true;
+                record.image.removeAttribute('src');
+                record.fallback.hidden = false;
+            };
+            record.image.src = url;
+        });
+    }
+
+    function clearRoomBackdrop(view) {
+        if (!view || !view.backdrop) return;
+        view.backdrop.onload = null;
+        view.backdrop.onerror = null;
+        view.backdrop.removeAttribute('src');
+        view.backdrop.hidden = true;
+        view.presentation.classList.remove('wt-roomPresentation--image');
+        view.backdropUrl = null;
+        view.backdropTarget = null;
+    }
+
+    function updateRoomBackdrop(page, room, view, media) {
+        var url = media && media.title && media.backdropUrl;
+        var target = page._wtMediaTargets[room.RoomId];
+        if (!url || !target) {
+            clearRoomBackdrop(view);
+            return;
+        }
+        // Rechecking metadata must not reload an unchanged image every poll.
+        if (view.backdropUrl === url && view.backdropTarget === target) return;
+        clearRoomBackdrop(view);
+        view.backdropUrl = url;
+        view.backdropTarget = target;
+        var generation = page._wtGeneration;
+        function current() {
+            var currentMedia = page._wtMedia[room.RoomId];
+            var currentState = page._wtRoomStates[room.RoomId];
+            return pageActionAllowed(page) && page._wtGeneration === generation &&
+                page._wtRoomViews[room.RoomId] === view && page._wtMediaTargets[room.RoomId] === target &&
+                currentState && idKey(mediaItemId(currentState.state)) === idKey(media.itemId) &&
+                currentMedia && currentMedia.backdropUrl === url && view.backdrop.getAttribute('src') === url;
+        }
+        view.backdrop.onload = function () {
+            if (!current()) return;
+            view.backdrop.hidden = false;
+            view.presentation.classList.add('wt-roomPresentation--image');
+        };
+        view.backdrop.onerror = function () {
+            if (!current()) return;
+            view.backdrop.hidden = true;
+            view.backdrop.removeAttribute('src');
+            view.presentation.classList.remove('wt-roomPresentation--image');
+            // Keep this target/url marked attempted until either changes.
+        };
+        view.backdrop.src = url;
+    }
+
+    function waitingDecoration() {
+        var ns = 'http://www.w3.org/2000/svg';
+        var svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('viewBox', '0 0 240 160');
+        svg.setAttribute('class', 'wt-waitingDecoration');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+        var paths = [
+            'M40 16h160v82H40z M52 103h136 M120 99v12',
+            'M51 112q0-12 12-12h24q12 0 12 12v31H51z M46 123v20h58v-20 M58 144v8 M93 144v8',
+            'M141 112q0-12 12-12h24q12 0 12 12v31h-48z M136 123v20h58v-20 M148 144v8 M183 144v8',
+            'M16 55h9 M20 36l7 6 M20 74l7-6 M215 55h9 M213 42l7-6 M213 68l7 6'
+        ];
+        paths.forEach(function (d) {
+            var path = document.createElementNS(ns, 'path');
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', 'currentColor');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-linecap', 'round');
+            path.setAttribute('stroke-linejoin', 'round');
+            svg.appendChild(path);
+        });
+        return svg;
+    }
+
+    function updateRoomPresentation(page, room) {
+        var view = page._wtRoomViews[room.RoomId];
+        if (!view) return;
+        var info = roomPresentation(page, room);
+        view.state.textContent = info.label;
+        view.state.title = info.description;
+        view.state.className = 'wt-roomState wt-roomState-' + info.className;
+        view.description.textContent = info.description;
+        var media = page._wtMedia[room.RoomId];
+        var state = page._wtRoomStates[room.RoomId];
+        var prefix = state && state.state && state.state.State === 'Barrier' ? '正在同步\n' : '正在一起观看\n';
+        var hasTitle = !!(media && media.title);
+        view.presentation.classList.toggle('wt-roomPresentation--media', hasTitle);
+        view.waiting.hidden = hasTitle;
+        view.waitingTitle.textContent = info.label === '等待播放' ? '等待双方打开视频' : info.label;
+        view.waitingTitle.hidden = hasTitle;
+        view.mediaLabel.textContent = hasTitle ? prefix : media && media.unavailable ? '媒体信息暂不可用' : '';
+        view.mediaTitle.textContent = hasTitle ? media.heading || media.title : '';
+        view.mediaDetail.textContent = hasTitle ? media.detail || '' : '';
+        view.mediaDetail.hidden = !view.mediaDetail.textContent;
+        view.description.hidden = hasTitle;
+        view.media.hidden = !hasTitle && !(media && media.unavailable);
+        if (view.pauseButton) {
+            var primaryPause = !!(state && state.state && state.state.State === 'Watching' && state.state.StatusReason === 'watching');
+            view.pauseButton.classList.toggle('button-submit', primaryPause);
+            view.pauseButton.classList.toggle('raised-outline', !primaryPause);
+        }
+        updateRoomBackdrop(page, room, view, media);
+    }
+
+    function clearRoomStateExpiry(page, roomId) {
+        if (!page._wtStateExpiryTimers) return;
+        clearTimeout(page._wtStateExpiryTimers[roomId]);
+        delete page._wtStateExpiryTimers[roomId];
+    }
+
+    function renewRoomStateExpiry(page, room) {
+        var roomId = room.RoomId;
+        var generation = page._wtGeneration;
+        clearRoomStateExpiry(page, roomId);
+        var timer = setTimeout(function () {
+            if (!pageActionAllowed(page) || page._wtGeneration !== generation || page._wtStateExpiryTimers[roomId] !== timer) return;
+            delete page._wtStateExpiryTimers[roomId];
+            if (!(page._wtRooms || []).some(function (currentRoom) { return currentRoom.RoomId === roomId; })) return;
+            page._wtRoomStates[roomId] = { failed: true, expired: true };
+            delete page._wtMediaTargets[roomId];
+            delete page._wtMedia[roomId];
+            updateRoomPresentation(page, room);
+        }, 10000);
+        page._wtStateExpiryTimers[roomId] = timer;
+    }
+
+    function loadRoomMedia(page, room) {
+        if (!pageActionAllowed(page) || page._wtVisibleRoute !== 'rooms' || page._wtMediaFlights[room.RoomId]) return;
+        var roomId = room.RoomId;
+        var sequence = (page._wtRoomSequences[roomId] || 0) + 1;
+        page._wtRoomSequences[roomId] = sequence;
+        var flights = page._wtMediaFlights;
+        flights[roomId] = true;
+        var requestedAt = Date.now();
+        function current() {
+            return pageActionAllowed(page) && page._wtRoomSequences[roomId] === sequence &&
+                (page._wtRooms || []).some(function (value) { return value.RoomId === roomId; });
+        }
+        return apiGet(page, 'WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/State').finally(function () {
+            delete flights[roomId];
+        }).then(function (state) {
+            if (!current()) return;
+            if (Date.now() - requestedAt >= 10000) throw new Error('stale_state');
+            if (!state || state.RoomId !== roomId) throw new Error('invalid_state');
+            page._wtRoomStates[roomId] = { state: state };
+            renewRoomStateExpiry(page, room);
+            var itemId = mediaItemId(state);
+            var target = page._wtMediaTargets[roomId];
+            if (!itemId || !target || idKey(target.itemId) !== idKey(itemId)) {
+                delete page._wtMedia[roomId];
+                target = itemId ? { itemId: itemId, sequence: sequence } : null;
+                page._wtMediaTargets[roomId] = target;
+            }
+            // This read is fresher than Rooms, but the endpoint is not an atomic snapshot.
+            renderRooms(page, page._wtRooms || []);
+            if (!itemId) return;
+            if (page._wtMetadataFlights[roomId]) return;
+            var identity = page._wtIdentity;
+            if (!identity.user || typeof ApiClient.getItem !== 'function') {
+                page._wtMedia[roomId] = { unavailable: true };
+                updateRoomPresentation(page, room);
+                return;
+            }
+            var metadataFlights = page._wtMetadataFlights;
+            metadataFlights[roomId] = true;
+            function currentMedia() {
+                return pageActionAllowed(page) && page._wtMediaTargets[roomId] === target &&
+                    page._wtRoomStates[roomId] && idKey(mediaItemId(page._wtRoomStates[roomId].state)) === idKey(itemId) &&
+                    (page._wtRooms || []).some(function (value) { return value.RoomId === roomId; });
+            }
+            return pageRequest(page, 'item:' + roomId + ':' + sequence, function () {
+                return ApiClient.getItem(identity.user, itemId);
+            }).then(function (item) {
+                if (!currentMedia()) return;
+                var title = item && idKey(item.Id) === idKey(itemId) ? mediaTitle(item) : '';
+                var heading = title && item.Type === 'Episode' && typeof item.SeriesName === 'string' && item.SeriesName.trim()
+                    ? item.SeriesName.trim() : title && typeof item.Name === 'string' ? item.Name.trim() : '';
+                page._wtMedia[roomId] = title ? {
+                    title: title,
+                    heading: heading || title,
+                    detail: heading ? title.slice(heading.length).replace(/^ · /, '') : '',
+                    itemId: itemId,
+                    backdropUrl: roomBackdropUrl(page, item)
+                } : { unavailable: true };
+                updateRoomPresentation(page, room);
+            }).catch(function () {
+                if (!currentMedia()) return;
+                page._wtMedia[roomId] = { unavailable: true };
+                updateRoomPresentation(page, room);
+            }).finally(function () { delete metadataFlights[roomId]; });
+        }).catch(function () {
+            if (!current()) return;
+            clearRoomStateExpiry(page, roomId);
+            page._wtRoomStates[roomId] = { failed: true };
+            delete page._wtMediaTargets[roomId];
+            delete page._wtMedia[roomId];
+            updateRoomPresentation(page, room);
+        });
+    }
+
     function renderRooms(page, rooms) {
         var container = page.querySelector('#wtRooms');
         if (!container) {
             return;
         }
 
+        var renderedRooms = (rooms || []).map(function (room) {
+            var entry = page._wtRoomStates[room.RoomId];
+            return entry && entry.state ? Object.assign({}, room, entry.state) : room;
+        });
+        var signature = JSON.stringify([renderedRooms.map(function (room) {
+            return [room.RoomId, room.Name, room.State, room.StatusReason, room.ParticipantUserIds, room.PrimaryUserId,
+                room.JoinedParticipantUserIds, room.Participants, room.IsAdmin, room.CanEnd, room.CurrentUserJoined];
+        }), page._wtRoomBusy, page._wtRoomFeedback, page._wtIsAdmin]);
+        if (page._wtRoomsSignature === signature) {
+            container.setAttribute('aria-busy', 'false');
+            (rooms || []).forEach(function (room) { updateRoomPresentation(page, room); });
+            return;
+        }
+        page._wtRoomsSignature = signature;
+        var focused = page.ownerDocument.activeElement;
+        var focusedCard = focused && focused.closest ? focused.closest('[data-room-id]') : null;
+        var focusRoom = focusedCard && focusedCard.dataset.roomId;
+        var focusAction = focused && focused.dataset && focused.dataset.action;
+        var focusSummary = focused && focused.tagName === 'SUMMARY';
         rememberDiagnosticPanelState(page);
+        Object.keys(page._wtRoomViews || {}).forEach(function (roomId) {
+            clearRoomBackdrop(page._wtRoomViews[roomId]);
+            clearRoomAvatars(page._wtRoomViews[roomId]);
+        });
         clearChildren(container);
         page._wtDiagnosticPanels = {};
         page._wtDiagnosticBusy = page._wtDiagnosticBusy || {};
         page._wtDiagnosticRequests = page._wtDiagnosticRequests || {};
         page._wtDiagnosticOpen = page._wtDiagnosticOpen || {};
+        page._wtRoomViews = {};
         container.setAttribute('aria-busy', 'false');
         if (page._wtIsAdmin !== undefined) {
             setAdminVisibility(page, page._wtIsAdmin);
@@ -1566,63 +2197,169 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var emptyText = document.createElement('p');
             emptyText.className = 'fieldDescription';
             emptyText.textContent = page._wtIsAdmin === true
-                ? '先在上方创建一个房间，再让两位参与者打开同一视频。'
-                : '请让管理员把你的账号加入房间。';
+                ? '到“创建与邀请”创建房间或邀请码，再让两位参与者打开同一视频。'
+                : '到“邀请”接受邀请码，或请管理员创建房间。';
             empty.appendChild(emptyTitle);
             empty.appendChild(emptyText);
             container.appendChild(empty);
             return;
         }
 
-        rooms.forEach(function (room) {
+        renderedRooms.forEach(function (room) {
             var card = document.createElement('article');
             card.className = 'wt-roomCard';
-
+            card.dataset.roomId = room.RoomId;
             var header = document.createElement('div');
             header.className = 'wt-roomHeader';
-            var identity = document.createElement('div');
             var name = document.createElement('h3');
             name.className = 'wt-roomName';
             name.textContent = room.Name || '未命名房间';
-            identity.appendChild(name);
-
-            var info = getStateInfo(room.State);
-            info.description = statusReasonMessage(room.StatusReason);
-            if (room.StatusReason === 'different_video') {
-                info.label = '视频不一致';
-            }
-            var stateDescription = document.createElement('p');
-            stateDescription.className = 'fieldDescription wt-roomStateDescription';
-            stateDescription.textContent = info.description;
-            identity.appendChild(stateDescription);
-
             var state = document.createElement('span');
-            state.className = 'wt-roomState wt-roomState-' + info.className;
-            state.textContent = info.label;
-            state.title = info.description;
-
-            header.appendChild(identity);
+            header.appendChild(name);
             header.appendChild(state);
             card.appendChild(header);
 
-            var meta = document.createElement('div');
-            meta.className = 'fieldDescription wt-roomMeta';
-            var participantLine = document.createElement('div');
-            var participantIds = room.ParticipantUserIds || [];
-            participantLine.textContent = '参与者：' + participantIds.map(function (id) {
-                return roomUserName(room, id);
-            }).join('、');
-            var primaryLine = document.createElement('div');
-            primaryLine.textContent = '主用户：' + roomUserName(room, room.PrimaryUserId);
-            meta.appendChild(participantLine);
-            meta.appendChild(primaryLine);
-            card.appendChild(meta);
+            var layout = document.createElement('div');
+            layout.className = 'wt-roomLayout';
+            var main = document.createElement('div');
+            main.className = 'wt-roomMain';
+            var presentation = document.createElement('div');
+            presentation.className = 'wt-roomPresentation';
+            var backdrop = document.createElement('img');
+            backdrop.className = 'wt-roomBackdrop';
+            backdrop.alt = '';
+            backdrop.setAttribute('aria-hidden', 'true');
+            backdrop.decoding = 'async';
+            backdrop.hidden = true;
+            presentation.appendChild(backdrop);
+            var waiting = document.createElement('div');
+            waiting.className = 'wt-waitingArtwork';
+            waiting.setAttribute('aria-hidden', 'true');
+            waiting.appendChild(waitingDecoration());
+            presentation.appendChild(waiting);
+            var waitingTitle = document.createElement('h4');
+            waitingTitle.className = 'wt-waitingTitle';
+            presentation.appendChild(waitingTitle);
+            var stateDescription = document.createElement('p');
+            stateDescription.className = 'fieldDescription wt-roomStateDescription';
+            presentation.appendChild(stateDescription);
+            var media = document.createElement('p');
+            media.className = 'wt-roomMedia';
+            var mediaLabel = document.createElement('span');
+            mediaLabel.className = 'wt-roomMediaLabel';
+            var mediaTitle = document.createElement('strong');
+            var mediaDetail = document.createElement('span');
+            mediaDetail.className = 'wt-roomMediaDetail';
+            media.appendChild(mediaLabel);
+            media.appendChild(mediaTitle);
+            media.appendChild(mediaDetail);
+            presentation.appendChild(media);
+            main.appendChild(presentation);
 
-            var membershipLine = document.createElement('div');
-            membershipLine.className = 'fieldDescription wt-roomMeta wt-roomMembership';
-            membershipLine.textContent = '你的状态：' + (room.CurrentUserJoined ? '已加入' : '已暂离') +
-                '。暂离不会解除成员关系；结束房间会解除双方成员关系，之后才能加入或创建其他房间。';
-            card.appendChild(membershipLine);
+            var meta = document.createElement('div');
+            meta.className = 'wt-participants';
+            var participantIds = room.ParticipantUserIds || [];
+            var avatars = [];
+            participantIds.forEach(function (id) {
+                var participant = document.createElement('div');
+                participant.className = 'wt-participant';
+                var displayName = roomUserName(page, room, id);
+                var avatar = document.createElement('span');
+                avatar.className = 'wt-participantAvatar';
+                avatar.setAttribute('aria-hidden', 'true');
+                var avatarFallback = document.createElement('span');
+                avatarFallback.className = 'wt-participantAvatarFallback';
+                avatarFallback.textContent = Array.from(String(displayName).trim())[0] || '?';
+                var avatarImage = document.createElement('img');
+                avatarImage.className = 'wt-participantAvatarImage';
+                avatarImage.alt = '';
+                avatarImage.setAttribute('aria-hidden', 'true');
+                avatarImage.decoding = 'async';
+                avatarImage.hidden = true;
+                avatar.appendChild(avatarFallback);
+                avatar.appendChild(avatarImage);
+                avatars.push({ userId: id, element: avatar, image: avatarImage, fallback: avatarFallback, url: null });
+                participant.appendChild(avatar);
+                var text = document.createElement('div');
+                text.className = 'wt-participantText';
+                var participantName = document.createElement('div');
+                participantName.className = 'wt-participantName';
+                participantName.textContent = displayName;
+                if (idKey(id) === idKey(room.PrimaryUserId)) {
+                    var primary = document.createElement('small');
+                    primary.className = 'wt-primaryLabel';
+                    primary.textContent = '主用户';
+                    participantName.appendChild(primary);
+                }
+                var joined = document.createElement('div');
+                joined.className = 'wt-participantState';
+                var isJoined = (room.JoinedParticipantUserIds || []).map(idKey).indexOf(idKey(id)) >= 0;
+                joined.textContent = isJoined ? '已加入' : '已暂离';
+                joined.classList.toggle('wt-participantState--joined', isJoined);
+                text.appendChild(participantName);
+                text.appendChild(joined);
+                participant.appendChild(text);
+                meta.appendChild(participant);
+            });
+            main.appendChild(meta);
+            layout.appendChild(main);
+
+            var controls = document.createElement('aside');
+            controls.className = 'wt-roomControls';
+            var controlsTitle = document.createElement('h3');
+            controlsTitle.textContent = '房间控制';
+            controls.appendChild(controlsTitle);
+            function groupHeading(group, title) {
+                var heading = document.createElement('h4');
+                heading.className = 'wt-controlHeading';
+                heading.textContent = title;
+                group.appendChild(heading);
+            }
+            var playback = document.createElement('div');
+            playback.className = 'wt-roomActions wt-roomActions--playback';
+            playback.setAttribute('role', 'group');
+            playback.setAttribute('aria-label', '播放控制');
+            groupHeading(playback, '播放控制');
+            if (room.CurrentUserJoined && !room.IsAdmin) {
+                playback.appendChild(createActionButton(page, room, 'participantResync'));
+            }
+            var pauseButton = null;
+            if (room.IsAdmin) {
+                ['pause', 'resume', 'resync'].forEach(function (action) {
+                    var button = createActionButton(page, room, action);
+                    if (action === 'pause') pauseButton = button;
+                    playback.appendChild(button);
+                });
+            }
+            if (playback.querySelector('button')) controls.appendChild(playback);
+            var actions = document.createElement('div');
+            actions.className = 'wt-roomActions wt-roomActions--members';
+            actions.setAttribute('role', 'group');
+            actions.setAttribute('aria-label', '成员与诊断');
+            groupHeading(actions, '房间成员');
+            var isMember = participantIds.map(idKey).indexOf(idKey(page._wtIdentity.user)) >= 0;
+            if (isMember) actions.appendChild(createActionButton(page, room, room.CurrentUserJoined ? 'leave' : 'join'));
+            if (room.IsAdmin) {
+                actions.appendChild(createActionButton(page, room, 'delete'));
+            } else if (room.CanEnd) {
+                actions.appendChild(createActionButton(page, room, 'delete'));
+            }
+            if (actions.querySelector('button')) controls.appendChild(actions);
+            var membershipLine = document.createElement('p');
+            membershipLine.className = 'fieldDescription wt-roomMembership';
+            membershipLine.hidden = !isMember;
+            membershipLine.textContent = '暂离保留成员关系；结束房间会解除双方成员关系。';
+            controls.appendChild(membershipLine);
+            var diagnosticsAction = document.createElement('div');
+            diagnosticsAction.className = 'wt-diagnosticAction';
+            diagnosticsAction.appendChild(createActionButton(page, room, 'diagnostics'));
+            var diagnosticHelp = document.createElement('p');
+            diagnosticHelp.className = 'fieldDescription';
+            diagnosticHelp.textContent = '查看同步状态与排查信息';
+            diagnosticsAction.appendChild(diagnosticHelp);
+            controls.appendChild(diagnosticsAction);
+            layout.appendChild(controls);
+            card.appendChild(layout);
 
             var feedback = page._wtRoomFeedback && page._wtRoomFeedback[room.RoomId];
             var feedbackEl = document.createElement('div');
@@ -1632,28 +2369,24 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             feedbackEl.textContent = feedback ? feedback.text : '';
             feedbackEl.hidden = !feedback;
             card.appendChild(feedbackEl);
-
-            var actions = document.createElement('div');
-            actions.className = 'wt-roomActions';
-            actions.appendChild(createActionButton(page, room, room.CurrentUserJoined ? 'leave' : 'join'));
-            actions.appendChild(createActionButton(page, room, 'diagnostics'));
-            if (room.CurrentUserJoined && !room.IsAdmin) {
-                actions.appendChild(createActionButton(page, room, 'participantResync'));
-            }
-            if (room.IsAdmin) {
-                ['pause', 'resume', 'resync', 'delete'].forEach(function (action) {
-                    actions.appendChild(createActionButton(page, room, action));
-                });
-            } else if (room.CanEnd) {
-                actions.appendChild(createActionButton(page, room, 'delete'));
-            }
-            card.appendChild(actions);
             card.appendChild(createDiagnosticPanel(page, room));
+            page._wtRoomViews[room.RoomId] = {
+                state: state, description: stateDescription, media: media, mediaLabel: mediaLabel,
+                mediaTitle: mediaTitle, mediaDetail: mediaDetail, presentation: presentation, backdrop: backdrop,
+                waiting: waiting, waitingTitle: waitingTitle, pauseButton: pauseButton, avatars: avatars
+            };
+            updateRoomPresentation(page, room);
             container.appendChild(card);
+            startRoomAvatars(page, room, page._wtRoomViews[room.RoomId]);
+            if (focusRoom === room.RoomId) {
+                var target = focusAction ? card.querySelector('[data-action="' + focusAction + '"]') : focusSummary ? card.querySelector('summary') : null;
+                if (target) target.focus({ preventScroll: true });
+            }
         });
     }
 
     function loadRooms(page, announce) {
+        if (!pageActionAllowed(page)) return Promise.resolve();
         if (page._wtRoomsLoading) {
             return Promise.resolve();
         }
@@ -1667,9 +2400,18 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             setStatus(page, '正在刷新房间…');
         }
 
-        return apiGet('WatchTogether/Rooms').then(function (rooms) {
+        return apiGet(page, 'WatchTogether/Rooms').then(function (rooms) {
             var list = Array.isArray(rooms) ? rooms : [];
             page._wtRooms = list;
+            Object.keys(page._wtRoomStates).forEach(function (roomId) {
+                if (!list.some(function (room) { return room.RoomId === roomId; })) {
+                    page._wtRoomSequences[roomId] = (page._wtRoomSequences[roomId] || 0) + 1;
+                    clearRoomStateExpiry(page, roomId);
+                    delete page._wtRoomStates[roomId];
+                    delete page._wtMediaTargets[roomId];
+                    delete page._wtMedia[roomId];
+                }
+            });
             page._wtDiagnostics = page._wtDiagnostics || {};
             Object.keys(page._wtDiagnostics).forEach(function (roomId) {
                 if (!list.some(function (room) { return room && room.RoomId === roomId; })) {
@@ -1682,6 +2424,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 }
             });
             renderRooms(page, list);
+            if (page._wtVisibleRoute === 'rooms') list.forEach(function (room) { loadRoomMedia(page, room); });
             syncForm(page);
             if (announce) {
                 setStatus(page, list.length > 0
@@ -1690,6 +2433,14 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
             return list;
         }).catch(function (err) {
+            (page._wtRooms || []).forEach(function (room) {
+                clearRoomStateExpiry(page, room.RoomId);
+                page._wtRoomSequences[room.RoomId] = (page._wtRoomSequences[room.RoomId] || 0) + 1;
+                page._wtRoomStates[room.RoomId] = { failed: true };
+                delete page._wtMediaTargets[room.RoomId];
+                delete page._wtMedia[room.RoomId];
+                updateRoomPresentation(page, room);
+            });
             page._wtRooms = null;
             syncForm(page);
             setStatus(page, '房间加载失败：' + errorMessage(err) + '。', true);
@@ -1720,6 +2471,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function control(page, roomId, action, button) {
+        if (!pageActionAllowed(page)) return;
         var label = actionLabels[action] || '操作';
         if (action === 'resync' && !window.confirm('重新同步会暂时暂停双方并重新对齐，确认继续吗？')) {
             return;
@@ -1728,7 +2480,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         clearRoomFeedback(page, roomId);
         roomFeedback(page, roomId, label + '处理中…', false, true);
         renderRooms(page, page._wtRooms || []);
-        apiSend('WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Action', 'POST', { Action: action })
+        apiSend(page, 'WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Action', 'POST', { Action: action })
             .then(function (result) {
                 if (result && result.Error) {
                     roomFeedback(page, roomId, label + '已发起，但部分客户端未完成，请检查客户端。', true, true);
@@ -1753,11 +2505,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function participantResync(page, roomId, button) {
+        if (!pageActionAllowed(page)) return;
         setRoomBusy(page, roomId, true);
         clearRoomFeedback(page, roomId);
         roomFeedback(page, roomId, '重新同步请求处理中…', false, true);
         renderRooms(page, page._wtRooms || []);
-        apiSend('WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync', 'POST')
+        apiSend(page, 'WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync', 'POST')
             .then(function (result) {
                 var status = result && result.Status;
                 if (status === 'accepted') {
@@ -1785,6 +2538,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function deleteRoom(page, room, button) {
+        if (!pageActionAllowed(page)) return;
         var roomName = room.Name || '未命名房间';
         var ending = room.CanEnd === true;
         if (!window.confirm((ending ? '确认结束“' : '确认删除“') + roomName + '”吗？' +
@@ -1795,7 +2549,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         setRoomBusy(page, room.RoomId, true);
         roomFeedback(page, room.RoomId, '删除中…', false, true);
         renderRooms(page, page._wtRooms || []);
-        apiSend('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId), 'DELETE')
+        apiSend(page, 'WatchTogether/Rooms/' + encodeURIComponent(room.RoomId), 'DELETE')
             .then(function (result) {
                 if (result && result.Deleted === false) {
                     throw new Error('房间不存在或已删除');
@@ -1816,6 +2570,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function membership(page, room, action, button) {
+        if (!pageActionAllowed(page)) return;
         if (action === 'leave' && !window.confirm('暂离“' + (room.Name || '未命名房间') + '”吗？暂离不会解除成员关系，并将尝试暂停仍在房间的一方。')) {
             return;
         }
@@ -1823,7 +2578,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         clearRoomFeedback(page, room.RoomId);
         roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '暂离中…', false, true);
         renderRooms(page, page._wtRooms || []);
-        apiSend('WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/' + (action === 'join' ? 'Join' : 'Leave'), 'POST')
+        apiSend(page, 'WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/' + (action === 'join' ? 'Join' : 'Leave'), 'POST')
             .then(function (result) {
                 var text = action === 'join'
                     ? '已加入房间，请与另一位参与者打开同一视频。'
@@ -1855,6 +2610,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function createRoom(page) {
+        if (!pageActionAllowed(page)) return;
+        if (page._wtIsAdmin !== true) return;
         var nameInput = page.querySelector('#wtRoomName');
         var participantA = page.querySelector('#wtUserA');
         var participantB = page.querySelector('#wtUserB');
@@ -1871,7 +2628,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
             return;
         }
-        if (users.length < 2 || !a || !b) {
+        if (page._wtUsers.length < 2 || !a || !b) {
             setStatus(page, '至少需要选择两名参与者。', true);
             return;
         }
@@ -1881,7 +2638,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
         var conflict = findRoomConflict(page, [a, b]);
         if (conflict) {
-            var message = conflictMessage(conflict);
+            var message = conflictMessage(page, conflict);
             setStatus(page, message, true);
             setFormHint(page, message, true);
             syncForm(page);
@@ -1894,7 +2651,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
         setButtonBusy(createButton, true, '创建中…');
         setStatus(page, '正在创建房间…');
-        apiSend('WatchTogether/Rooms', 'POST', {
+        apiSend(page, 'WatchTogether/Rooms', 'POST', {
             Name: name,
             ParticipantUserIds: [a, b],
             PrimaryUserId: primary.value
@@ -1948,6 +2705,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             copyInvitationCode(page, event.currentTarget);
         });
         dom.addEventListener(page.querySelector('#wtRefresh'), 'click', function () {
+            if (!pageActionAllowed(page)) return;
             clearAllRoomFeedback(page);
             loadRooms(page, true);
         });
@@ -1975,20 +2733,27 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     View.prototype.onResume = function () {
         BaseView.prototype.onResume.apply(this, arguments);
         var page = this.view;
+        window.removeEventListener('focus', page._wtRefreshVisible);
+        page._wtActive = false;
+        page._wtGeneration = (page._wtGeneration || 0) + 1;
+        page._wtRoute = currentRoute(page);
+        clearPageData(page);
+        page._wtIdentity = pageIdentity();
+        page._wtActive = true;
+        if (!pageActionAllowed(page)) return;
+        applyRoute(page);
         bindPageEvents(page);
         syncForm(page);
         loading.show();
 
-        loadPluginConfiguration(page).catch(function () {
-            return null;
-        }).then(function () {
-            return loadUsers(page);
-        }).then(function () {
+        loadUsers(page).then(function () {
             return loadRooms(page, true);
         }).then(function () {
-            return loadInvitations(page);
+            if (page._wtVisibleRoute === 'invite') return loadInvitations(page);
         }).then(function () {
-            return loadPluginInfo(page);
+            if (page._wtVisibleRoute === 'settings') {
+                return loadPluginConfiguration(page).catch(function () { return null; }).then(function () { return loadPluginInfo(page); });
+            }
         }).then(function () {
             loading.hide();
         }, function () {
@@ -1996,21 +2761,25 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         });
 
         clearInterval(page._wtTimer);
-        page._wtTimer = setInterval(function () {
-            loadRooms(page, false);
-            loadInvitations(page);
-        }, 5000);
+        page._wtRefreshVisible = function () {
+            if (!pageActionAllowed(page)) return;
+            if (page._wtVisibleRoute === 'rooms') loadRooms(page, false);
+            else if (page._wtVisibleRoute === 'invite') {
+                loadRooms(page, false);
+                loadInvitations(page);
+            }
+        };
+        page._wtTimer = setInterval(page._wtRefreshVisible, 5000);
+        window.addEventListener('focus', page._wtRefreshVisible);
     };
 
     View.prototype.onPause = function () {
         var page = this.view;
-        clearInterval(page._wtTimer);
-        clearAllRoomFeedback(page);
-        if (page._wtStatusTimer) {
-            clearTimeout(page._wtStatusTimer);
-            page._wtStatusTimer = null;
-        }
-        clearGitHubTokenInput(page);
+        page._wtActive = false;
+        page._wtGeneration = (page._wtGeneration || 0) + 1;
+        window.removeEventListener('focus', page._wtRefreshVisible);
+        clearPageData(page);
+        loading.hide();
         BaseView.prototype.onPause.apply(this, arguments);
     };
 

@@ -23,6 +23,7 @@
 - 现象：版本号或 MD5 正确不代表发布资产可信。
 - 原因：未签名或未知 key 的资产可能被替换。
 - 结论：更新前必须验证 canonical manifest、大小、SHA-256、程序集身份、tag 和 RSA detached signature；未知 key 或任一失败都拒绝更新。
+- 独立下载核验时，`.release.manifest.sig` 为严格 Base64 ASCII 文件，必须先按项目格式解码，再对 manifest 原始字节执行 RSA PKCS#1 v1.5/SHA-256 验证；不能把签名文件的文本字节直接当作 RSA 签名。此规则由签名脚本、验证器和 v1.7.0.1 公开资产交叉核对。
 - 规则：不得把 installer 的 MD5 二次校验当作信任根，也不得把私钥或 secret 写入仓库文档。
 - 验证：`ReleaseTrustStoreTests`、`release-signing.tests.ps1` 与 `release-workflow.tests.ps1`。
 - 补充规则：beta 更新检查应先在 GitHub API 返回的非 draft stable 与 prerelease 中选择最高规范版本，再验证该版本的固定资产；历史低版本缺少 manifest 或 signature 不得阻断最高版本选择，但最高版本自身缺少固定资产仍必须 fail closed。当前 GitHub API 的 35 个 Release、早期 `v1.0`/`v1.1`/`v1.2` 资产情况，以及 `GitHubReleaseClientTests` 的两个选择/缺资产测试共同确认了这一边界。
@@ -176,3 +177,58 @@
 - 事实：宿主 `.emby-button` 使用 inline-flex 和 align-items:center，但没有 justify-content；`.raised` 的 text-align:center 不负责 flex 主轴分布。设置最小宽度或窄屏拉伸后，真实房间按钮文字横向偏左约 4.16px。
 - 修正：只补插件作用域的 justify-content/align-items/text-align:center，保留宿主 display、字体、padding、焦点与禁用行为。普通按钮采用已有原生 raised-outline，通过宿主派生的文字色强化轮廓，不需要自绘按钮背景。
 - 验证：原 V6 源码快照在真实 inline-flex 夹具中出现 7.71px 文字偏移，新增对齐回归失败；描边与文字分别使用 RGBA 合成后测量边界和文字对比度，不能用文字清晰代替轮廓可辨。S118 的最终检查与真实宿主证据见 `native-controls-plan.md`。
+
+## 25. 原生标签必须在权限确定后注册并核对所有权
+
+- 事实：当前宿主 `mainTabsManager.setTabs` 对相同 owner 返回 `replaced:false`，不会重建标签列表。权限未知时先注册两页，随后确定管理员再调用相同 owner，不会自动增加设置页。
+- 规则：权限判定后首次注册；重建或离页前以 `getTabsElement()` 的元素引用确认当前标签仍属于本页，再调用 `setTabs(null)`。不能清掉其他页面已经接管的导航。
+- 验证：真实宿主模块只读核对，S122 fixture 模拟 owner 行为，浏览器覆盖管理员三页、普通用户两页、权限失败与重复进入。
+
+## 26. 房间片名展示需要状态、权限与新鲜度共同约束
+
+- 事实：`/State` 是重新选择 Session 的非原子读，Waiting 停止观察期间可保留旧 SyncItemId。媒体元数据慢响应也可能晚于下一次房间状态变化。
+- 规则：State/StatusReason/Eligible/两名已加入成员/在线同 Item/SyncItemId 必须共同满足；通过当前调用用户的 Emby 媒体接口取名，禁止空 userId 导致全局 Items fallback。State 与媒体请求独立，旧媒体目标、身份或页面代次不得回写；过期或失败清除片名。
+- 验证：S122 浏览器用例覆盖失效 gate、403/404、错误响应 Id、账号/服务器切换、pause、慢媒体、换 Item、房间删除、10 秒状态新鲜度及文本注入。媒体只进入界面，不加入诊断导出；未将模拟媒体数据记为真实双客户端验收。
+
+## 27. 背景图片加载也必须绑定当前媒体与权限
+
+- 事实：当前 SDK 的 BaseItemDto 提供自身及父背景标签；宿主 `getImageUrl` 构造图片地址。URL 构造器会将 null/undefined 转成相对路径，不能用解析成功替代返回值类型检查。
+- 规则：只从当前用户获准读取、Id 匹配的 DTO 选取背景；检查 SDK 返回非空字符串、协议、origin 和嵌入式凭据后才启动图片请求。load/error 必须核对页面、view、当前目标及 URL；状态失效和离页清除 src。图加载成功后才应用图上文字配色，失败保留有效片名。
+- 验证：V10 浏览器检查包含自身/父背景、缺图/404、非法地址零网络请求、迟到图片、权限撤回和图片标识不进入诊断导出；不将模拟图片成功等同于真实双端播放。
+
+## 28. 媒体区域的比例与最小高度会影响窄屏宽度
+
+- 事实：V10 初次布局使用 16:9 比例与 255px 最小高度时，390px 页面中媒体区最小宽度约 453px，产生横向溢出。
+- 修正：使用 width:100%、min-width:0、height:auto 和最小高度；长标题允许撑高，图像与遮罩单独继承圆角。不通过隐藏横向溢出掩盖内容裁剪。
+- 验证：修正后 320–1920px、390px 长标题和浅深三页布局检查通过。
+
+## 29. 房间头像使用成员身份与独立图片生命周期
+
+- 事实：等待播放时成员仍有效，头像不能依赖媒体同步资格；房间状态更新会重建参与者节点，缺失头像若仅在节点内记录失败会反复请求。
+- 规则：仅对当前房间两名成员与受限摘要共同包含的用户生成同服务器头像地址，不额外查询用户资料。图片事件校验页面代次、账号、服务器、view、当前成员与 URL；离页或移除清理 src。代次内记录失败，下一代次允许重新尝试；失败保留首字。
+- 验证：V11 七项浏览器检查覆盖授权成员、等待、403/404 与失败抑制、无效接口/URL、摘要缺失、旧事件与身份切换和诊断隔离；真实 Emby 已显示一位参与者的头像以及另一位的首字回退。
+
+## 30. 拒绝旧请求回调时必须同步清理静态操作按钮
+
+- 事实：页面 generation 守卫会阻止旧请求链的成功、失败和最终清理回调。静态创建/接受按钮复用 DOM 时，仅依赖请求链尾部解除 busy，会在离页返回后永久禁用。
+- 规则：生命周期清理恢复静态按钮文字并移除 aria-busy，再由新页面的权限与表单规则判断可用性；保留旧回调隔离，不能用允许旧 finally 回写来解锁按钮。
+- 验证：创建邀请码、接受邀请、管理员创建房间三项浏览器回归修正前均失败、修正后通过；同时确认返回后可重试，旧响应不会解除新请求的 busy，也不会自动重发 POST。
+- 同类事件边界：DOM 节点移除后仍可能有已排队的 details toggle；读写新页面状态前需要身份、generation 和当前 panel 引用校验。新增回归修正前检测到旧面板触发的 Diagnostics 查询。
+
+## 31. 插件分页不能依赖旧宿主的 Dashboard 全局
+
+- 事实：2026-10-19 只读打开当前 Emby Web 4.10.0.40 的 V12 页面，控制台出现 `ReferenceError: Dashboard is not defined`；调用链为 `nativeTabs → applyRoute → setAdminVisibility → clearPageData → onResume`。初始化中断时保留“正在加载…”；同一清理函数也由 onPause 调用，会阻断离页。原 fixture 主动注入 Dashboard，掩盖了这个兼容问题。
+- 修正：S124 V14 候选构造与当前宿主 `pluginManager.getConfigurationPageUrl` 相同的相对链接 `configurationpage?name=`，并编码当前账号和服务器参数；默认 fixture 不再注入 Dashboard。页面、控制器注册、HTML 声明与浏览器测试同步更新缓存键。
+- 真实宿主返修：首次 V13 部署后，页面初始化恢复，但 emby-linkbutton 将 `#!/configurationpage` 链接按 anchor pathname 改写为 `#!/index.html/configurationpage`，切页无效。V14 改为宿主相对链接；fixture 导航改为解析 anchor pathname/query 后交给路由，不能再原样复制 href 到地址栏掩盖这种差异。
+- 下拉规则：`fillSelect` 仅在选项 ID、名称或顺序变化时重建 option，避免 5 秒刷新、窗口 focus 刷新和房间名称输入替换打开中的主用户菜单。保留当前有效选择，参与者改变使旧选择失效时回退首项；继续使用宿主 emby-select，不自绘箭头或选择菜单。
+- 验证：缺少 Dashboard 的初始化/切页/离页回归、保留未变化选项及参与者变化回归，均验证修正前失败、修正后通过；完整浏览器 84/84、.NET 545/545，Release 构建打包通过。
+- 边界：用户观察到客户端三个下拉框当时均不能打开、重启后恢复；本轮没有复现该客户端卡住的原始过程，不能把选项重建修正记为其已证实根因。V13 曾部署并由真实宿主检查发现上述切页问题，V14 的部署/验收以本地 receipt 为准；没有架构或后端同步语义变更。
+
+## 32. 原生单选模式与跨宿主箭头定位需要分别核对
+
+- 事实：当前 Server Web 与已安装 Theater 的 `enableNativeMenu` 均会在普通单选、非 TV 且未指定 `data-menu="custom"` 时使用系统菜单。2026-10-19 用户最终以 Madby“元数据语言”的普通单选截图确认目标；房间参与者、主用户和更新通道沿用这种默认单选模式。较早的多选参考不能作为强制主题浮层的依据。
+- 箭头差异：当前 Web 在独立 `.emby-select-wrapper` 内用 top/bottom 与 flex 居中；旧 Theater 把 label、select、带隐藏占位的 `.selectArrowContainer` 放在同一父节点，依赖顶部偏移和 margin-top。客户端 GenericEdit 适配层已有基于控件 grid 行的修正，但其作用域不覆盖本插件页面。
+- 修正：V16 四个 select 与 Madby 普通单选一样使用 `is="emby-select"`，菜单由宿主默认规则选择。插件自己的 `.wt-selectField` 仅将旧版直属 label、select、说明与原有箭头放到对应 grid 行，隐藏旧箭头占位并清除其 margin-top；新版 wrapper 内的箭头继续由宿主管理，不绘制第二个箭头，不改客户端安装文件。V15 曾错误地强制 custom，现已按用户最终参考撤回。
+- 验证：菜单模式与旧版 390px 长标签几何回归修正前失败，后者偏差约 64.88px；修正后旧/新两种 DOM、390/1280px 与四个控件的中线偏差小于 1px。完整浏览器 89/89、.NET 545/545，构建打包通过。fixture 只模拟两种实际结构及定位规则，不模拟真实菜单运行；真实 Web 和客户端证据必须单独记录。
+- 真实 Web 对照：神医与 Madby 的表单由 `genericui / GenericEdit` 生成。神医“搜索范围”为 multiple select，展开的是带复选框的虚拟滚动 actionSheet；Madby“元数据语言 / 图片语言 / 国家地区”为普通单选，未指定 custom，沿用系统单选菜单。不能用前者的多选展开形态定义全部原生单选的默认外观。V15 一起看显式 custom 的单选使用同一宿主 actionSheet 的单选形态；其闭合态实测高度约 34.615px、字号 14.424px、内边距与 Madby 单选相同，Web 箭头偏差约 0.0052px。这些测量只证明相应几何与组件事实，最终外观反馈见下条。
+- 最终反馈：用户在 V16 部署后确认“可以了，进行下一步”。本轮最终普通单选外观与箭头方案据此记为用户确认；该反馈不扩大为原始客户端临时卡住已复现、真实双端播放已验收或公开发布授权。后续本地 1.7.0.1 包和已部署的 1.7.0.0/V16 候选保持身份区分。
