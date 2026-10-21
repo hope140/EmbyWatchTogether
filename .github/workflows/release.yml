@@ -19,24 +19,61 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      channel:
+        required: true
+        type: string
+      key_id:
+        required: true
+        type: string
+      request_path:
+        type: string
+        default: ''
+      source_sha:
+        type: string
+        default: ''
+      release_title:
+        type: string
+        default: ''
+      notes_sha256:
+        type: string
+        default: ''
+
+permissions: {}
 
 jobs:
   release:
     name: Build and publish signed release
     runs-on: windows-latest
     environment: release
+    concurrency:
+      group: watch-together-signed-release
+      cancel-in-progress: false
     permissions:
       contents: write
+      actions: read
+      pull-requests: read
+    defaults:
+      run:
+        working-directory: source
     env:
       RELEASE_TAG: ${{ inputs.tag }}
       RELEASE_CHANNEL: ${{ inputs.channel }}
       RELEASE_TRIGGER_REF: ${{ github.ref_name }}
       RELEASE_KEY_ID: ${{ inputs.key_id }}
+      RELEASE_REQUEST_PATH: ${{ inputs.request_path }}
+      RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_TITLE: ${{ inputs.release_title }}
+      RELEASE_NOTES_SHA256: ${{ inputs.notes_sha256 }}
+      RELEASE_SOURCE_ROOT: ${{ github.workspace }}/source
     steps:
       - name: Validate release channel and dispatch branch
         shell: pwsh
+        working-directory: ${{ github.workspace }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -48,6 +85,11 @@ jobs:
           }
 
           $expectedRef = if ($channel -eq 'stable') { 'main' } else { 'beta' }
+          if (-not [string]::IsNullOrEmpty($env:RELEASE_REQUEST_PATH)) {
+              # Requests always enter through reviewed PRs merged into main; the
+              # trusted Node validator independently binds the source channel.
+              $expectedRef = 'main'
+          }
           if (-not [string]::Equals(
                   $triggerRef,
                   $expectedRef,
@@ -60,11 +102,34 @@ jobs:
 
           Write-Output ('Release channel {0} is authorized from branch {1}.' -f $channel, $triggerRef)
 
+      - name: Checkout trusted release controller
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Revalidate merged request and create immutable tag
+        if: ${{ inputs.request_path != '' }}
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release/release-request.cjs create-tag
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Checkout requested tag
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.source_sha || inputs.tag }}
+          path: source
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup .NET 10 SDK
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -189,7 +254,12 @@ jobs:
               throw 'The checkout HEAD does not equal the requested tag commit.'
           }
 
-          $projectPath = Join-Path $env:GITHUB_WORKSPACE 'src/EmbyWatchTogether/EmbyWatchTogether.csproj'
+          if (-not [string]::IsNullOrEmpty($env:RELEASE_REQUEST_PATH) -and
+              -not [string]::Equals($headCommit, $env:RELEASE_SOURCE_SHA, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw 'Checkout HEAD differs from the reviewed request source SHA.'
+          }
+
+          $projectPath = Join-Path $env:RELEASE_SOURCE_ROOT 'src/EmbyWatchTogether/EmbyWatchTogether.csproj'
           if (-not [System.IO.File]::Exists($projectPath)) {
               throw 'The plugin project file is missing.'
           }
@@ -214,7 +284,7 @@ jobs:
               }
           }
 
-          $trustStorePath = Join-Path $env:GITHUB_WORKSPACE 'src/EmbyWatchTogether/ReleaseTrustStore.cs'
+          $trustStorePath = Join-Path $env:RELEASE_SOURCE_ROOT 'src/EmbyWatchTogether/ReleaseTrustStore.cs'
           if (-not [System.IO.File]::Exists($trustStorePath)) {
               throw 'ReleaseTrustStore.cs is missing.'
           }
@@ -299,15 +369,15 @@ jobs:
           $dllRelativePath = 'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll'
           $manifestRelativePath = 'dist/EmbyWatchTogether.release.manifest'
           $signatureRelativePath = 'dist/EmbyWatchTogether.release.manifest.sig'
-          $dllPath = Join-Path $env:GITHUB_WORKSPACE $dllRelativePath
-          $manifestPath = Join-Path $env:GITHUB_WORKSPACE $manifestRelativePath
-          $signaturePath = Join-Path $env:GITHUB_WORKSPACE $signatureRelativePath
+          $dllPath = Join-Path $env:RELEASE_SOURCE_ROOT $dllRelativePath
+          $manifestPath = Join-Path $env:RELEASE_SOURCE_ROOT $manifestRelativePath
+          $signaturePath = Join-Path $env:RELEASE_SOURCE_ROOT $signatureRelativePath
 
           if (-not [System.IO.File]::Exists($dllPath)) {
               throw 'The packaged release DLL is missing before signing.'
           }
 
-          pwsh scripts/release/Sign-ReleaseManifest.ps1 `
+          pwsh (Join-Path $env:GITHUB_WORKSPACE 'scripts/release/Sign-ReleaseManifest.ps1') `
               -DllPath $dllPath `
               -Tag $env:RELEASE_TAG `
               -KeyId $env:RELEASE_KEY_ID `
@@ -328,10 +398,10 @@ jobs:
           $archiveRelativePath = 'dist/EmbyWatchTogether.zip'
           $manifestRelativePath = 'dist/EmbyWatchTogether.release.manifest'
           $signatureRelativePath = 'dist/EmbyWatchTogether.release.manifest.sig'
-          $dllPath = Join-Path $env:GITHUB_WORKSPACE $dllRelativePath
-          $archivePath = Join-Path $env:GITHUB_WORKSPACE $archiveRelativePath
-          $manifestPath = Join-Path $env:GITHUB_WORKSPACE $manifestRelativePath
-          $signaturePath = Join-Path $env:GITHUB_WORKSPACE $signatureRelativePath
+          $dllPath = Join-Path $env:RELEASE_SOURCE_ROOT $dllRelativePath
+          $archivePath = Join-Path $env:RELEASE_SOURCE_ROOT $archiveRelativePath
+          $manifestPath = Join-Path $env:RELEASE_SOURCE_ROOT $manifestRelativePath
+          $signaturePath = Join-Path $env:RELEASE_SOURCE_ROOT $signatureRelativePath
 
           $assetDefinitions = @(
               [pscustomobject]@{ RelativePath = $dllRelativePath; Path = $dllPath; MaximumBytes = 50MB },
@@ -621,6 +691,10 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
 
+          if (-not [string]::IsNullOrEmpty($env:RELEASE_REQUEST_PATH)) {
+              node (Join-Path $env:GITHUB_WORKSPACE 'scripts/release/release-request.cjs') verify-tag
+              if ($LASTEXITCODE -ne 0) { throw 'Request/tag revalidation failed before publishing.' }
+          }
           gh release view $env:RELEASE_TAG --json tagName 2>$null
           $releaseViewExitCode = $LASTEXITCODE
           if ($releaseViewExitCode -eq 0) {
@@ -631,7 +705,10 @@ jobs:
               throw 'Could not verify that the GitHub Release does not already exist.'
           }
 
-          $releaseNotesPath = Join-Path $env:GITHUB_WORKSPACE ('docs/releases/{0}.md' -f $env:RELEASE_TAG)
+          $releaseNotesPath = Join-Path $env:RELEASE_SOURCE_ROOT ('docs/releases/{0}.md' -f $env:RELEASE_TAG)
+          if (-not [string]::IsNullOrEmpty($env:RELEASE_REQUEST_PATH)) {
+              $releaseNotesPath = Join-Path $env:RUNNER_TEMP 'EWT-reviewed-release-notes.md'
+          }
           if (-not [System.IO.File]::Exists($releaseNotesPath)) {
               throw ('The Chinese release notes file is missing: {0}' -f $releaseNotesPath)
           }
@@ -656,6 +733,16 @@ jobs:
               throw 'The Chinese release notes must be non-empty and contain CJK characters.'
           }
 
+          if (-not [string]::IsNullOrEmpty($env:RELEASE_NOTES_SHA256)) {
+              $notesHash = (Get-FileHash -LiteralPath $releaseNotesPath -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($notesHash -cne $env:RELEASE_NOTES_SHA256) {
+                  throw 'The release notes do not match the reviewed request SHA-256.'
+              }
+          }
+          $releaseTitle = if ([string]::IsNullOrEmpty($env:RELEASE_TITLE)) {
+              'Release ' + $env:RELEASE_TAG
+          } else { $env:RELEASE_TITLE }
+
           $releaseArguments = @(
               'dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll'
               'dist/EmbyWatchTogether.zip'
@@ -665,7 +752,7 @@ jobs:
               '--notes-file'
               $releaseNotesPath
               '--title'
-              ('Release ' + $env:RELEASE_TAG)
+              $releaseTitle
           )
           if ($env:RELEASE_CHANNEL -eq 'beta') {
               $releaseArguments += '--prerelease'

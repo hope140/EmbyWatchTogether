@@ -63,6 +63,13 @@ Phase E 在现有 `Watching` 逻辑旁增加独立的 `Recovering` runtime。仅
 
 管理员可在嵌入式管理页保存可选的 GitHub fine-grained token。Token 仅用于 beta Releases API 请求，stable 查询和两条通道的固定资产下载均不携带 Token；未配置 Token 时 beta 继续使用匿名 API。Token 保存在独立的私有存储中，不进入通用插件配置或页面回显。
 
+发布控制面支持独立的[审核请求 PR](release-requests.md)，保留原手动 dispatch。
+只有同仓库专用 PR 向 main 新增唯一请求文件并合并后，受信任控制器才读取固定
+源码 SHA、成功 CI、四段版本、通道、标题及中文说明 hash。控制器与源码分开
+checkout；普通 main 提交不发布。请求和手动入口共用串行签名发布 job，沿用
+`release` Environment 与运行期 GitHub token，不新增持久凭据，tag/Release
+不覆盖。取舍见 [ADR-004](adr/004-reviewed-release-requests.md)。
+
 ## 证据与维护
 
 上述结论来自 `src/EmbyWatchTogether` 的入口、房间、会话、同步和发布信任实现，以及对应 `tests/EmbyWatchTogether.Tests` 测试。新增跨组件约束时先补测试或文档证据，再更新本文；稳定决策另建 ADR。

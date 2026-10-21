@@ -153,18 +153,18 @@ catch {
 $workflowText = $workflowText.Replace("`r`n", "`n").Replace("`r", "`n")
 $onMatch = [System.Text.RegularExpressions.Regex]::Match(
     $workflowText,
-    '(?ms)^on:\s*\n(?<on>.*?)(?=^permissions:\s*$|^jobs:\s*$)')
+    '(?ms)^on:\s*\n(?<on>.*?)(?=^permissions:|^jobs:)')
 Assert-True -Condition $onMatch.Success -Message 'The workflow on block is missing.'
 $onText = $onMatch.Groups['on'].Value
 Assert-Matches -Text $onText -Pattern '(?m)^\s{2}workflow_dispatch:\s*$' -Message 'The workflow must use workflow_dispatch.'
-Assert-NotMatches -Text $onText -Pattern '(?m)^\s{2}(?!workflow_dispatch:)[A-Za-z_][A-Za-z0-9_-]*:\s*$' -Message 'The workflow contains an unapproved trigger.'
+Assert-NotMatches -Text $onText -Pattern '(?m)^\s{2}(?!(?:workflow_dispatch|workflow_call):)[A-Za-z_][A-Za-z0-9_-]*:\s*$' -Message 'The workflow contains an unapproved trigger.'
 Assert-NotMatches -Text $onText -Pattern '(?m)^\s{2}(?:push|pull_request|schedule):\s*$' -Message 'The workflow contains a forbidden automatic trigger.'
 
 $inputsMatch = [System.Text.RegularExpressions.Regex]::Match(
     $onText,
     '(?ms)^\s{4}inputs:\s*\n(?<inputs>.*)')
 Assert-True -Condition $inputsMatch.Success -Message 'The workflow_dispatch inputs block is missing.'
-$inputsText = $inputsMatch.Groups['inputs'].Value
+$inputsText = ($inputsMatch.Groups['inputs'].Value -split '(?m)^  workflow_call:')[0]
 Assert-InputShape -InputsText $inputsText -InputName 'tag'
 Assert-InputShape -InputsText $inputsText -InputName 'key_id'
 Assert-InputShape -InputsText $inputsText -InputName 'channel' -ExpectedType 'choice'
@@ -177,8 +177,8 @@ Assert-Matches -Text $channelInputText -Pattern '(?m)^\s{8}options:\s*$' -Messag
 Assert-Matches -Text $channelInputText -Pattern '(?m)^\s{10}-\s*stable\s*$' -Message 'The channel input must offer stable.'
 Assert-Matches -Text $channelInputText -Pattern '(?m)^\s{10}-\s*beta\s*$' -Message 'The channel input must offer beta.'
 
-Assert-Matches -Text $workflowText -Pattern '(?m)^permissions:\s*$' -Message 'Top-level contents permissions are missing.'
-Assert-Matches -Text $workflowText -Pattern '(?m)^\s{2}contents:\s*write\s*$' -Message 'Top-level contents write permission is missing.'
+Assert-Matches -Text $workflowText -Pattern '(?m)^permissions:\s*\{\}\s*$' -Message 'Top-level permissions must be empty.'
+Assert-NotMatches -Text $workflowText -Pattern '(?m)^\s{2}contents:\s*write\s*$' -Message 'Write permission must be job-scoped.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{4}environment:\s*release\s*$' -Message 'The release GitHub Environment is missing.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{4}permissions:\s*$' -Message 'Job-level permissions are missing.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{6}contents:\s*write\s*$' -Message 'Job-level contents write permission is missing.'
@@ -197,7 +197,7 @@ $setupDotnetActionSha = '26b0ec14cb23fa6904739307f278c14f94c95bf1'
 $actionReferenceMatches = @([System.Text.RegularExpressions.Regex]::Matches(
         $workflowText,
         '(?m)^[ \t]*uses:[ \t]*actions/(?<action>checkout|setup-dotnet)@(?<reference>[^\s#]+)'))
-Assert-Equal -Expected 2 -Actual $actionReferenceMatches.Count -Message 'The workflow must contain exactly one checkout and one setup-dotnet action reference.'
+Assert-Equal -Expected 3 -Actual $actionReferenceMatches.Count -Message 'The workflow must contain separate trusted-control and source checkouts and one setup-dotnet action.'
 foreach ($actionReferenceMatch in $actionReferenceMatches) {
     $actionName = $actionReferenceMatch.Groups['action'].Value
     $actionReference = $actionReferenceMatch.Groups['reference'].Value
@@ -210,7 +210,7 @@ Assert-NotMatches -Text $workflowText `
 Assert-Matches -Text $workflowText `
     -Pattern ('(?m)^[ \t]*uses:[ \t]*actions/checkout@{0}[ \t]+#[ \t]*v5[ \t]*$' -f [System.Text.RegularExpressions.Regex]::Escape($checkoutActionSha)) `
     -Message 'The workflow checkout action is not pinned to the approved v5 SHA.'
-Assert-Matches -Text $workflowText -Pattern '(?m)^\s{10}ref:\s*\$\{\{\s*inputs\.tag\s*\}\}\s*$' -Message 'Checkout must use the requested tag as ref.'
+Assert-Matches -Text $workflowText -Pattern '(?m)^\s{10}ref:\s*\$\{\{\s*inputs\.source_sha\s*\|\|\s*inputs\.tag\s*\}\}\s*$' -Message 'Checkout must use the exact request source SHA or the manual tag.'
 Assert-Matches -Text $workflowText -Pattern '(?m)^\s{10}fetch-depth:\s*0\s*$' -Message 'Checkout must use fetch-depth 0.'
 Assert-Matches -Text $workflowText `
     -Pattern ('(?m)^[ \t]*uses:[ \t]*actions/setup-dotnet@{0}[ \t]+#[ \t]*v5[ \t]*$' -f [System.Text.RegularExpressions.Regex]::Escape($setupDotnetActionSha)) `
@@ -298,7 +298,9 @@ Assert-Matches -Text $runText -Pattern 'releaseNotesPath|releaseNotesBytes|stric
 Assert-Matches -Text $runText -Pattern '(?s)--notes-file.*\$releaseNotesPath' -Message 'The release creation command must use the validated notes file.'
 Assert-NotMatches -Text $runText -Pattern '--generate-notes' -Message 'The release creation command must not generate unreviewed notes.'
 Assert-NotMatches -Text $runText -Pattern '(?im)^\s*(?:Write-Output|Write-Host|echo)\b.*\$(?:releaseNotesText|releaseNotesBytes)\b' -Message 'The workflow must not echo release notes content.'
-Assert-Matches -Text $runText -Pattern '(?s)''--title''.*\(''Release\s*''\s*\+\s*\$env:RELEASE_TAG\)' -Message 'The release title must contain the requested tag.'
+Assert-Matches -Text $runText -Pattern '(?s)''--title''.*\$releaseTitle' -Message 'The release command must use the reviewed title.'
+Assert-Matches -Text $runText -Pattern '''Release '' \+ \$env:RELEASE_TAG' -Message 'The manual title fallback must remain.'
+Assert-Matches -Text $runText -Pattern 'RELEASE_NOTES_SHA256' -Message 'Request notes must be bound to their reviewed hash.'
 $releaseRunBlocks = @($runBlocks | Where-Object { $_ -match 'gh\s+release\s+create' })
 Assert-Equal -Expected 1 -Actual $releaseRunBlocks.Count -Message 'The workflow must have exactly one release creation step.'
 $releaseRunText = [string]$releaseRunBlocks[0]

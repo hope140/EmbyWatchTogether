@@ -95,6 +95,17 @@ jobs:
               exit $LASTEXITCODE
           }
 
+      - name: Setup Node.js for release request tests
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Run release request behavior tests
+        shell: pwsh
+        run: |
+          node --test tests/release-request.tests.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload test results
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
