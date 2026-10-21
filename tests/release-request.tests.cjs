@@ -16,7 +16,7 @@ const request = { schema: 1, tag: 'v1.7.1.0', channel: 'stable', keyId: 'prod-20
 const json = r => JSON.stringify(r, null, 2) + '\n';
 const run = { repository: repo, head_repository: repo, head_sha: source, head_branch: 'main',
   event: 'push', path: '.github/workflows/ci.yml', status: 'completed', conclusion: 'success' };
-const pr = { merged: true, state: 'closed', base: { ref: 'main', repo },
+const pr = { merged: true, state: 'closed', base: { ref: 'main', repo, sha: 'd'.repeat(40) },
   head: { ref: 'release-request/v1.7.1.0', repo, sha: head }, merge_commit_sha: merge, changed_files: 1 };
 const event = { action: 'closed', number: 27, repository: repo, pull_request: { merged: true, merge_commit_sha: merge } };
 const project = '<Project>' + ['Version', 'FileVersion', 'AssemblyVersion']
@@ -176,7 +176,10 @@ test('workflow wiring preserves manual publishing and isolates trusted code from
   assert.match(controller, /startsWith\(github.event.pull_request.head.ref, 'release-request\/'\)/);
   assert.doesNotMatch(controller, /^\s+(push|workflow_run|schedule):/m);
   assert.match(controller, /ref: \$\{\{ github.workflow_sha \}\}/);
-  assert.doesNotMatch(controller, /ref:.*(?:head\.sha|inputs\.source_sha)|secrets: inherit|secrets\./);
+  assert.doesNotMatch(controller, /ref:.*(?:head\.sha|inputs\.source_sha)|secrets: inherit/);
+  assert.match(controller, /secrets:\s*\n\s+WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64: \$\{\{ secrets.WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64 \}\}/);
+  assert.match(release, /workflow_call:\s*\n\s+secrets:\s*\n\s+WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64:\s*\n\s+required: true/);
+  assert.ok(release.indexOf('Require signing environment before creating any tag') < release.indexOf('Revalidate merged request and create immutable tag'));
   assert.match(release, /workflow_dispatch:/);
   assert.match(release, /workflow_call:/);
   assert.match(release, /concurrency:\s*\n\s+group: watch-together-signed-release\s*\n\s+cancel-in-progress: false/);
@@ -226,4 +229,34 @@ test('stable monotonic and revision-only rules are checked before tag creation',
     { tag_name: 'v9.0.0.0', draft: true, prerelease: false },
     { tag_name: 'v1.6.1.0', draft: false, prerelease: false }] });
   assert.deepEqual((await validate(f.args)).request, request);
+});
+
+test('a unique retry must add a byte-identical request and cannot modify reviewed publishing metadata', async () => {
+  const retryPath = '.github/release-requests/v1.7.1.0.retry-2.json';
+  const prepare = () => {
+    const f = fixture();
+    f.data['/pulls/27/files?per_page=100'] = [{ status: 'added', filename: retryPath }];
+    f.data[`/contents/${retryPath}?ref=${merge}`] = structuredClone(f.data[`/contents/${requestPath}?ref=${merge}`]);
+    f.data[`/git/trees/${merge}?recursive=1`].tree.push({ path: retryPath, type: 'blob', mode: '100644' });
+    const originalSha = 'e'.repeat(40);
+    f.data[`/commits?path=${encodeURIComponent(requestPath)}&sha=${pr.base.sha}&per_page=100&page=1`] = [{ sha: originalSha }];
+    f.data[`/commits/${originalSha}`] = { files: [{ filename: requestPath, status: 'added' }] };
+    f.data[`/commits/${originalSha}/pulls?per_page=100`] = [{ ...pr, merged_at: '2026-10-21T00:00:00Z' }];
+    f.data[`/contents/${requestPath}?ref=${originalSha}`] = structuredClone(f.data[`/contents/${requestPath}?ref=${merge}`]);
+    f.data[`/git/trees/${originalSha}?recursive=1`] = structuredClone(f.data[`/git/trees/${merge}?recursive=1`]);
+    return f;
+  };
+  const f = prepare();
+  assert.equal((await validate(f.args)).path, retryPath);
+  const changedCurrent = prepare();
+  changedCurrent.data[`/contents/${requestPath}?ref=${merge}`].content = Buffer.from('Changed later on main').toString('base64');
+  assert.equal((await validate(changedCurrent.args)).path, retryPath);
+  const changed = prepare();
+  changed.data[`/contents/${retryPath}?ref=${merge}`].content = Buffer.from(json({ ...request, title: '改写标题' })).toString('base64');
+  await assert.rejects(validate(changed.args), /byte-identical/);
+  const duplicate = prepare();
+  duplicate.data[`/releases/tags/${request.tag}`] = { tag_name: request.tag };
+  await assert.rejects(validate(duplicate.args), /Release already exists/);
+  for (const suffix of ['1', '0', '02', '-2', '2/extra'])
+    assert.throws(() => parseRequest(json(request), `.github/release-requests/v1.7.1.0.retry-${suffix}.json`));
 });

@@ -27,7 +27,11 @@ function parseRequest(text, path) {
   check(typeof r.tag === 'string' && /^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/.test(r.tag),
     'Tag must be canonical v<four numeric parts>.');
   check(r.tag.slice(1).split('.').every(n => Number(n) <= 65534), 'Assembly version component is out of range.');
-  check(path === `.github/release-requests/${r.tag}.json`, 'Request path must be derived from its canonical tag.');
+  const originalPath = `.github/release-requests/${r.tag}.json`;
+  const retrySuffix = path.startsWith(originalPath.slice(0, -5) + '.retry-') ?
+    path.slice((originalPath.slice(0, -5) + '.retry-').length) : '';
+  check(path === originalPath || /^(?:[2-9]|[1-9][0-9]+)\.json$/.test(retrySuffix),
+    'Request path must be derived from its canonical tag and optional unique retry number.');
   check(['stable', 'beta'].includes(r.channel), 'Unknown release channel.');
   check(r.keyId === 'prod-2026-08', 'Unapproved signing key ID.');
   check(typeof r.sourceSha === 'string' && /^[0-9a-f]{40}$/.test(r.sourceSha), 'Source must be a full immutable SHA.');
@@ -133,6 +137,29 @@ async function checkUnpublished(api, request) {
   return sha;
 }
 
+async function originalRequestBytes(api, path, baseSha, tag) {
+  check(/^[0-9a-f]{40}$/.test(baseSha), 'Original request history requires an immutable base SHA.');
+  let addition = null;
+  for (let page = 1; ; page++) {
+    const history = await api(`/commits?path=${encodeURIComponent(path)}&sha=${baseSha}&per_page=100&page=${page}`);
+    check(Array.isArray(history), 'Invalid original request history.');
+    for (const entry of history) {
+      const commit = await api(`/commits/${entry.sha}`);
+      if (!commit.files?.some(f => f.filename === path && f.status === 'added')) continue;
+      check(addition === null && commit.files.length === 1,
+        'Original request history must have exactly one dedicated addition.');
+      addition = entry.sha;
+    }
+    if (history.length < 100) break;
+  }
+  check(addition !== null, 'Original request addition is unavailable.');
+  const associated = await api(`/commits/${addition}/pulls?per_page=100`);
+  check(associated.some(pr => pr.merged_at && pr.base.ref === 'main' &&
+    pr.base.repo.id === REPOSITORY_ID && pr.head.repo?.id === REPOSITORY_ID &&
+    pr.head.ref === `release-request/${tag}`), 'Original request was not merged through its dedicated PR.');
+  return readRegularFile(api, path, addition);
+}
+
 async function validate({ eventName, repository, event, api }) {
   check(eventName === 'pull_request_target' && repository === REPOSITORY &&
     event.action === 'closed' && event.pull_request?.merged === true &&
@@ -147,10 +174,15 @@ async function validate({ eventName, repository, event, api }) {
   check(pr.changed_files === 1, 'A release-request PR may only add its one request file.');
   const files = await api(`/pulls/${number}/files?per_page=100`);
   check(files.length === 1 && files[0].status === 'added' && !files[0].previous_filename &&
-    /^\.github\/release-requests\/v[0-9.]+\.json$/.test(files[0].filename),
+    /^\.github\/release-requests\/v[0-9.]+(?:\.retry-(?:[2-9]|[1-9][0-9]+))?\.json$/.test(files[0].filename),
     'A release-request PR must add exactly one canonical request file.');
   const path = files[0].filename;
-  const r = parseRequest(strictText(await readRegularFile(api, path, pr.merge_commit_sha)), path);
+  const requestBytes = await readRegularFile(api, path, pr.merge_commit_sha);
+  const r = parseRequest(strictText(requestBytes), path);
+  if (path !== `.github/release-requests/${r.tag}.json`) {
+    const originalBytes = await originalRequestBytes(api, `.github/release-requests/${r.tag}.json`, pr.base.sha, r.tag);
+    check(requestBytes.equals(originalBytes), 'A retry request must be byte-identical to its original reviewed request.');
+  }
   check(pr.head.ref === `release-request/${r.tag}`, 'Release requests require the dedicated version branch.');
   const branch = r.channel === 'stable' ? 'main' : 'beta';
   const comparison = await api(`/compare/${r.sourceSha}...${branch}`);
