@@ -20,6 +20,9 @@ on:
         type: string
 
   workflow_call:
+    secrets:
+      WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64:
+        required: true
     inputs:
       tag:
         required: true
@@ -112,6 +115,16 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
+
+      - name: Require signing environment before creating any tag
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        env:
+          WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64: ${{ secrets.WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64)) {
+              throw 'The signing environment secret is unavailable; no tag will be created.'
+          }
 
       - name: Revalidate merged request and create immutable tag
         if: ${{ inputs.request_path != '' }}

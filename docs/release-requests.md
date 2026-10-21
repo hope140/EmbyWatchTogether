@@ -42,14 +42,20 @@ sourceSha 必须是对应通道分支（stable 为 main，beta 为 beta）的祖
 `pull_request_target: closed` 只在 main 的专用请求 PR 合并后进入校验。
 控制器 checkout `github.workflow_sha`，读取合并提交中的请求；不会 checkout
 或执行 PR head。源码单独 checkout 到 `source/`。只读校验 job 没有签名 secret；
-写 job 进入原 `release` Environment 后重新核实全部请求与输入，再创建 tag。
-私钥仅传入原签名步骤；签名脚本取自受信任控制器 checkout。
+写 job 进入原 `release` Environment 后先检查签名 secret 可用，再重新核实全部请求与输入并创建 tag。
+caller 仅按名称传递该签名 secret，workflow_call 将其声明为 required；值仍由原 Environment 提供，不使用 secrets: inherit。非空检查和签名步骤只在 Actions 内消费它；签名脚本取自受信任控制器 checkout。
 
 所有手动及请求发布共用 `watch-together-signed-release` job 串行锁。tag 只允许
 首次创建；已存在时必须指向相同源码 SHA，绝不移动。已有 Release（包括 draft）
 直接拒绝，不覆盖资产。创建 tag 后失败，可以在查明远端状态、确认没有 Release
 后重跑同一请求 run；若存在部分 Release，先停止调查，不自动删除或覆盖。
 请求路径固定在历史中，旧请求修改不能再次触发。重跑同一已成功请求会拒绝。
+若失败需要修复控制器，旧 run 仍绑定旧 workflow，先独立审核修复 PR，再新增
+`<tag>.retry-N.json`（N 为不带前导零、至少为 2 的整数）的专用请求 PR。
+retry 的 JSON 必须逐字节等于原请求：从固定 base SHA 的 Git 历史寻找唯一的
+原始新增提交，并核实它属于同仓库已合并的专用请求 PR，再按不可变提交读取
+原始 blob。不得用后来 main 上可能被改写的旧文件作为比较依据。不删除旧请求，
+不移动 tag，不覆盖任何 Release；仍须新请求 head CI、源 CI 和版本全部通过。
 
 tag 创建和发布在同一可信 run 内完成，不依赖 `GITHUB_TOKEN` 的 tag push
 触发后续 workflow。Actions token 仅在 job 生命周期使用；校验 job 只读，发布

@@ -46,6 +46,8 @@ jobs:
       actions: read
       pull-requests: read
     uses: ./.github/workflows/release.yml
+    secrets:
+      WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64: ${{ secrets.WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64 }}
     with:
       tag: ${{ needs.validate.outputs.tag }}
       channel: ${{ needs.validate.outputs.channel }}
