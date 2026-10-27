@@ -474,7 +474,10 @@ namespace Emby.Plugins.WatchTogether
                             sameItem,
                             now,
                             out var stalePendingCommand);
-                        if (staleDeferredCommand || stalePendingCommand)
+                        // Waiting commands are pruned per target; resetting here
+                        // would renew an unchanged peer's exhausted Pause budget.
+                        if ((staleDeferredCommand || stalePendingCommand) &&
+                            runtime.State != RoomState.Waiting)
                         {
                             // A command captured for a different session or item
                             // must never be acknowledged or retried against the
@@ -516,12 +519,13 @@ namespace Emby.Plugins.WatchTogether
                             runtime.Error = null;
                         }
 
-                        if (sameItem &&
+                        if (eligible &&
                             string.Equals(runtime.Error, WaitingPauseRetryLimitError, StringComparison.Ordinal))
                         {
-                            // The item mismatch that caused the bounded Waiting
-                            // Pause cycle has recovered. Drop that old Waiting
-                            // command state so the pair can enter a new Barrier.
+                            // Same-item snapshots do not prove that the failure
+                            // which caused Waiting has recovered (remote control
+                            // may still be unavailable). Renew the budget only
+                            // when the complete pair is eligible for a Barrier.
                             runtime.ResetToWaiting();
                         }
 

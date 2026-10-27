@@ -1586,6 +1586,105 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(1, runtime.WaitingPauseRetries["u1"].Attempts);
         }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void WaitingPauseRetryLimit_SameItemRemoteFailureRemainsBounded(bool immediateFailure)
+        {
+            var room = CreateRoom();
+            using var engine = CreateEngine();
+            _issuer.FailuresRemaining = immediateFailure ? 1000 : 0;
+            var capabilities = new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek" });
+            var runtime = _rooms.GetRuntime(room.Id);
+            for (int poll = 0; poll < 20; poll++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", false, 0, supportsRemoteControl: false,
+                        capabilities: capabilities, lastActivityDateUtc: _clock.Now),
+                    Snapshot("s2", "u2", false, 0, supportsRemoteControl: false,
+                        capabilities: capabilities, lastActivityDateUtc: _clock.Now));
+                engine.PollOnce(_clock.Now);
+                // Repeated polls of the same snapshot must not renew the budget.
+                engine.PollOnce(_clock.Now);
+                _clock.Advance(SyncConstants.PendingTimeoutSeconds + SyncConstants.WaitingPauseRetryDelaySeconds + 1);
+            }
+            Assert.Equal(2 * SyncConstants.MaxWaitingPauseAttempts, _issuer.Issued.Count);
+            Assert.All(runtime.WaitingPauseRetries.Values, retry => Assert.True(retry.Exhausted));
+            Assert.Equal("waiting pause retry limit reached", runtime.Error);
+            Assert.Empty(runtime.Pending);
+
+            // Late pause confirmation is not remote-control recovery.
+            SetCandidates(
+                Snapshot("s1", "u1", true, 0, supportsRemoteControl: false,
+                    capabilities: capabilities, lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", true, 0, supportsRemoteControl: false,
+                    capabilities: capabilities, lastActivityDateUtc: _clock.Now));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Waiting, runtime.State);
+            Assert.Equal("waiting pause retry limit reached", runtime.Error);
+            Assert.Equal(2 * SyncConstants.MaxWaitingPauseAttempts, _issuer.Issued.Count);
+
+            // Actual eligibility recovery may start synchronization again.
+            _issuer.FailuresRemaining = 0;
+            SetCandidates(
+                Snapshot("s1", "u1", false, 0, lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", false, 0, lastActivityDateUtc: _clock.Now));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Barrier, runtime.State);
+            Assert.Null(runtime.Error);
+            Assert.Empty(runtime.WaitingPauseRetries);
+            SetCandidates(
+                Snapshot("s1", "u1", true, 0, lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", true, 0, lastActivityDateUtc: _clock.Now));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            SetCandidates(
+                Snapshot("s1", "u1", false, 0, lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", false, 0, lastActivityDateUtc: _clock.Now));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RoomState.Watching, runtime.State);
+        }
+
+        [Theory]
+        [InlineData("session", true)]
+        [InlineData("session", false)]
+        [InlineData("item", true)]
+        [InlineData("item", false)]
+        [InlineData("capability", true)]
+        [InlineData("capability", false)]
+        public void WaitingPauseRetryLimit_OnlyChangedTargetGetsNewBudget(string change, bool immediateFailure)
+        {
+            var room = CreateRoom();
+            using var engine = CreateEngine();
+            _issuer.FailuresRemaining = immediateFailure ? 1000 : 0;
+            var capabilities = new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek" });
+            for (int attempt = 0; attempt < SyncConstants.MaxWaitingPauseAttempts; attempt++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", false, 0, supportsRemoteControl: false,
+                        capabilities: capabilities, lastActivityDateUtc: _clock.Now),
+                    Snapshot("s2", "u2", false, 0, supportsRemoteControl: false,
+                        capabilities: capabilities, lastActivityDateUtc: _clock.Now));
+                engine.PollOnce(_clock.Now);
+                _clock.Advance(SyncConstants.PendingTimeoutSeconds + SyncConstants.WaitingPauseRetryDelaySeconds + 1);
+            }
+            int count = _issuer.Issued.Count;
+            SetCandidates(
+                Snapshot(change == "session" ? "s1-new" : "s1", "u1", false, 0,
+                    itemId: change == "item" ? "i2" : "i1", supportsRemoteControl: false,
+                    capabilities: change == "capability"
+                        ? new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek", "DisplayMessage" })
+                        : capabilities, lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", false, 0, supportsRemoteControl: false,
+                    capabilities: capabilities, lastActivityDateUtc: _clock.Now));
+            engine.PollOnce(_clock.Now);
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(count + 1, _issuer.Issued.Count);
+            Assert.Equal(1, runtime.WaitingPauseRetries["u1"].Attempts);
+            Assert.True(runtime.WaitingPauseRetries["u2"].Exhausted);
+            Assert.Equal("waiting pause retry limit reached", runtime.Error);
+        }
         [Fact]
         public void WaitingPauseRetryLimit_SameItemRecoveryStartsNewBarrier()
         {

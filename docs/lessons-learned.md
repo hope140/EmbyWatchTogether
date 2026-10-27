@@ -273,3 +273,10 @@
 - 规则：排队时的身份只能作为目标绑定，发送前重新选取当前会话并核验原房间引用、服务器、joined 成员、Session/Item、能力、快照保护、通知设置和停止状态；消息网络发送在 gate 外执行。停止清空等待队列，取消在途工作而不等待不协作传输或取消回调。
 - 集成约束：仅移出轮询线程仍不够；若 DisplayMessage 与播放控制占同一会话槽，慢提示仍可能使 Pause/Seek 被误判为超时。内部通道前缀隔离占位，Emby 接收原 SessionId，总未完成传输容量继续受限。
 - 验证：SyncNotificationDispatcherTests、SyncEnginePerformanceTests 的容量、异常恢复、边界过期、等待 gate、身份失效与 Stop/Dispose 用例，以及 SessionBridgeCommandIssuerTests 的双向通道隔离、容量和迟到清理用例。取舍见 [ADR-005](adr/005-sync-notification-dispatch.md)。
+
+## 39. Waiting Pause exhaustion belongs to each target condition
+
+- Same-item snapshots alone do not prove remote-control eligibility recovered. Clear the exhausted Waiting cycle only when the complete pair is eligible for a new Barrier.
+- Waiting stale commands are already discarded individually. A whole-runtime reset on one stale Session/Item must not renew an unchanged peer's exhausted budget; retain per-target identity/capability pruning.
+- Evidence: SyncEngineTests.WaitingPauseRetryLimit_SameItemRemoteFailureRemainsBounded covers immediate failure, accepted/no ACK, repeated polls, late paused status and full recovery. OnlyChangedTargetGetsNewBudget covers Session/Item/capability changes with immediate failure and unacknowledged transport success. The original same-item loop and stale Pending reset both fail their corresponding regressions before the guards.
+- Explicit user resync is an intentional new cycle. These deterministic tests do not establish the network/client root cause or continuous playback after Unpause. No architecture or ADR update is needed.
