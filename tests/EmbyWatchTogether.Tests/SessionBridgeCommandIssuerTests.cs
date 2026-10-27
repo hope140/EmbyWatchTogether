@@ -12,6 +12,7 @@ using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
 {
+    [Collection(TransportTimingCollection.Name)]
     public class SessionBridgeCommandIssuerTests
     {
         [Fact]
