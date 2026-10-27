@@ -20,11 +20,18 @@ namespace Emby.Plugins.WatchTogether
     {
         private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
         private readonly SessionBridge _bridge;
+        private readonly BoundedSessionDispatch _dispatch;
         private readonly ILogger _logger;
 
         public SessionBridgeCommandIssuer(SessionBridge bridge, ILogManager logManager = null)
+            : this(bridge, logManager, ExternalCallTimeout)
+        {
+        }
+
+        internal SessionBridgeCommandIssuer(SessionBridge bridge, ILogManager logManager, TimeSpan dispatchTimeout)
         {
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
+            _dispatch = new BoundedSessionDispatch(dispatchTimeout);
             try
             {
                 _logger = logManager?.GetLogger(nameof(SessionBridgeCommandIssuer));
@@ -111,16 +118,19 @@ namespace Emby.Plugins.WatchTogether
                 switch (command)
                 {
                     case RemoteCommands.Pause:
-                        _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, cancellationToken)
-                            .GetAwaiter().GetResult();
+                        _dispatch.Execute(snapshot.SessionId,
+                            token => _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, token),
+                            cancellationToken);
                         break;
                     case RemoteCommands.Unpause:
-                        _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, cancellationToken)
-                            .GetAwaiter().GetResult();
+                        _dispatch.Execute(snapshot.SessionId,
+                            token => _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, token),
+                            cancellationToken);
                         break;
                     case RemoteCommands.Seek:
-                        _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, cancellationToken)
-                            .GetAwaiter().GetResult();
+                        _dispatch.Execute(snapshot.SessionId,
+                            token => _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, token),
+                            cancellationToken);
                         break;
                     default:
                         error = "remote_control_unsupported";
@@ -223,8 +233,9 @@ namespace Emby.Plugins.WatchTogether
                     HandoffTrace.Dispatch(_logger, roomId, snapshot.SessionId, itemId, now);
                     dispatchTimer = Stopwatch.StartNew();
                 }
-                _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, cancellationToken)
-                    .GetAwaiter().GetResult();
+                _dispatch.Execute(snapshot.SessionId,
+                    token => _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, token),
+                    cancellationToken);
                 if (_logger != null)
                 {
                     HandoffTrace.DispatchResult(
@@ -338,14 +349,10 @@ namespace Emby.Plugins.WatchTogether
 
             try
             {
-                _bridge.SendDisplayMessageAsync(
-                    controllingUserId,
-                    snapshot.SessionId,
-                    header,
-                    text,
-                    timeoutMs,
-                    cancellationToken)
-                    .GetAwaiter().GetResult();
+                _dispatch.Execute(snapshot.SessionId,
+                    token => _bridge.SendDisplayMessageAsync(
+                        controllingUserId, snapshot.SessionId, header, text, timeoutMs, token),
+                    cancellationToken);
                 error = null;
                 return true;
             }

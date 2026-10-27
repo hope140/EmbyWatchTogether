@@ -400,6 +400,9 @@ namespace Emby.Plugins.WatchTogether
                                 StringComparison.Ordinal);
                             if (!stopAlreadyHandled)
                             {
+                                // Confirmed Stop terminates the old playback sequence.
+                                // Its pending Unpause/Seek must not suppress the peer Pause.
+                                runtime.Pending.Clear();
                                 if (options.PauseOtherOnPlaybackStop)
                                 {
                                     PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Session;
@@ -421,6 +422,324 @@ namespace Emby.Plugins.WatchTogether.Tests
             manager.Verify(m => m.SendPlayCommand(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()),
                 Times.Exactly(5));
+        }
+
+        [Theory]
+        [InlineData("Pause", false)]
+        [InlineData("Pause", true)]
+        [InlineData("PlayItem", false)]
+        [InlineData("PlayItem", true)]
+        [InlineData("Message", false)]
+        [InlineData("Message", true)]
+        public async Task BoundedDispatch_UncooperativeTaskRetainsSharedSessionSlotUntilLateCompletion(
+            string operation, bool lateFault)
+        {
+            var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int dispatches = 0;
+            CancellationToken transportToken = default;
+            var manager = ManagerWithTransport((_, token) =>
+            {
+                if (Interlocked.Increment(ref dispatches) == 1)
+                {
+                    transportToken = token;
+                    entered.TrySetResult(true);
+                    return release.Task;
+                }
+                return Task.CompletedTask;
+            });
+            using var bridge = new SessionBridge(manager.Object);
+            var exceptions = new List<Exception>();
+            var issuer = NewBoundedIssuer(bridge, TimeSpan.FromMilliseconds(100),
+                NewLogManager(new List<string>(), exceptions).Object);
+            try
+            {
+                var pending = Task.Run(() => Dispatch(issuer, operation));
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                var result = await pending.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.False(result.accepted);
+                Assert.Equal("command_timeout", result.error);
+                Assert.True(SpinWait.SpinUntil(() => transportToken.IsCancellationRequested, 1000));
+                foreach (var otherOperation in new[] { "Pause", "PlayItem", "Message" })
+                {
+                    var blocked = Dispatch(issuer, otherOperation);
+                    Assert.False(blocked.accepted);
+                    Assert.Equal("command_timeout", blocked.error);
+                }
+                Assert.Equal(1, Volatile.Read(ref dispatches));
+                int loggedBeforeRelease = exceptions.Count;
+                if (lateFault) release.TrySetException(new InvalidOperationException("late transport detail"));
+                else release.TrySetResult(true);
+
+                // Completion releases the slot; no late result logs or automatic resend.
+                await Task.Delay(30);
+                Assert.Equal(1, Volatile.Read(ref dispatches));
+                Assert.Equal(loggedBeforeRelease, exceptions.Count);
+                (bool accepted, string error) recovered = default;
+                for (int attempt = 0; attempt < 100; attempt++)
+                {
+                    recovered = Dispatch(issuer, operation);
+                    if (recovered.accepted) break;
+                    await Task.Delay(10);
+                }
+                Assert.True(recovered.accepted, recovered.error);
+                Assert.Equal(2, Volatile.Read(ref dispatches));
+            }
+            finally
+            {
+                release.TrySetResult(true);
+            }
+        }
+
+        [Theory]
+        [InlineData("Pause")]
+        [InlineData("PlayItem")]
+        [InlineData("Message")]
+        public async Task BoundedDispatch_SynchronouslyBlockedFactoryDoesNotBlockCaller(string operation)
+        {
+            using var release = new ManualResetEventSlim(false);
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var returned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var manager = ManagerWithTransport((_, token) =>
+            {
+                entered.TrySetResult(true);
+                release.Wait();
+                returned.TrySetResult(true);
+                return Task.CompletedTask;
+            });
+            using var bridge = new SessionBridge(manager.Object);
+            var issuer = NewBoundedIssuer(bridge, TimeSpan.FromMilliseconds(100));
+            try
+            {
+                var pending = Task.Run(() => Dispatch(issuer, operation));
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                var result = await pending.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.False(result.accepted);
+                Assert.Equal("command_timeout", result.error);
+                Assert.False(returned.Task.IsCompleted);
+            }
+            finally
+            {
+                release.Set();
+                await returned.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void BoundedDispatch_CancellationAndPreCancellationReturnStableTimeout(bool preCancelled)
+        {
+            int dispatches = 0;
+            var manager = ManagerWithTransport((_, token) =>
+            {
+                Interlocked.Increment(ref dispatches);
+                return Task.Delay(Timeout.Infinite, token);
+            });
+            using var bridge = new SessionBridge(manager.Object);
+            var issuer = NewBoundedIssuer(bridge, TimeSpan.FromMilliseconds(100));
+            using var cancellation = new CancellationTokenSource();
+            if (preCancelled) cancellation.Cancel();
+            var accepted = issuer.TryIssuePlayItem("room", "admin", "user", NewPlayItemSnapshot(),
+                "42", DateTimeOffset.UtcNow, cancellation.Token, out var error);
+            Assert.False(accepted);
+            Assert.Equal("command_timeout", error);
+            Assert.Equal(preCancelled ? 0 : 1, Volatile.Read(ref dispatches));
+        }
+
+        [Fact]
+        public void BoundedDispatch_TotalUnfinishedFlightsAreCappedAndRecoverAfterCompletion()
+        {
+            var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int dispatches = 0;
+            var manager = ManagerWithTransport((_, token) =>
+            {
+                Interlocked.Increment(ref dispatches);
+                return release.Task;
+            });
+            using var bridge = new SessionBridge(manager.Object);
+            var issuer = NewBoundedIssuer(bridge, TimeSpan.FromMilliseconds(100));
+            try
+            {
+                for (int i = 0; i < 64; i++)
+                {
+                    var result = Dispatch(issuer, "PlayItem", "session-" + i);
+                    Assert.False(result.accepted);
+                    Assert.Equal("command_timeout", result.error);
+                }
+                Assert.Equal(64, Volatile.Read(ref dispatches));
+                var saturated = Dispatch(issuer, "PlayItem", "session-overflow");
+                Assert.False(saturated.accepted);
+                Assert.Equal("command_timeout", saturated.error);
+                Assert.Equal(64, Volatile.Read(ref dispatches));
+            }
+            finally
+            {
+                release.TrySetResult(true);
+            }
+            Assert.True(SpinWait.SpinUntil(() => Dispatch(issuer, "PlayItem", "session-overflow").accepted, 2000));
+            Assert.Equal(65, Volatile.Read(ref dispatches));
+        }
+
+        [Fact]
+        public async Task BoundedDispatch_ExpiredFactoryNeverDispatchesAfterQueueContention()
+        {
+            int dispatches = 0;
+            var manager = ManagerWithTransport((_, token) =>
+            {
+                Interlocked.Increment(ref dispatches);
+                return Task.CompletedTask;
+            });
+            using var bridge = new SessionBridge(manager.Object);
+            var issuer = NewBoundedIssuer(bridge, TimeSpan.FromMilliseconds(100));
+            var dispatch = typeof(SessionBridgeCommandIssuer).GetField("_dispatch", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(issuer);
+            var admissionGate = dispatch.GetType().GetField("_lock", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(dispatch);
+            var result = new TaskCompletionSource<(bool accepted, string error)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var caller = new Thread(() =>
+            {
+                try { result.TrySetResult(Dispatch(issuer, "PlayItem")); }
+                catch (Exception exception) { result.TrySetException(exception); }
+            }) { IsBackground = true };
+            // Delay admission past the deadline, deterministically producing an
+            // already-expired queued factory without changing global pool limits.
+            lock (admissionGate)
+            {
+                caller.Start();
+                Assert.True(SpinWait.SpinUntil(() =>
+                    (caller.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, 2000));
+                Thread.Sleep(150);
+            }
+            var expired = await result.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(expired.accepted);
+            Assert.Equal("command_timeout", expired.error);
+            Assert.True(caller.Join(2000));
+            Assert.Equal(0, Volatile.Read(ref dispatches));
+            Assert.True(SpinWait.SpinUntil(() => Dispatch(issuer, "PlayItem").accepted, 2000));
+            Assert.Equal(1, Volatile.Read(ref dispatches));
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task BoundedDispatch_CompletedTransportDoesNotBlockSuccessorWhileCleanupWaits(bool successorPending)
+        {
+            var firstRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var successorRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int dispatches = 0;
+            var manager = ManagerWithTransport((_, token) =>
+            {
+                int attempt = Interlocked.Increment(ref dispatches);
+                if (attempt == 1)
+                {
+                    entered.TrySetResult(true);
+                    return firstRelease.Task;
+                }
+                return attempt == 2 && successorPending ? successorRelease.Task : Task.CompletedTask;
+            });
+            using var bridge = new SessionBridge(manager.Object);
+            var issuer = NewBoundedIssuer(bridge, TimeSpan.FromSeconds(1));
+            var dispatch = typeof(SessionBridgeCommandIssuer).GetField("_dispatch", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(issuer);
+            var admissionGate = dispatch.GetType().GetField("_lock", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(dispatch);
+            using var firstReturned = new ManualResetEventSlim(false);
+            (bool accepted, string error) firstResult = default;
+            Exception firstException = null;
+            var caller = new Thread(() =>
+            {
+                try { firstResult = Dispatch(issuer, "PlayItem"); }
+                catch (Exception exception) { firstException = exception; }
+                finally { firstReturned.Set(); }
+            }) { IsBackground = true };
+            try
+            {
+                caller.Start();
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(SpinWait.SpinUntil(() =>
+                    (caller.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, 2000));
+                lock (admissionGate)
+                {
+                    // Hold cleanup after the transport publishes completion.
+                    // This thread can reenter admission while that callback waits.
+                    firstRelease.TrySetResult(true);
+                    Assert.True(firstReturned.Wait(2000));
+                    Assert.Null(firstException);
+                    Assert.True(firstResult.accepted, firstResult.error);
+                    var successor = Dispatch(issuer, "Message");
+                    Assert.Equal(!successorPending, successor.accepted);
+                    Assert.Equal(successorPending ? "command_timeout" : null, successor.error);
+                    Assert.Equal(2, Volatile.Read(ref dispatches));
+                }
+                if (successorPending)
+                {
+                    // The old continuation must not delete the successor's slot.
+                    await Task.Delay(30);
+                    var blocked = Dispatch(issuer, "Pause");
+                    Assert.False(blocked.accepted);
+                    Assert.Equal("command_timeout", blocked.error);
+                    Assert.Equal(2, Volatile.Read(ref dispatches));
+                }
+                else
+                {
+                    Assert.True(Dispatch(issuer, "Pause").accepted);
+                    Assert.Equal(3, Volatile.Read(ref dispatches));
+                }
+            }
+            finally
+            {
+                firstRelease.TrySetResult(true);
+                successorRelease.TrySetResult(true);
+                Assert.True(caller.Join(2000));
+            }
+        }
+
+        private static SessionBridgeCommandIssuer NewBoundedIssuer(
+            SessionBridge bridge, TimeSpan timeout, ILogManager logManager = null)
+        {
+            return (SessionBridgeCommandIssuer)Activator.CreateInstance(
+                typeof(SessionBridgeCommandIssuer), BindingFlags.Instance | BindingFlags.NonPublic,
+                null, new object[] { bridge, logManager, timeout }, null);
+        }
+
+        private static (bool accepted, string error) Dispatch(
+            SessionBridgeCommandIssuer issuer, string operation, string sessionId = "session")
+        {
+            var snapshot = new SessionSnapshot(sessionId, "user", "42", "source", 0, 1,
+                false, 1, false, true,
+                new SessionCapabilityReport(true, new[] { RemoteCommands.Pause, RemoteCommands.DisplayMessage }));
+            string error;
+            bool accepted;
+            switch (operation)
+            {
+                case "PlayItem":
+                    accepted = issuer.TryIssuePlayItem("room", "admin", "user", snapshot, "42", DateTimeOffset.UtcNow, out error);
+                    break;
+                case "Message":
+                    accepted = issuer.TryIssueMessage("room", "admin", "user", snapshot, "header", "text", 3000, DateTimeOffset.UtcNow, out error);
+                    break;
+                default:
+                    accepted = issuer.TryIssue("room", "admin", "user", snapshot, RemoteCommands.Pause, null, DateTimeOffset.UtcNow, out error);
+                    break;
+            }
+            return (accepted, error);
+        }
+
+        private static Mock<ISessionManager> ManagerWithTransport(Func<string, CancellationToken, Task> transport)
+        {
+            var manager = NewManager();
+            manager.Setup(m => m.SendPlaystateCommand(It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                .Returns<string, string, PlaystateRequest, CancellationToken>((_, sessionId, request, token) => transport(sessionId, token));
+            manager.Setup(m => m.SendPlayCommand(It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                .Returns<string, string, PlayRequest, CancellationToken>((_, sessionId, request, token) => transport(sessionId, token));
+            manager.Setup(m => m.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()))
+                .Returns<string, string, MessageCommand, CancellationToken>((_, sessionId, request, token) => transport(sessionId, token));
+            return manager;
         }
 
         private static Mock<ISessionManager> NewManager()

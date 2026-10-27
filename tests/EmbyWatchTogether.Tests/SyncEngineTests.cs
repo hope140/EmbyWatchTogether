@@ -5711,6 +5711,136 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(3000, message.timeoutMs);
         }
 
+        [Fact]
+        public void ConfirmedStop_AcknowledgedUnpauseDuringDebounceDoesNotSuppressPeerPause()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatchingPaused(engine, room, 50);
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
+                Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Equal(RemoteCommands.Unpause, runtime.Pending["u2"].Command);
+
+            SetCandidates(Snapshot("s2", "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Watching, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Equal(RemoteCommands.Unpause, runtime.Pending["u2"].Command);
+            _issuer.Issued.Clear();
+            _clock.Advance(2.1);
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(_issuer.Issued, issue => issue.userId == "u2" && issue.command == RemoteCommands.Pause);
+            Assert.Empty(runtime.Pending);
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            Assert.Single(_issuer.Issued);
+        }
+
+        [Theory]
+        [InlineData("Pause", true, false)]
+        [InlineData("Seek", true, false)]
+        [InlineData("Unpause", false, false)]
+        [InlineData("Seek", true, true)]
+        public void ConfirmedStop_TerminatesPendingSequenceWhileRespectingCurrentTargetAndPauseOption(
+            string pendingCommand, bool pauseEnabled, bool replacementSession)
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine(pauseOtherOnPlaybackStop: pauseEnabled);
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+            runtime.Pending["u2"] = new PendingCommand
+            {
+                UserId = "u2", SessionId = "s2", ItemId = "i1",
+                Command = pendingCommand, PositionTicks = 55 * SessionSnapshot.TicksPerSecond,
+                IssuedAtUtc = _clock.Now,
+            };
+            string currentSession = replacementSession ? "s2-replacement" : "s2";
+            SetCandidates(Snapshot(currentSession, "u2", paused: false, position: 51 * SessionSnapshot.TicksPerSecond));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _issuer.Issued.Clear();
+            _clock.Advance(2.1);
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+            if (pauseEnabled && !replacementSession)
+            {
+                var pause = Assert.Single(_issuer.Issued);
+                Assert.Equal("u2", pause.userId);
+                Assert.Equal("s2", pause.sessionId);
+                Assert.Equal(RemoteCommands.Pause, pause.command);
+            }
+            else
+            {
+                // A replacement observed inside the stop window is itself a
+                // stopped target; it must not inherit the old session's command.
+                Assert.Empty(_issuer.Issued);
+            }
+            Assert.Empty(runtime.Pending);
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(pauseEnabled && !replacementSession ? 1 : 0, _issuer.Issued.Count);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task PollOnce_UncooperativeTransportTimesOutAndNextRoomStillRuns(bool lateFault)
+        {
+            var first = CreateRoom();
+            var second = _rooms.CreateRoom("server-1", "http://emby", "second", "admin-1",
+                new[] { "u3", "u4" }, "u3");
+            var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int blockedDispatches = 0;
+            var manager = new Mock<ISessionManager>();
+            manager.Setup(m => m.SendPlaystateCommand(It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                .Returns<string, string, PlaystateRequest, CancellationToken>((_, sessionId, request, token) =>
+                {
+                    if (sessionId == "s1")
+                    {
+                        Interlocked.Increment(ref blockedDispatches);
+                        entered.TrySetResult(true);
+                        return release.Task;
+                    }
+                    return Task.CompletedTask;
+                });
+            using var bridge = new SessionBridge(manager.Object);
+            var issuer = (SessionBridgeCommandIssuer)Activator.CreateInstance(
+                typeof(SessionBridgeCommandIssuer), BindingFlags.Instance | BindingFlags.NonPublic,
+                null, new object[] { bridge, null, TimeSpan.FromMilliseconds(100) }, null);
+            using var engine = new SyncEngine(_rooms, _provider, issuer, () => "server-1", () => _clock.Now,
+                notifyOtherOnPlaybackStop: false, notifyOnSyncActions: false);
+            SetCandidates(
+                Snapshot("s1", "u1", false, 0), Snapshot("s2", "u2", false, 0),
+                Snapshot("s3", "u3", false, 0), Snapshot("s4", "u4", false, 0));
+            try
+            {
+                var poll = Task.Run(() => engine.PollOnce(_clock.Now));
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                var results = await poll.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(2, results.Count);
+                Assert.Equal(RoomState.Waiting, _rooms.GetRuntime(first.Id).State);
+                Assert.Equal(RoomState.Barrier, _rooms.GetRuntime(second.Id).State);
+                var firstRuntime = _rooms.GetRuntime(first.Id);
+                var error = firstRuntime.Error;
+                var pending = firstRuntime.Pending.Count;
+                if (lateFault) release.TrySetException(new InvalidOperationException("late transport detail"));
+                else release.TrySetResult(true);
+                await Task.Delay(30);
+                Assert.Equal(error, firstRuntime.Error);
+                Assert.Equal(pending, firstRuntime.Pending.Count);
+                Assert.Equal(RoomState.Waiting, firstRuntime.State);
+                Assert.Equal(1, Volatile.Read(ref blockedDispatches));
+            }
+            finally
+            {
+                release.TrySetResult(true);
+            }
+        }
+
         private void SetCandidates(params SessionSnapshot[] snapshots)
         {
             _provider.Snapshots = snapshots.ToList();
