@@ -33,6 +33,10 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 - `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后创建者或管理员可按房间权限结束自助房间。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 在当前房间 gate 内重新校验房间、成员和服务器身份，返回只读、有界、脱敏的同步诊断 DTO。诊断事件环、当前选中快照、Pending、Handoff、Barrier、Recovery 和 drift telemetry 仅驻留 `RoomRuntime` 内存，房间删除或运行时重建时丢弃，不写入 `rooms.json`；导出使用 `userA`/`userB` 别名、短 hash 和稳定错误分类，不包含用户名、GUID、Token、路径或异常文本。
 
+内置 SessionBridgeCommandIssuer 通过 BoundedSessionDispatch 执行播放、PlayItem 和消息传输。独立的 5 秒有界等待涵盖同步调用入口和不响应取消的 Task；同一 Session 的未完成传输共用一个槽位，每个 issuer 最多保留 64 个未完成传输。发送器在超时返回后不会以迟到结果回写 RoomRuntime；旧传输实际完成后释放槽位，准入同时依据 Task 的完成状态清理已完成项，避免清理回调稍晚而误拒绝下一条正常命令。已进入底层的物理发送不能强制撤回，取消令牌仍传入下层，未完成期间拒绝叠加请求。
+
+Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。
+
 ## 嵌入式 UI
 
 本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV16`、`WatchTogetherInviteV16`、`WatchTogetherSettingsV16`，共享 `WatchTogetherNativeV16.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
