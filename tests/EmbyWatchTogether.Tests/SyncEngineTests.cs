@@ -590,15 +590,16 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public async Task PollOnce_RoomDeletedAfterRuntimeLookup_DoesNotIssueCommands()
+        public void PollOnce_RoomDeletedAfterRuntimeLookup_DoesNotIssueCommands()
         {
+            var timeout = TimeSpan.FromSeconds(10);
             var room = CreateRoom();
-            var provider = new BlockingSnapshotProvider(new[]
+            using var provider = new BlockingSnapshotProvider(new[]
             {
                 Snapshot("s1", "u1", paused: false, position: 0),
                 Snapshot("s2", "u2", paused: false, position: 0),
             });
-            var engine = new SyncEngine(
+            using var engine = new SyncEngine(
                 _rooms,
                 provider,
                 _issuer,
@@ -606,27 +607,48 @@ namespace Emby.Plugins.WatchTogether.Tests
                 () => _clock.Now,
                 messageIssuer: _messageIssuer);
 
-            var pollTask = Task.Run(() => engine.PollOnce(_clock.Now));
+            // Neither worker nor the entry handshake needs a free thread-pool
+            // worker while the snapshot provider is deliberately blocked.
+            IReadOnlyList<RoomPollResult> results = null;
+            Exception pollFailure = null;
+            Exception deleteFailure = null;
+            bool deleted = false;
+            var pollThread = new Thread(() =>
+            {
+                try { results = engine.PollOnce(_clock.Now); }
+                catch (Exception ex) { pollFailure = ex; }
+            }) { IsBackground = true };
+            var deleteThread = new Thread(() =>
+            {
+                try { deleted = _rooms.DeleteRoom(room.Id); }
+                catch (Exception ex) { deleteFailure = ex; }
+            }) { IsBackground = true };
+            bool deletionStarted = false;
+            pollThread.Start();
             try
             {
-                await provider.EnteredTask.WaitAsync(TimeSpan.FromSeconds(2));
-                Assert.True(_rooms.DeleteRoom(room.Id));
+                Assert.True(provider.Entered.Wait(timeout), "Poll did not enter the snapshot provider.");
+                deleteThread.Start();
+                deletionStarted = true;
+                Assert.True(deleteThread.Join(timeout), "Room deletion blocked while snapshots were being read.");
+                if (deleteFailure != null)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(deleteFailure).Throw();
+                Assert.True(deleted);
             }
             finally
             {
                 provider.Release.Set();
+                bool pollStopped = pollThread.Join(timeout);
+                bool deletionStopped = !deletionStarted || deleteThread.Join(timeout);
+                Assert.True(pollStopped && deletionStopped,
+                    $"Race workers did not finish after releasing snapshots: poll={pollStopped}, deletion={deletionStopped}.");
             }
 
-            try
-            {
-                Assert.Empty(await pollTask);
-                Assert.Empty(_issuer.Issued);
-                Assert.Null(_rooms.GetRuntime(room.Id));
-            }
-            finally
-            {
-                engine.Dispose();
-            }
+            if (pollFailure != null)
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(pollFailure).Throw();
+            Assert.Empty(results);
+            Assert.Empty(_issuer.Issued);
+            Assert.Null(_rooms.GetRuntime(room.Id));
         }
 
         [Fact]
@@ -5844,7 +5866,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
-        private sealed class BlockingSnapshotProvider : ISessionSnapshotProvider
+        private sealed class BlockingSnapshotProvider : ISessionSnapshotProvider, IDisposable
         {
             private readonly IReadOnlyList<SessionSnapshot> _snapshots;
 
@@ -5853,18 +5875,22 @@ namespace Emby.Plugins.WatchTogether.Tests
                 _snapshots = snapshots;
             }
 
-            private readonly TaskCompletionSource<bool> _entered =
-                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            public Task EnteredTask => _entered.Task;
+            public ManualResetEventSlim Entered { get; } = new ManualResetEventSlim(false);
 
             public ManualResetEventSlim Release { get; } = new ManualResetEventSlim(false);
 
             public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
             {
-                _entered.TrySetResult(true);
-                Release.Wait(TimeSpan.FromSeconds(5));
+                Entered.Set();
+                // Only the test's finally block may release this checkpoint.
+                Release.Wait();
                 return _snapshots;
+            }
+
+            public void Dispose()
+            {
+                Entered.Dispose();
+                Release.Dispose();
             }
         }
 
