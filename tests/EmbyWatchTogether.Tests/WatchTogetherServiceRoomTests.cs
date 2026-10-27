@@ -934,6 +934,65 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void StatusReason_ConcurrentErrorChangesDoNotThrowForRoomsOrState()
+        {
+            var user1 = Guid.NewGuid().ToString("N");
+            var user2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", user1, new[] { user1, user2 }, user1);
+            var runtime = manager.GetRuntime(room.Id);
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var service = NewService(user1, true);
+            var errors = new[] { "media handoff timed out", "participant resync timed out", null };
+            using var started = new ManualResetEventSlim(false);
+            using var stop = new ManualResetEventSlim(false);
+            Exception writerFailure = null;
+            int errorWrites = 0;
+            var writer = new Thread(() =>
+            {
+                try
+                {
+                    started.Set();
+                    int index = 0;
+                    while (!stop.IsSet)
+                    {
+                        runtime.Error = errors[index++ % errors.Length];
+                        Interlocked.Increment(ref errorWrites);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    writerFailure = exception;
+                }
+            });
+            writer.IsBackground = true;
+            writer.Start();
+
+            try
+            {
+                Assert.True(started.Wait(TimeSpan.FromSeconds(5)));
+                for (int i = 0; i < 3000; i++)
+                {
+                    var rooms = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+                    var roomList = ((System.Collections.IEnumerable)rooms).Cast<object>().ToList();
+                    Assert.Equal(room.Id, GetString(GetRoomResponse(roomList, room.Id), "RoomId"));
+
+                    var state = WithPlugin(plugin, () => service.Get(new GetRoomStateRequest { Id = room.Id }));
+                    Assert.Equal(room.Id, GetString(state, "RoomId"));
+                }
+            }
+            finally
+            {
+                stop.Set();
+                Assert.True(writer.Join(TimeSpan.FromSeconds(5)));
+            }
+
+            Assert.Null(writerFailure);
+            Assert.True(Volatile.Read(ref errorWrites) > 0);
+        }
+
+        [Fact]
         public void State_StatusReason_MapsEligibilityReasons()
         {
             var user1 = Guid.NewGuid().ToString("N");

@@ -600,6 +600,7 @@ namespace Emby.Plugins.WatchTogether
                 // check while the room gate is held, before any external
                 // command can be issued or Pending state can be changed.
                 if (runtime.Barrier != null ||
+                    runtime.Handoff != null ||
                     HasJoinedParticipantPending(room, runtime))
                 {
                     return new RoomActionResult
