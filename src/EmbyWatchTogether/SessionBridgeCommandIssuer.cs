@@ -118,17 +118,17 @@ namespace Emby.Plugins.WatchTogether
                 switch (command)
                 {
                     case RemoteCommands.Pause:
-                        _dispatch.Execute(snapshot.SessionId,
+                        _dispatch.Execute("playback:" + snapshot.SessionId,
                             token => _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, token),
                             cancellationToken);
                         break;
                     case RemoteCommands.Unpause:
-                        _dispatch.Execute(snapshot.SessionId,
+                        _dispatch.Execute("playback:" + snapshot.SessionId,
                             token => _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, token),
                             cancellationToken);
                         break;
                     case RemoteCommands.Seek:
-                        _dispatch.Execute(snapshot.SessionId,
+                        _dispatch.Execute("playback:" + snapshot.SessionId,
                             token => _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, token),
                             cancellationToken);
                         break;
@@ -233,7 +233,7 @@ namespace Emby.Plugins.WatchTogether
                     HandoffTrace.Dispatch(_logger, roomId, snapshot.SessionId, itemId, now);
                     dispatchTimer = Stopwatch.StartNew();
                 }
-                _dispatch.Execute(snapshot.SessionId,
+                _dispatch.Execute("playback:" + snapshot.SessionId,
                     token => _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, token),
                     cancellationToken);
                 if (_logger != null)
@@ -349,7 +349,7 @@ namespace Emby.Plugins.WatchTogether
 
             try
             {
-                _dispatch.Execute(snapshot.SessionId,
+                _dispatch.Execute("message:" + snapshot.SessionId,
                     token => _bridge.SendDisplayMessageAsync(
                         controllingUserId, snapshot.SessionId, header, text, timeoutMs, token),
                     cancellationToken);

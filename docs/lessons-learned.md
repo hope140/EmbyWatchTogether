@@ -239,7 +239,7 @@
 
 - 现象：底层返回不完成的 Task，或在返回 Task 前同步阻塞时，仅 CancelAfter 不能释放调用方。
 - 结论：内置发送器使用独立有界等待，工厂在实际开始前核对已用时间与取消状态；计时不完全依赖线程池回调。
-- 规则：不响应取消的传输保留会话槽位并限制总量，迟到成功或失败只清理资源、观察异常，不回写房间状态。Task 完成发布与 continuation 清理不是原子操作，下一次准入要依据 Task.IsCompleted；旧清理不能删除后续传输的新槽位。
+- 规则：不响应取消的传输保留对应会话通道槽位并限制总量；播放控制与 PlayItem 共用通道，DisplayMessage 独立占位，两类通道共享 issuer 的 64 个未完成传输上限。迟到成功或失败只清理资源、观察异常，不回写房间状态。Task 完成发布与 continuation 清理不是原子操作，下一次准入要依据 Task.IsCompleted；旧清理不能删除后续传输的新槽位。
 - 验证：SessionBridgeCommandIssuerTests 的不协作 Task、同步阻塞、排队过期、容量和清理竞争用例，以及 SyncEngineTests.PollOnce_UncooperativeTransportTimesOutAndNextRoomStillRuns。
 
 ## 34. 确认停止要显式终止旧 Pending 序列
@@ -259,3 +259,17 @@
 - 现象：设置页读取配置后，安装器写入待重启版本，迟到的设置 POST 又清掉 pending，下一轮任务重复安装同一版本。
 - 规则：设置替换和 pending 持久化共用配置锁；设置请求只更新用户设置，保留当前内部 pending。安装器在锁内取得当前对象并保存，不持有旧配置对象跨越替换边界；初始配置为空时先建立 BasePlugin 所持有的配置对象。
 - 验证：PluginConfigurationTests 的保留/伪造 pending 与不可变事件测试，WatchTogetherUpdateTaskTests 的旧设置重放、双向屏障交错及初始空配置用例。对应核心回归在原基线失败、修复后通过。补充第 9 节的已完成事实约束，无需新增 ADR。
+
+## 37. Barrier 可以省阶段等待，不能省命令后的快照确认
+
+- 事实：原正常快路在 Pause 确认后和 Seek 满足后各等待一轮才执行下一阶段。改为有界的 Pause → Seek → Restore 同轮推进后，理想下一轮确认的双端播放夹具由 5/6 轮缩短为 3/4 轮；已暂停且对齐时一轮即可进入 Watching，无需发送重复 Pause。
+- 约束：仅当前快照已满足且无 Pending 时跳过命令；实际发送后结束本轮阶段推进，保持后续快照确认、身份绑定、暂停后重新锚定、固定 Seek 目标和绝对重试预算。手动 Seek 在检测当轮启动 BarrierTick，仍不能用本轮旧快照确认刚发出的 Pause。
+- 验证：SyncEnginePerformanceTests 的阶段轮数、已暂停快路、未确认 Pause/Seek 和当轮手动 Seek 用例；新增三条阶段回归在逻辑修复基线失败。既有 Seek 失败测试需在 Pause 确认前注入失败，否则会错过提前后的发送轮次。
+- 证据边界：轮数来自确定性夹具，周期轮询与事件唤醒、客户端上报和网络耗时会共同影响实际速度，不能直接换算成真实客户端收益。
+
+## 38. 异步提示需要有界资源、持续过期校验和独立通道
+
+- 规则：每引擎一个提示 worker、64 条等待消息；队满丢弃新提示，超过 10 秒寿命丢弃。寿命使用单调时间，并在出队后、等待 room gate 后和网络发送前重查；墙上时钟跳变不应改变排队寿命，当前时间仍用于会话过期选择。
+- 规则：排队时的身份只能作为目标绑定，发送前重新选取当前会话并核验原房间引用、服务器、joined 成员、Session/Item、能力、快照保护、通知设置和停止状态；消息网络发送在 gate 外执行。停止清空等待队列，取消在途工作而不等待不协作传输或取消回调。
+- 集成约束：仅移出轮询线程仍不够；若 DisplayMessage 与播放控制占同一会话槽，慢提示仍可能使 Pause/Seek 被误判为超时。内部通道前缀隔离占位，Emby 接收原 SessionId，总未完成传输容量继续受限。
+- 验证：SyncNotificationDispatcherTests、SyncEnginePerformanceTests 的容量、异常恢复、边界过期、等待 gate、身份失效与 Stop/Dispose 用例，以及 SessionBridgeCommandIssuerTests 的双向通道隔离、容量和迟到清理用例。取舍见 [ADR-005](adr/005-sync-notification-dispatch.md)。

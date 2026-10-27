@@ -33,7 +33,9 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 - `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后创建者或管理员可按房间权限结束自助房间。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 在当前房间 gate 内重新校验房间、成员和服务器身份，返回只读、有界、脱敏的同步诊断 DTO。诊断事件环、当前选中快照、Pending、Handoff、Barrier、Recovery 和 drift telemetry 仅驻留 `RoomRuntime` 内存，房间删除或运行时重建时丢弃，不写入 `rooms.json`；导出使用 `userA`/`userB` 别名、短 hash 和稳定错误分类，不包含用户名、GUID、Token、路径或异常文本。
 
-内置 SessionBridgeCommandIssuer 通过 BoundedSessionDispatch 执行播放、PlayItem 和消息传输。独立的 5 秒有界等待涵盖同步调用入口和不响应取消的 Task；同一 Session 的未完成传输共用一个槽位，每个 issuer 最多保留 64 个未完成传输。发送器在超时返回后不会以迟到结果回写 RoomRuntime；旧传输实际完成后释放槽位，准入同时依据 Task 的完成状态清理已完成项，避免清理回调稍晚而误拒绝下一条正常命令。已进入底层的物理发送不能强制撤回，取消令牌仍传入下层，未完成期间拒绝叠加请求。
+内置 SessionBridgeCommandIssuer 通过 BoundedSessionDispatch 执行播放、PlayItem 和消息传输。独立的 5 秒有界等待涵盖同步调用入口和不响应取消的 Task；同一 Session 的播放控制与 PlayItem 共用 `playback:` 槽位，DisplayMessage 使用独立的 `message:` 槽位，两类请求仍共享每个 issuer 最多 64 个未完成传输的总量限制。发送器在超时返回后不会以迟到结果回写 RoomRuntime；旧传输实际完成后释放槽位，准入同时依据 Task 的完成状态清理已完成项，避免清理回调稍晚而误拒绝下一条正常命令。已进入底层的物理发送不能强制撤回，取消令牌仍传入下层，同一 Session 同一通道在未完成期间拒绝叠加请求。
+
+同步引擎的提示通过 `SyncNotificationDispatcher` 发送，每个引擎最多一个发送 worker、64 条等待消息；队满丢弃新提示，排队超过 10 秒的提示按单调时钟过期。发送前重新选择当前会话，并在房间 gate 内核对原房间引用、当前服务器、成员加入状态、Session/Item 身份、快照保护和通知设置，网络发送在退出 gate 后执行。停止时清空等待队列并取消在途提示；底层忽略取消或取消回调阻塞时，停止调用不等待其完成。提示发送不修改同步状态，取舍见 [ADR-005](adr/005-sync-notification-dispatch.md)。
 
 Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。
 
@@ -54,6 +56,8 @@ S124 已随 v1.7.0.1 发布，使用 V16 页面/控制器缓存键，去除 Dash
 ## 状态与持久化
 
 起播 `Barrier` 按 Pause → Seek（仅非锚点用户）→ Restore 执行，远程命令等待会话快照确认；进入 Restore 前，锚点和另一端都必须在固定 Seek 目标的容差内。Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的绝对预算内重试；只有检测到锚点有当前远程命令无法解释的明显新位置操作时，才显式重建 Barrier。正常 `Watching` 期间传播明确暂停/继续和明显手动 Seek，持续明显漂移满足门槛时触发低频 Barrier；同一 Session/Item 的原始远控标志短暂丢失且仍有有效能力证据、没有 Pending 命令时，使用绑定身份和受影响用户集合的 8 秒内存恢复窗口，期间不发送命令，恢复后继续观察，超时或条件变化仍进入严格等待。
+
+Barrier 在当前快照已满足条件且没有待确认命令时，同轮继续推进下一阶段，最多经过 Pause → Seek → Restore；已满足的 Pause/Restore 不重复发送。发出需要改变状态的命令后立即结束本轮阶段推进，继续等待后续轮询的快照确认。Watching 检测到明确手动 Seek 时，当轮启动 Barrier 的暂停阶段。以上变化缩短调度等待，不能强制客户端更快执行或上报。
 
 主用户在 `Watching` 中从 Item A 切换到 Item B 时，`SyncEngine` 先记录主用户 Item 变化并进入独立的 `Handoff` runtime。该 runtime 绑定目标 Item、主用户 Session identity、参与者 Session identity 和 generation。参与者尚未位于 B 时，通过 `IPlayItemIssuer` 发起一次有界的 `PlayItem(B)`，随后只接受当前参与者用户、当前 Session 和 `SessionSnapshot.ItemId == B` 的确认；目标变化会使旧 generation 失效。参与者已经位于 B 时跳过 PlayItem，直接进入 `Barrier`，由 Barrier 重新暂停、定位和恢复播放意图。PlayItem 请求本身的成功不等于播放器完成打开，确认超时或有限重试失败会清理 Handoff 并回到安全的 `Waiting`。
 

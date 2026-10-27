@@ -431,7 +431,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("PlayItem", true)]
         [InlineData("Message", false)]
         [InlineData("Message", true)]
-        public async Task BoundedDispatch_UncooperativeTaskRetainsSharedSessionSlotUntilLateCompletion(
+        public async Task BoundedDispatch_UncooperativeTaskRetainsChannelSlotUntilLateCompletion(
             string operation, bool lateFault)
         {
             var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -460,7 +460,8 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Assert.False(result.accepted);
                 Assert.Equal("command_timeout", result.error);
                 Assert.True(SpinWait.SpinUntil(() => transportToken.IsCancellationRequested, 1000));
-                foreach (var otherOperation in new[] { "Pause", "PlayItem", "Message" })
+                foreach (var otherOperation in operation == "Message"
+                    ? new[] { "Message" } : new[] { "Pause", "PlayItem" })
                 {
                     var blocked = Dispatch(issuer, otherOperation);
                     Assert.False(blocked.accepted);
@@ -571,6 +572,9 @@ namespace Emby.Plugins.WatchTogether.Tests
                 var saturated = Dispatch(issuer, "PlayItem", "session-overflow");
                 Assert.False(saturated.accepted);
                 Assert.Equal("command_timeout", saturated.error);
+                var messageOverflow = Dispatch(issuer, "Message", "session-0");
+                Assert.False(messageOverflow.accepted);
+                Assert.Equal("command_timeout", messageOverflow.error);
                 Assert.Equal(64, Volatile.Read(ref dispatches));
             }
             finally
@@ -668,7 +672,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                     Assert.True(firstReturned.Wait(2000));
                     Assert.Null(firstException);
                     Assert.True(firstResult.accepted, firstResult.error);
-                    var successor = Dispatch(issuer, "Message");
+                    var successor = Dispatch(issuer, "Pause");
                     Assert.Equal(!successorPending, successor.accepted);
                     Assert.Equal(successorPending ? "command_timeout" : null, successor.error);
                     Assert.Equal(2, Volatile.Read(ref dispatches));
@@ -694,6 +698,38 @@ namespace Emby.Plugins.WatchTogether.Tests
                 successorRelease.TrySetResult(true);
                 Assert.True(caller.Join(2000));
             }
+        }
+
+        [Theory]
+        [InlineData("Message", "Pause")]
+        [InlineData("Pause", "Message")]
+        public async Task BoundedDispatch_MessageAndPlaybackUseIndependentSlots(string blockedOperation, string allowedOperation)
+        {
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int calls = 0;
+            var manager = ManagerWithTransport((session, _) =>
+            {
+                Assert.Equal("session", session); // channel key never reaches Emby
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    entered.TrySetResult(true);
+                    return release.Task;
+                }
+                return Task.CompletedTask;
+            });
+            using var bridge = new SessionBridge(manager.Object);
+            var issuer = NewBoundedIssuer(bridge, TimeSpan.FromMilliseconds(100));
+            try
+            {
+                var first = Task.Run(() => Dispatch(issuer, blockedOperation));
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.True(Dispatch(issuer, allowedOperation).accepted);
+                Assert.False(Dispatch(issuer, blockedOperation).accepted);
+                Assert.False((await first.WaitAsync(TimeSpan.FromSeconds(5))).accepted);
+                Assert.Equal(2, Volatile.Read(ref calls));
+            }
+            finally { release.TrySetResult(true); }
         }
 
         private static SessionBridgeCommandIssuer NewBoundedIssuer(
