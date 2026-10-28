@@ -424,6 +424,7 @@ namespace Emby.Plugins.WatchTogether
                     }
 
                     GitHubReleaseInfo selected = null;
+                    var invalidTagEncountered = false;
                     foreach (var apiRelease in apiReleases)
                     {
                         var release = apiRelease?.ToReleaseInfo();
@@ -435,7 +436,8 @@ namespace Emby.Plugins.WatchTogether
                         if (!IsCanonicalReleaseTag(release.TagName) ||
                             !TryParseReleaseVersion(release.TagName, out var version))
                         {
-                            throw new ReleaseValidationException("测试版发布标签无效。");
+                            invalidTagEncountered = true;
+                            continue;
                         }
 
                         release.Version = version;
@@ -447,7 +449,9 @@ namespace Emby.Plugins.WatchTogether
 
                     if (selected == null)
                     {
-                        throw new ReleaseValidationException("没有可用的测试版发布。");
+                        throw new ReleaseValidationException(invalidTagEncountered
+                            ? "测试版发布标签无效。"
+                            : "没有可用的测试版发布。");
                     }
 
                     if (!HasRequiredAssets(selected))

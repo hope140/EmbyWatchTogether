@@ -29,6 +29,8 @@
 - 补充规则：beta 更新检查应先在 GitHub API 返回的非 draft stable 与 prerelease 中选择最高规范版本，再验证该版本的固定资产；历史低版本缺少 manifest 或 signature 不得阻断最高版本选择，但最高版本自身缺少固定资产仍必须 fail closed。当前 GitHub API 的 35 个 Release、早期 `v1.0`/`v1.1`/`v1.2` 资产情况，以及 `GitHubReleaseClientTests` 的两个选择/缺资产测试共同确认了这一边界。
 - 补充规则：Releases API 查询与固定资产下载使用不同的有界超时；固定资产（DLL、manifest、signature）应允许 60 秒，Releases API 仍为 20 秒。该边界由服务器日志、pinned `MediaBrowser.Common` 反射确认的默认 `TimeoutMs=20000`、NAS 上官方 DLL 下载耗时 28.34 秒，以及 S5 候选实际运行更新检查任务完成共同验证；签名、哈希、来源/身份校验和失败清理仍必须保持不变。
 
+- 补充规则：beta 枚举应跳过历史非规范 tag，再选择最高规范非 draft 版本；只含非法或 draft 候选时仍拒绝更新。最终最高候选缺资产或签名错误不能回退低版本，规范 tag 和固定下载地址的校验规则不变。验证：GitHubReleaseClientTests 的历史标签混合/反序、全非法或 draft、最高签名失败及最高资产缺失用例。
+
 ## 4. 签名自动更新必须先完成可信引导
 
 - 现象：验签程序随待安装版本一起分发时，该版本无法仅凭自身证明内置公钥可信。
@@ -232,3 +234,50 @@
 - 验证：菜单模式与旧版 390px 长标签几何回归修正前失败，后者偏差约 64.88px；修正后旧/新两种 DOM、390/1280px 与四个控件的中线偏差小于 1px。完整浏览器 89/89、.NET 545/545，构建打包通过。fixture 只模拟两种实际结构及定位规则，不模拟真实菜单运行；真实 Web 和客户端证据必须单独记录。
 - 真实 Web 对照：神医与 Madby 的表单由 `genericui / GenericEdit` 生成。神医“搜索范围”为 multiple select，展开的是带复选框的虚拟滚动 actionSheet；Madby“元数据语言 / 图片语言 / 国家地区”为普通单选，未指定 custom，沿用系统单选菜单。不能用前者的多选展开形态定义全部原生单选的默认外观。V15 一起看显式 custom 的单选使用同一宿主 actionSheet 的单选形态；其闭合态实测高度约 34.615px、字号 14.424px、内边距与 Madby 单选相同，Web 箭头偏差约 0.0052px。这些测量只证明相应几何与组件事实，最终外观反馈见下条。
 - 最终反馈：用户在 V16 部署后确认“可以了，进行下一步”。本轮最终普通单选外观与箭头方案据此记为用户确认；该反馈不扩大为原始客户端临时卡住已复现、真实双端播放已验收或公开发布授权。后续本地 1.7.0.1 包和已部署的 1.7.0.0/V16 候选保持身份区分。
+
+## 33. 取消令牌与有界等待是两个约束
+
+- 现象：底层返回不完成的 Task，或在返回 Task 前同步阻塞时，仅 CancelAfter 不能释放调用方。
+- 结论：内置发送器使用独立有界等待，工厂在实际开始前核对已用时间与取消状态；计时不完全依赖线程池回调。
+- 规则：不响应取消的传输保留对应会话通道槽位并限制总量；播放控制与 PlayItem 共用通道，DisplayMessage 独立占位，两类通道共享 issuer 的 64 个未完成传输上限。迟到成功或失败只清理资源、观察异常，不回写房间状态。Task 完成发布与 continuation 清理不是原子操作，下一次准入要依据 Task.IsCompleted；旧清理不能删除后续传输的新槽位。
+- 验证：SessionBridgeCommandIssuerTests 的不协作 Task、同步阻塞、排队过期、容量和清理竞争用例，以及 SyncEngineTests.PollOnce_UncooperativeTransportTimesOutAndNextRoomStillRuns。
+
+## 34. 确认停止要显式终止旧 Pending 序列
+
+- 现象：主用户继续后立即停止，停止观察窗口跳过普通 Pending 确认，已执行的 Unpause 仍可能挡住停止后的 Pause。
+- 结论：只有确认停止的终态转换先清除旧 Pending，再执行停止副作用；其他同步路径继续保留原有 Pending 冲突保护。
+- 验证：SyncEngineTests.ConfirmedStop_AcknowledgedUnpauseDuringDebounceDoesNotSuppressPeerPause，以及 Pause/Seek、选项关闭、替换会话与单次副作用用例。
+
+## 35. 展示读取也要避免可变字段的重复解引用
+
+- 约束：Rooms 和 State 允许非原子展示读取，但一次状态原因计算应只捕获一次 Error，再使用局部值判空和分类。判空后重新读共享属性可能遇到同步线程清空，产生空引用异常。
+- 验证：WatchTogetherServiceRoomTests.StatusReason_ConcurrentErrorChangesDoNotThrowForRoomsOrState 实际覆盖两个 API 入口并枚举房间响应；既有稳定原因映射用例保持有效。
+- 相关边界：Handoff 的 PlayItemPending 独立于普通 Pending。手动 pause/resume 的同步冲突检查应包括 Handoff 对象；RoomManagerTests.Action_PauseOrResume_HandoffConflictDoesNotIssueOrMutate 验证零发送、稳定错误和运行时不变。
+
+## 36. 安装内部状态不能由旧设置回写覆盖
+
+- 现象：设置页读取配置后，安装器写入待重启版本，迟到的设置 POST 又清掉 pending，下一轮任务重复安装同一版本。
+- 规则：设置替换和 pending 持久化共用配置锁；设置请求只更新用户设置，保留当前内部 pending。安装器在锁内取得当前对象并保存，不持有旧配置对象跨越替换边界；初始配置为空时先建立 BasePlugin 所持有的配置对象。
+- 验证：PluginConfigurationTests 的保留/伪造 pending 与不可变事件测试，WatchTogetherUpdateTaskTests 的旧设置重放、双向屏障交错及初始空配置用例。对应核心回归在原基线失败、修复后通过。补充第 9 节的已完成事实约束，无需新增 ADR。
+
+## 37. Barrier 可以省阶段等待，不能省命令后的快照确认
+
+- 事实：原正常快路在 Pause 确认后和 Seek 满足后各等待一轮才执行下一阶段。改为有界的 Pause → Seek → Restore 同轮推进后，理想下一轮确认的双端播放夹具由 5/6 轮缩短为 3/4 轮；已暂停且对齐时一轮即可进入 Watching，无需发送重复 Pause。
+- 约束：仅当前快照已满足且无 Pending 时跳过命令；实际发送后结束本轮阶段推进，保持后续快照确认、身份绑定、暂停后重新锚定、固定 Seek 目标和绝对重试预算。手动 Seek 在检测当轮启动 BarrierTick，仍不能用本轮旧快照确认刚发出的 Pause。
+- 验证：SyncEnginePerformanceTests 的阶段轮数、已暂停快路、未确认 Pause/Seek 和当轮手动 Seek 用例；新增三条阶段回归在逻辑修复基线失败。既有 Seek 失败测试需在 Pause 确认前注入失败，否则会错过提前后的发送轮次。
+- 证据边界：轮数来自确定性夹具，周期轮询与事件唤醒、客户端上报和网络耗时会共同影响实际速度，不能直接换算成真实客户端收益。
+
+## 38. 异步提示需要有界资源、持续过期校验和独立通道
+
+- 规则：每引擎一个提示 worker、64 条等待消息；队满丢弃新提示，超过 10 秒寿命丢弃。寿命使用单调时间，并在出队后、等待 room gate 后和网络发送前重查；墙上时钟跳变不应改变排队寿命，当前时间仍用于会话过期选择。
+- 规则：排队时的身份只能作为目标绑定，发送前重新选取当前会话并核验原房间引用、服务器、joined 成员、Session/Item、能力、快照保护、通知设置和停止状态；消息网络发送在 gate 外执行。停止清空等待队列，取消在途工作而不等待不协作传输或取消回调。
+- 集成约束：仅移出轮询线程仍不够；若 DisplayMessage 与播放控制占同一会话槽，慢提示仍可能使 Pause/Seek 被误判为超时。内部通道前缀隔离占位，Emby 接收原 SessionId，总未完成传输容量继续受限。
+- 验证：SyncNotificationDispatcherTests、SyncEnginePerformanceTests 的容量、异常恢复、边界过期、等待 gate、身份失效与 Stop/Dispose 用例，以及 SessionBridgeCommandIssuerTests 的双向通道隔离、容量和迟到清理用例。取舍见 [ADR-005](adr/005-sync-notification-dispatch.md)。
+
+## 39. Waiting Pause exhaustion belongs to each target condition
+
+- Same-item snapshots alone do not prove remote-control eligibility recovered. Clear the exhausted Waiting cycle only when the complete pair is eligible for a new Barrier.
+- Waiting stale commands are already discarded individually. A whole-runtime reset on one stale Session/Item must not renew an unchanged peer's exhausted budget; retain per-target identity/capability pruning.
+- Evidence: SyncEngineTests.WaitingPauseRetryLimit_SameItemRemoteFailureRemainsBounded covers immediate failure, accepted/no ACK, repeated polls, late paused status and full recovery. OnlyChangedTargetGetsNewBudget covers Session/Item/capability changes with immediate failure and unacknowledged transport success. The original same-item loop and stale Pending reset both fail their corresponding regressions before the guards.
+- Explicit user resync is an intentional new cycle. These deterministic tests do not establish the network/client root cause or continuous playback after Unpause. No architecture or ADR update is needed.
+- CI fixture isolation: SyncEngineTests and SessionBridgeCommandIssuerTests deliberately block ThreadPool work while asserting 100ms deadlines. Place them in a nonparallel Transport timing collection so other test classes cannot expire transport work before its entered signal. Keep the existing deadlines and assertions; this does not alter production scheduling.

@@ -26,6 +26,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly ISessionManager _sessionManager;
         private readonly Func<PluginConfiguration> _configurationAccessor;
         private readonly Action _saveConfiguration;
+        private readonly Action<string> _savePendingUpdateVersion;
         private readonly Func<Version> _currentVersionAccessor;
         private readonly ILogger _logger;
         private readonly CancellationTokenSource _lifetimeCancellation = new CancellationTokenSource();
@@ -56,6 +57,10 @@ namespace Emby.Plugins.WatchTogether
                 logManager,
                 sessionManager)
         {
+            if (_saveConfiguration != null)
+            {
+                _savePendingUpdateVersion = plugin.SavePendingUpdateVersion;
+            }
         }
 
         public PluginUpdateManager(
@@ -504,9 +509,8 @@ namespace Emby.Plugins.WatchTogether
                     new Progress<double>(),
                     cancellationToken).ConfigureAwait(false);
 
-                var configuration = ReadConfiguration();
-                configuration.PendingUpdateVersion = FormatVersion(release.Version);
-                var configurationSaved = SaveConfigurationSafely(configuration, out var saveException);
+                var pendingVersion = FormatVersion(release.Version);
+                var configurationSaved = SaveConfigurationSafely(pendingVersion, out var saveException);
                 Exception notificationException = null;
                 try
                 {
@@ -519,14 +523,14 @@ namespace Emby.Plugins.WatchTogether
                 }
                 lock (_stateLock)
                 {
-                    _status.PendingVersion = configuration.PendingUpdateVersion;
+                    _status.PendingVersion = pendingVersion;
                     _status.RestartRequired = true;
                     _status.UpdateAvailable = false;
                     _status.ReleaseUrl = release.HtmlUrl;
 
                     if (!configurationSaved || notificationException != null)
                     {
-                        _pendingVersionStatusOverride = configuration.PendingUpdateVersion;
+                        _pendingVersionStatusOverride = pendingVersion;
                         _postInstallDiagnosticOverride = BuildPostInstallDiagnostic(
                             configurationSaved,
                             notificationException != null);
@@ -667,12 +671,21 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private bool SaveConfigurationSafely(PluginConfiguration configuration, out Exception exception)
+        private bool SaveConfigurationSafely(string pendingVersion, out Exception exception)
         {
             exception = null;
             try
             {
-                _saveConfiguration?.Invoke();
+                if (_savePendingUpdateVersion != null)
+                {
+                    _savePendingUpdateVersion(pendingVersion);
+                }
+                else
+                {
+                    ReadConfiguration().PendingUpdateVersion = pendingVersion;
+                    _saveConfiguration?.Invoke();
+                }
+
                 return true;
             }
             catch (Exception ex)

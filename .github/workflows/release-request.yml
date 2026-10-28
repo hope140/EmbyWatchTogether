@@ -1,0 +1,58 @@
+name: Reviewed release request
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  validate:
+    if: ${{ github.repository == 'hope140/EmbyWatchTogether' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release-request/') && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      tag: ${{ steps.request.outputs.tag }}
+      channel: ${{ steps.request.outputs.channel }}
+      key_id: ${{ steps.request.outputs.key_id }}
+      request_path: ${{ steps.request.outputs.request_path }}
+      source_sha: ${{ steps.request.outputs.source_sha }}
+      release_title: ${{ steps.request.outputs.release_title }}
+      notes_sha256: ${{ steps.request.outputs.notes_sha256 }}
+    steps:
+      - name: Checkout trusted main controller only
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Validate immutable request, source, notes and successful CI
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/release-request.cjs validate
+
+  publish:
+    needs: validate
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    uses: ./.github/workflows/release.yml
+    secrets:
+      WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64: ${{ secrets.WATCH_TOGETHER_RELEASE_SIGNING_KEY_PKCS8_B64 }}
+    with:
+      tag: ${{ needs.validate.outputs.tag }}
+      channel: ${{ needs.validate.outputs.channel }}
+      key_id: ${{ needs.validate.outputs.key_id }}
+      request_path: ${{ needs.validate.outputs.request_path }}
+      source_sha: ${{ needs.validate.outputs.source_sha }}
+      release_title: ${{ needs.validate.outputs.release_title }}
+      notes_sha256: ${{ needs.validate.outputs.notes_sha256 }}

@@ -50,6 +50,9 @@ namespace Emby.Plugins.WatchTogether
         private readonly ISessionSnapshotProvider _snapshotProvider;
         private readonly ICommandIssuer _issuer;
         private readonly IMessageIssuer _messageIssuer;
+        private readonly SyncNotificationDispatcher _notifications = new SyncNotificationDispatcher();
+
+        internal System.Threading.Tasks.Task NotificationsIdle => _notifications.WhenIdle;
         private readonly ILogger _logger;
         private readonly Func<string> _serverIdProvider;
         private readonly Func<DateTimeOffset> _clock;
@@ -165,6 +168,7 @@ namespace Emby.Plugins.WatchTogether
 
         public void Stop()
         {
+            _notifications.Stop();
             Thread thread;
             lock (_lock)
             {
@@ -400,6 +404,9 @@ namespace Emby.Plugins.WatchTogether
                                 StringComparison.Ordinal);
                             if (!stopAlreadyHandled)
                             {
+                                // Confirmed Stop terminates the old playback sequence.
+                                // Its pending Unpause/Seek must not suppress the peer Pause.
+                                runtime.Pending.Clear();
                                 if (options.PauseOtherOnPlaybackStop)
                                 {
                                     PauseOtherAfterPlaybackStopped(runtime, room, snapshots, stoppedUsers, now);
@@ -467,7 +474,10 @@ namespace Emby.Plugins.WatchTogether
                             sameItem,
                             now,
                             out var stalePendingCommand);
-                        if (staleDeferredCommand || stalePendingCommand)
+                        // Waiting commands are pruned per target; resetting here
+                        // would renew an unchanged peer's exhausted Pause budget.
+                        if ((staleDeferredCommand || stalePendingCommand) &&
+                            runtime.State != RoomState.Waiting)
                         {
                             // A command captured for a different session or item
                             // must never be acknowledged or retried against the
@@ -509,12 +519,13 @@ namespace Emby.Plugins.WatchTogether
                             runtime.Error = null;
                         }
 
-                        if (sameItem &&
+                        if (eligible &&
                             string.Equals(runtime.Error, WaitingPauseRetryLimitError, StringComparison.Ordinal))
                         {
-                            // The item mismatch that caused the bounded Waiting
-                            // Pause cycle has recovered. Drop that old Waiting
-                            // command state so the pair can enter a new Barrier.
+                            // Same-item snapshots do not prove that the failure
+                            // which caused Waiting has recovered (remote control
+                            // may still be unavailable). Renew the budget only
+                            // when the complete pair is eligible for a Barrier.
                             runtime.ResetToWaiting();
                         }
 
@@ -628,6 +639,7 @@ namespace Emby.Plugins.WatchTogether
 
         public void Dispose()
         {
+            _notifications.Stop();
             Thread thread;
             lock (_lock)
             {
@@ -2012,16 +2024,13 @@ namespace Emby.Plugins.WatchTogether
                     // Display messages are advisory: a client that rejects the
                     // capability or fails to receive the message must not alter
                     // the stop transition or its existing pause behavior.
-                    TryIssueMessage(
-                        room.Id,
-                        room.AdminUserId,
+                    QueueNotification(
+                        room,
                         pair.Key,
                         snapshot,
                         StoppedPlaybackMessageHeader,
                         StoppedPlaybackMessageText,
-                        timeoutMs: NotificationTimeoutMs,
-                        now: now,
-                        out _);
+                        stopNotice: true);
                 }
                 catch
                 {
@@ -2052,16 +2061,12 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Automatic retry notices are advisory. Delivery failures
                     // must not prevent the new barrier from being started.
-                    TryIssueMessage(
-                        room.Id,
-                        room.AdminUserId,
+                    QueueNotification(
+                        room,
                         userId,
                         snapshot,
                         AutomaticResyncMessageHeader,
-                        AutomaticResyncMessageText,
-                        timeoutMs: NotificationTimeoutMs,
-                        now: now,
-                        out _);
+                        AutomaticResyncMessageText);
                 }
                 catch
                 {
@@ -2098,16 +2103,12 @@ namespace Emby.Plugins.WatchTogether
 
                 try
                 {
-                    TryIssueMessage(
-                        room.Id,
-                        room.AdminUserId,
+                    QueueNotification(
+                        room,
                         userId,
                         snapshot,
                         "一起观看",
-                        text,
-                        timeoutMs: NotificationTimeoutMs,
-                        now: now,
-                        out _);
+                        text);
                 }
                 catch
                 {
@@ -3001,6 +3002,54 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        private void QueueNotification(
+            Room room,
+            string userId,
+            SessionSnapshot original,
+            string header,
+            string text,
+            bool stopNotice = false)
+        {
+            // All captured identities are immutable; selection is repeated for
+            // each message, after queueing, rather than reusing poll authority.
+            string sessionId = original.SessionId;
+            string itemId = original.ItemId;
+            string adminUserId = room.AdminUserId;
+            _notifications.TryEnqueueFresh((token, isFresh) =>
+            {
+                if (!isFresh() || token.IsCancellationRequested || _disposed || _cts.IsCancellationRequested) return;
+                var candidates = _snapshotProvider.GetSessionSnapshots();
+                DateTimeOffset now;
+                SessionSnapshot target;
+                using (var access = _roomManager.TryEnterRoom(room.Id))
+                {
+                    if (access == null || !ReferenceEquals(access.Room, room) ||
+                        access.Runtime.SnapshotUnavailable || token.IsCancellationRequested ||
+                        !isFresh() || _disposed || _cts.IsCancellationRequested ||
+                        !string.Equals(room.ServerId, _serverIdProvider(), StringComparison.OrdinalIgnoreCase) ||
+                        !room.JoinedParticipantUserIds.Contains(userId, StringComparer.OrdinalIgnoreCase)) return;
+
+                    var options = GetOptionsSnapshot();
+                    if (stopNotice ? !options.NotifyOtherOnPlaybackStop : !options.NotifyOnSyncActions) return;
+                    var runtime = access.Runtime;
+                    now = _clock();
+                    var selected = SessionSelector.SelectWithPreviousDiagnostics(
+                        candidates, room.JoinedParticipantUserIds, now,
+                        SessionSelector.StaleSessionTimeoutSeconds, runtime.Previous,
+                        runtime.State == RoomState.Watching || runtime.State == RoomState.Handoff).Selected;
+                    if (!selected.TryGetValue(userId, out target) || target == null || !target.Online ||
+                        !string.Equals(target.UserId, userId, StringComparison.OrdinalIgnoreCase) ||
+                        !HasSameIdentity(sessionId, itemId, target) ||
+                        target.Capabilities?.CanDisplayMessage != true || !isFresh() ||
+                        token.IsCancellationRequested || _disposed || _cts.IsCancellationRequested) return;
+                }
+
+                if (!isFresh() || token.IsCancellationRequested || _disposed || _cts.IsCancellationRequested) return;
+                TryIssueMessage(room.Id, adminUserId, userId, target, header, text,
+                    NotificationTimeoutMs, now, token, out _);
+            });
+        }
+
         private bool TryIssueMessage(
             string roomId,
             string controllingUserId,
@@ -3010,6 +3059,7 @@ namespace Emby.Plugins.WatchTogether
             string text,
             int? timeoutMs,
             DateTimeOffset now,
+            CancellationToken stopToken,
             out string error)
         {
             if (_messageIssuer == null)
@@ -3036,8 +3086,9 @@ namespace Emby.Plugins.WatchTogether
                     out error);
             }
 
-            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(stopToken))
             {
+                timeout.CancelAfter(ExternalCallTimeout);
                 return cancellable.TryIssueMessage(
                     roomId,
                     controllingUserId,
@@ -3495,10 +3546,13 @@ namespace Emby.Plugins.WatchTogether
                 case BarrierStage.Pause:
                     if (!barrier.PauseSent)
                     {
+                        bool waitingForCommand = false;
                         bool allIssued = true;
                         string issueFailure = null;
                         foreach (var user in members)
                         {
+                            if (snapshots[user].IsPaused && !runtime.Pending.ContainsKey(user)) continue;
+                            waitingForCommand = true;
                             if (!Issue(
                                 runtime,
                                 room,
@@ -3525,10 +3579,12 @@ namespace Emby.Plugins.WatchTogether
                         }
 
                         barrier.PauseSent = true;
-                        return;
+                        // A command sent against this snapshot still needs a new
+                        // poll acknowledgement, even if the transport returned.
+                        if (waitingForCommand) return;
                     }
 
-                    if (members.All(u => snapshots[u].IsPaused))
+                    if (runtime.Pending.Count == 0 && members.All(u => snapshots[u].IsPaused))
                     {
                         // The primary may continue playing until Emby applies the
                         // pause command. Re-anchor after both acknowledgements so
@@ -3541,7 +3597,7 @@ namespace Emby.Plugins.WatchTogether
                         runtime.RecordDiagnosticEvent(
                             "barrier_stage_changed", barrier.AnchorUserId, null, "changed",
                             barrier.PrimaryPositionTicks, null, now);
-                        return;
+                        goto case BarrierStage.Seek;
                     }
 
                     if (runtime.Pending.Count == 0 &&
@@ -3587,7 +3643,7 @@ namespace Emby.Plugins.WatchTogether
                     bool targetReached =
                         Math.Abs(snapshots[follower].PositionTicks - target) <= SyncConstants.SeekToleranceTicks;
 
-                    if (anchorReached && targetReached && !anyUnpaused)
+                    if (anchorReached && targetReached && !anyUnpaused && runtime.Pending.Count == 0)
                     {
                         ClearAnchorPositionCandidate(barrier);
                         barrier.Stage = BarrierStage.Restore;
@@ -3595,7 +3651,7 @@ namespace Emby.Plugins.WatchTogether
                         runtime.RecordDiagnosticEvent(
                             "barrier_stage_changed", barrier.AnchorUserId, null, "changed",
                             barrier.PrimaryPositionTicks, null, now);
-                        return;
+                        goto case BarrierStage.Restore;
                     }
 
                     if (IsSeekRetryBudgetExpired(barrier, now))
@@ -3639,7 +3695,7 @@ namespace Emby.Plugins.WatchTogether
                         return;
                     }
 
-                    if (anchorReached && targetReached)
+                    if (anchorReached && targetReached && runtime.Pending.Count == 0)
                     {
                         ClearAnchorPositionCandidate(barrier);
                         barrier.Stage = BarrierStage.Restore;
@@ -3647,7 +3703,7 @@ namespace Emby.Plugins.WatchTogether
                         runtime.RecordDiagnosticEvent(
                             "barrier_stage_changed", barrier.AnchorUserId, null, "changed",
                             barrier.PrimaryPositionTicks, null, now);
-                        return;
+                        goto case BarrierStage.Restore;
                     }
 
                     if (barrier.SeekRetryAtUtc.HasValue)
@@ -3699,10 +3755,14 @@ namespace Emby.Plugins.WatchTogether
                     if (!barrier.RestoreSent)
                     {
                         string command = barrier.PrimaryPaused ? RemoteCommands.Pause : RemoteCommands.Unpause;
+                        bool waitingForCommand = false;
                         bool allIssued = true;
                         string issueFailure = null;
                         foreach (var user in members)
                         {
+                            if (snapshots[user].IsPaused == barrier.PrimaryPaused &&
+                                !runtime.Pending.ContainsKey(user)) continue;
+                            waitingForCommand = true;
                             if (!Issue(
                                 runtime,
                                 room,
@@ -3729,11 +3789,11 @@ namespace Emby.Plugins.WatchTogether
                         }
 
                         barrier.RestoreSent = true;
-                        return;
+                        if (waitingForCommand) return;
                     }
 
                     bool desired = barrier.PrimaryPaused;
-                    if (members.All(u => snapshots[u].IsPaused == desired))
+                    if (runtime.Pending.Count == 0 && members.All(u => snapshots[u].IsPaused == desired))
                     {
                         EnterWatching(runtime, room, barrier, snapshots, now);
                     }
@@ -4212,6 +4272,7 @@ namespace Emby.Plugins.WatchTogether
                 // avoids live lead/stuck decisions that caused repeated
                 // pause/seeks in real sessions.
                 StartBarrier(runtime, room, snapshots, now, anchorUserId: winner.userId);
+                BarrierTick(runtime, room, snapshots, now);
                 NotifyParticipants(
                     room,
                     snapshots,

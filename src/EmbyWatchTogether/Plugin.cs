@@ -26,6 +26,7 @@ namespace Emby.Plugins.WatchTogether
         public static Plugin Instance { get; private set; }
 
         private GitHubTokenStore _githubTokenStore;
+        private readonly object _configurationLock = new object();
 
         /// <summary>
         /// Raised only after BasePlugin has accepted the persisted
@@ -80,10 +81,36 @@ namespace Emby.Plugins.WatchTogether
                 throw new ArgumentException("invalid Watch Together plugin configuration", nameof(configuration));
             }
 
-            base.UpdateConfiguration(pluginConfiguration);
+            SyncEngineOptions options;
+            lock (_configurationLock)
+            {
+                // Settings may have been read before an installation completed.
+                // Pending update state belongs only to the installer.
+                pluginConfiguration.PendingUpdateVersion = Configuration?.PendingUpdateVersion;
+                base.UpdateConfiguration(pluginConfiguration);
+                options = SyncEngineOptions.From(pluginConfiguration);
+            }
+
             ConfigurationChanged?.Invoke(
                 this,
-                new PluginConfigurationChangedEventArgs(SyncEngineOptions.From(pluginConfiguration)));
+                new PluginConfigurationChangedEventArgs(options));
+        }
+
+        internal void SavePendingUpdateVersion(string version)
+        {
+            lock (_configurationLock)
+            {
+                var configuration = Configuration;
+                if (configuration == null)
+                {
+                    base.UpdateConfiguration(new PluginConfiguration { PendingUpdateVersion = version });
+                }
+                else
+                {
+                    configuration.PendingUpdateVersion = version;
+                    SaveConfiguration();
+                }
+            }
         }
 
         /// <summary>

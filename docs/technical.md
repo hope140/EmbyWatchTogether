@@ -5,6 +5,8 @@
 ## 运行时行为与约束
 
 - 起播同步使用 `Barrier`：先暂停双方，以主用户位置为锚点对齐另一端，再恢复起播前的暂停/播放状态。进入恢复阶段前，双方都必须在固定 Seek 目标的容差内；Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的预算内有限重试。
+- 已满足且没有 Pending 的 Barrier 阶段在同轮继续推进，当前已满足的 Pause/Restore 不重复发送；实际发送命令后仍等待后续轮询确认。Watching 中明确的手动 Seek 当轮开始暂停对齐。
+- 同步提示使用每引擎单 worker、64 条等待消息的队列，排队超过 10 秒过期，发送前重新核验当前房间和会话身份。DisplayMessage 与播放控制分别占用会话传输槽，仍共享发送器 64 个未完成传输的总量限制；提示慢响应不占住播放控制槽。
 - `Watching` 阶段传播明确的暂停/继续和明显的手动 Seek；持续明显漂移满足 Phase E 的门槛时，以低频 Barrier 重新对齐。主用户同时操作时作为冲突裁决者；命令确认、抑制窗口以及 session identity、Item、设备会话绑定用于避免回环和旧会话误控制。
 - 已绑定的 `Watching` 会话若仅出现原始远控标志短暂丢失，而同一 Session/Item 的有效能力证据仍在、双方仍为同一有效媒体且没有 Pending 命令，则最多等待 8 秒恢复。窗口内不推进 `WatchingTick`、不发命令或提示；恢复后按保留的上一轮快照处理真实暂停或 Seek，超时及身份、Item、能力或 Pending 变化立即回到现有严格路径。
 - `Watching` 中主用户切换 Item 时进入独立的 `Handoff` 状态。插件通过 `SessionBridge` 的 `PlayItem` 抽象让非 Primary 参与者打开主用户当前 Item，收到当前用户、Session 和 ItemId 均匹配的快照确认后才进入 `Barrier`；参与者自行切换 Item 仍回到安全 `Waiting`，不会让主用户跟随。两人同时播放时按安全规则暂停活跃会话，单人播放受到保护。
@@ -14,7 +16,7 @@
 - 同一用户的多会话仅沿用唯一历史 `SessionId` + `ItemId` 关联；无历史或关联失效时保持 `Waiting`，不猜测新的会话。
 - 管理员手动 `pause`/`resume` 在 Barrier、Handoff 或任一参与者存在 Pending 时整次拒绝且不覆盖同步；成功操作不会把陈旧的运行时错误误报为本次失败。
 - 退出自动暂停返回稳定的 `Attempted`、`Succeeded`、`Failed` 汇总；群发消息按目标隔离异常并返回 `Sent`、`Failed`、`Skipped`。
-- 命令具备取消、超时和有限重试；起播失败会进入冷却并自动重试。`PlayItem` 由 `IPlayItemIssuer` / `SessionBridge` 封装为 Emby `SendPlayCommand`，发送成功只表示请求已发出，必须等快照实际变更确认；Handoff 最多进行有限尝试，失败后清理运行时并回到 `Waiting`。每个房间独立串行处理并隔离异常，不影响其他房间的轮询。
+- 命令具备取消、超时和有限重试；起播失败会进入冷却并自动重试。`PlayItem` 由 `IPlayItemIssuer` / `SessionBridge` 封装为 Emby `SendPlayCommand`，发送成功只表示请求已发出，必须等快照实际变更确认；Handoff 最多进行有限尝试，失败后清理运行时并回到 `Waiting`。房间逐个串行处理并隔离异常，慢播放传输仍可能在有界等待期间延后后续房间；同步提示通过独立队列发送。
 - `SessionInfo` 是服务器轮询快照，不是播放器内部时钟。明显位置跳变的阈值会根据已观测的命令确认延迟提高（普通情况下约 4 秒起），不保证每一帧一致，也不主动消除长期小幅漂移。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 是只读诊断接口，普通参与者和管理员可读取当前房间。接口在 room gate 内重新检查房间、成员和当前 `ServerId`，初始化未完成、房间不存在或服务器身份不匹配时沿用现有稳定错误语义；读取不会调用 `ICommandIssuer` 或消息发送器。返回字段采用白名单 DTO，`RoomRuntime` 保存最多 500 条连续去重事件、最近选中快照和最近动作，均为内存状态，删除房间或重启后清空；页面和导出只取最近 50 条，并按最新在前显示。快照位置、能力和命令确认延迟均表示服务端观察值，不代表客户端已实际执行。
 - 已加入的普通参与者可以通过 `POST /WatchTogether/Rooms/{Id}/Resync` 请求重新同步。请求在 room gate 内再次核验成员、加入状态、当前 `ServerId`、快照保护状态和运行中操作；`Barrier`、`Handoff` 或任意 Pending 存在时返回稳定的 busy 结果，不清理当前同步。受理后仅在内存中记录一次性请求，由轮询读取 Primary 当前 Item：参与者已在相同 Item 时直接进入原有 `Barrier`，Item 不同则通过 `PlayItem` Handoff 等待确认后再进入 Barrier。发送失败或确认超时会回到安全 `Waiting`，之后仍可在冷却结束后再次请求。响应的 `Status` 只使用 `accepted`、`busy`、`unavailable`，`Reason` 使用稳定原因码。

@@ -4,6 +4,8 @@
 
 使用 `host=missing` 查询参数可以验证宿主分页容器缺失时页面仍能安全渲染、且不会创建第二套页面导航，例如 `/?scenario=active&host=missing`。所有截图均来自仓库真实 HTML/JS 的 mock 渲染，不能作为真实 Emby 宿主视觉或双客户端验收证据。
 
+源码/CI SHA、失败归因及证据交接统一按[验证与交接](../../docs/validation-and-handoff.md)记录；本页详述浏览器夹具和报告操作。
+
 ```powershell
 npm ci
 npx playwright install chromium
