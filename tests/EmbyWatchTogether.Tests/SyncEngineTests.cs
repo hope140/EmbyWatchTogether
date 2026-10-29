@@ -1429,7 +1429,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(100);
             engine.PollOnce(_clock.Now);
             Assert.Equal(seekCountAtFailure + 4, _issuer.Issued.Count(i => i.command == RemoteCommands.Seek));
-            Assert.Equal(messageCountAtFailure + 8, _messageIssuer.Issued.Count);
+            Assert.Equal(messageCountAtFailure + 2, _messageIssuer.Issued.Count);
         }
 
         [Fact]
@@ -5546,7 +5546,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void WatchingTick_UserPause_NotifiesOnlyPeerOnce_WithThreeSecondTimeout()
+        public void WatchingTick_UserPause_ControlsPeerWithoutRoutineToast()
         {
             var room = CreateRoom();
             var engine = CreateEngine(notifyOnSyncActions: true);
@@ -5559,22 +5559,19 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
-            var message = Assert.Single(_messageIssuer.Issued);
-            Assert.Equal("u2", message.userId);
-            Assert.Equal("一起观看", message.header);
-            Assert.Equal("对方已暂停播放，已同步暂停", message.text);
-            Assert.Equal(3000, message.timeoutMs);
+            Assert.Contains(_issuer.Issued, issued => issued.userId == "u2" && issued.command == RemoteCommands.Pause);
+            Assert.Empty(_messageIssuer.Issued);
 
             SetCandidates(
                 Snapshot("s1", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: true, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
-            Assert.Single(_messageIssuer.Issued);
+            Assert.Empty(_messageIssuer.Issued);
         }
 
         [Fact]
-        public void WatchingTick_UserResume_NotifiesOnlyPeerOnce_WithThreeSecondTimeout()
+        public void WatchingTick_UserResume_ControlsPeerWithoutRoutineToast()
         {
             var room = CreateRoom();
             var engine = CreateEngine(notifyOnSyncActions: true);
@@ -5587,22 +5584,19 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
-            var message = Assert.Single(_messageIssuer.Issued);
-            Assert.Equal("u2", message.userId);
-            Assert.Equal("一起观看", message.header);
-            Assert.Equal("对方已继续播放，已同步继续", message.text);
-            Assert.Equal(3000, message.timeoutMs);
+            Assert.Contains(_issuer.Issued, issued => issued.userId == "u2" && issued.command == RemoteCommands.Unpause);
+            Assert.Empty(_messageIssuer.Issued);
 
             SetCandidates(
                 Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond));
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
-            Assert.Single(_messageIssuer.Issued);
+            Assert.Empty(_messageIssuer.Issued);
         }
 
         [Fact]
-        public void WatchingTick_ManualSeek_NotifiesOnlyPeer_WithThreeSecondTimeout()
+        public void WatchingTick_ManualSeek_LeavesNotificationUntilCompletion()
         {
             var room = CreateRoom();
             var engine = CreateEngine(notifyOnSyncActions: true);
@@ -5615,11 +5609,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
-            var message = Assert.Single(_messageIssuer.Issued);
-            Assert.Equal("u2", message.userId);
-            Assert.Equal("一起观看", message.header);
-            Assert.Equal("对方调整了播放进度，正在重新同步", message.text);
-            Assert.Equal(3000, message.timeoutMs);
+            Assert.Empty(_messageIssuer.Issued);
         }
 
         [Fact]
@@ -5776,6 +5766,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             _messageIssuer.ReturnFalse = !throwOnIssue;
             var engine = CreateEngine(notifyOnSyncActions: true);
             EnterWatching(engine, room);
+            Assert.Equal(RoomState.Watching, _rooms.GetRuntime(room.Id).State);
+            Assert.Equal(2, _messageIssuer.Issued.Count); // Completion sends really exercised the failing issuer.
             _messageIssuer.Issued.Clear();
 
             SetCandidates(
@@ -5793,11 +5785,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 _issuer.Issued,
                 issued => issued.userId == "u1" && issued.command == RemoteCommands.Pause);
 
-            var message = Assert.Single(_messageIssuer.Issued);
-            Assert.Equal("u2", message.userId);
-            Assert.Equal("一起观看", message.header);
-            Assert.Equal("对方已暂停播放，已同步暂停", message.text);
-            Assert.Equal(3000, message.timeoutMs);
+            Assert.Empty(_messageIssuer.Issued);
         }
 
         [Fact]
