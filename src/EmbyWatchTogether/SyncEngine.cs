@@ -318,6 +318,26 @@ namespace Emby.Plugins.WatchTogether
                             runtime.State == RoomState.Watching ||
                             runtime.State == RoomState.Handoff);
                         var snapshots = selection.Selected;
+                        // LastActivity is not a playback sequence. Reject only
+                        // provably older snapshots for the exact bound identity;
+                        // equal/newer timestamps must retain real user controls.
+                        if (runtime.State == RoomState.Watching && runtime.Pending.Count == 0 &&
+                            snapshots.Count == room.JoinedParticipantUserIds.Count &&
+                            RoomEligibility.IsPairEligible(snapshots) &&
+                            snapshots.All(pair => pair.Value != null && pair.Value.Online &&
+                                runtime.Previous.TryGetValue(pair.Key, out var bound) && bound != null &&
+                                HasSameIdentity(bound.SessionId, bound.ItemId, pair.Value)) &&
+                            snapshots.Any(pair => pair.Value != null &&
+                            runtime.Previous.TryGetValue(pair.Key, out var prior) && prior != null &&
+                            HasSameIdentity(prior.SessionId, prior.ItemId, pair.Value) &&
+                            prior.LastActivityDateUtc != default && pair.Value.LastActivityDateUtc != default &&
+                            pair.Value.LastActivityDateUtc < prior.LastActivityDateUtc))
+                        {
+                            runtime.RecordDiagnosticEvent("snapshot_ignored", null, null,
+                                "older_activity", null, null, now);
+                            results.Add(Result(room, runtime, RoomEligibility.IsPairEligible(snapshots)));
+                            continue;
+                        }
                         runtime.RecordDiagnosticSnapshots(snapshots, now);
                         var eligibility = RoomEligibility.Evaluate(snapshots);
                         bool eligible = eligibility.IsEligible;
@@ -605,7 +625,7 @@ namespace Emby.Plugins.WatchTogether
 
                             if (automaticRetry)
                             {
-                                NotifyAutomaticBarrierRetry(room, snapshots, now);
+                                NotifyAutomaticBarrierRetry(runtime, room, snapshots, now);
                             }
 
                             BarrierTick(runtime, room, snapshots, now);
@@ -2041,6 +2061,7 @@ namespace Emby.Plugins.WatchTogether
         }
 
         private void NotifyAutomaticBarrierRetry(
+            RoomRuntime runtime,
             Room room,
             IReadOnlyDictionary<string, SessionSnapshot> snapshots,
             DateTimeOffset now)
@@ -2049,6 +2070,9 @@ namespace Emby.Plugins.WatchTogether
             {
                 return;
             }
+
+            if (runtime.RetryNotificationSent) return;
+            runtime.RetryNotificationSent = true;
 
             foreach (var userId in room.JoinedParticipantUserIds)
             {
@@ -2061,12 +2085,8 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Automatic retry notices are advisory. Delivery failures
                     // must not prevent the new barrier from being started.
-                    QueueNotification(
-                        room,
-                        userId,
-                        snapshot,
-                        AutomaticResyncMessageHeader,
-                        AutomaticResyncMessageText);
+                    QueueNotificationCore(room, userId, snapshot, AutomaticResyncMessageHeader,
+                        AutomaticResyncMessageText, false, runtime.NotificationOperation, RoomState.Barrier, runtime.Barrier?.Stage);
                 }
                 catch
                 {
@@ -2081,7 +2101,9 @@ namespace Emby.Plugins.WatchTogether
             string text,
             DateTimeOffset now,
             bool includeAll,
-            string excludeUserId = null)
+            string excludeUserId = null,
+            object operation = null,
+            RoomState? expectedState = null)
         {
             if (!_notifyOnSyncActions || _messageIssuer == null || room == null || snapshots == null)
             {
@@ -2103,12 +2125,8 @@ namespace Emby.Plugins.WatchTogether
 
                 try
                 {
-                    QueueNotification(
-                        room,
-                        userId,
-                        snapshot,
-                        "一起观看",
-                        text);
+                    QueueNotificationCore(room, userId, snapshot, "一起观看", text,
+                        false, operation, expectedState);
                 }
                 catch
                 {
@@ -3010,6 +3028,13 @@ namespace Emby.Plugins.WatchTogether
             string text,
             bool stopNotice = false)
         {
+            QueueNotificationCore(room, userId, original, header, text, stopNotice, null, null);
+        }
+
+        private void QueueNotificationCore(Room room, string userId, SessionSnapshot original,
+            string header, string text, bool stopNotice, object operation, RoomState? expectedState,
+            BarrierStage? expectedStage = null)
+        {
             // All captured identities are immutable; selection is repeated for
             // each message, after queueing, rather than reusing poll authority.
             string sessionId = original.SessionId;
@@ -3032,6 +3057,9 @@ namespace Emby.Plugins.WatchTogether
                     var options = GetOptionsSnapshot();
                     if (stopNotice ? !options.NotifyOtherOnPlaybackStop : !options.NotifyOnSyncActions) return;
                     var runtime = access.Runtime;
+                    if (operation != null && (!ReferenceEquals(runtime.NotificationOperation, operation) ||
+                        runtime.State != expectedState ||
+                        (expectedStage.HasValue && runtime.Barrier?.Stage != expectedStage.Value))) return;
                     now = _clock();
                     var selected = SessionSelector.SelectWithPreviousDiagnostics(
                         candidates, room.JoinedParticipantUserIds, now,
@@ -3473,6 +3501,8 @@ namespace Emby.Plugins.WatchTogether
             runtime.ClearDriftTelemetry(clearAutoRepairHistory: false);
             runtime.State = RoomState.Barrier;
             runtime.Error = null;
+            runtime.NotificationOperation = new object();
+            runtime.RetryNotificationSent = false;
             runtime.Barrier = new BarrierState
             {
                 Stage = BarrierStage.Pause,
@@ -3716,7 +3746,7 @@ namespace Emby.Plugins.WatchTogether
                         barrier.SeekRetryAtUtc = null;
                         barrier.StartedAtUtc = now;
                         runtime.Error = null;
-                        NotifyAutomaticBarrierRetry(room, snapshots, now);
+                        NotifyAutomaticBarrierRetry(runtime, room, snapshots, now);
                     }
 
                     if (!barrier.SeekSent)
@@ -3995,7 +4025,9 @@ namespace Emby.Plugins.WatchTogether
                 snapshots,
                 "同步已完成，可以继续观看",
                 now,
-                includeAll: true);
+                includeAll: true,
+                operation: runtime.NotificationOperation,
+                expectedState: RoomState.Watching);
             _logger?.Info(
                 $"Room {room.Id}: entered Watching, members={string.Join(",", snapshots.Keys)}, " +
                 $"primaryPaused={barrier.PrimaryPaused}");
@@ -4273,13 +4305,7 @@ namespace Emby.Plugins.WatchTogether
                 // pause/seeks in real sessions.
                 StartBarrier(runtime, room, snapshots, now, anchorUserId: winner.userId);
                 BarrierTick(runtime, room, snapshots, now);
-                NotifyParticipants(
-                    room,
-                    snapshots,
-                    "对方调整了播放进度，正在重新同步",
-                    now,
-                    includeAll: false,
-                    excludeUserId: winner.userId);
+                // A seek cycle reports its result once, instead of each stage.
                 _logger?.Info(
                     $"Room {room.Id}: manual seek from {winner.userId} to " +
                     $"{FormatPosition(winner.positionTicks)}s; starting align barrier");
@@ -4366,13 +4392,7 @@ namespace Emby.Plugins.WatchTogether
 
                 _logger?.Info(
                     $"Room {room.Id}: pause change from {winner.userId} ({winner.paused}) propagated");
-                NotifyParticipants(
-                    room,
-                    snapshots,
-                    winner.paused ? "对方已暂停播放，已同步暂停" : "对方已继续播放，已同步继续",
-                    now,
-                    includeAll: false,
-                    excludeUserId: winner.userId);
+                // Pause/resume control is unchanged; routine stage toasts are omitted.
             }
 
             if (seekChanges.Count > 0 || pauseChanges.Count > 0)

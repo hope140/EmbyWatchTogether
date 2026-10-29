@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
 {
-    public class SyncEnginePerformanceTests
+    public partial class SyncEnginePerformanceTests
     {
         [Theory]
         [InlineData(false, 3, 4)]
@@ -98,7 +98,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
             finally { h.Messages.Release.Set(); }
             await h.Idle.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.Equal(2, h.Messages.Calls.Count);
+            Assert.Single(h.Messages.Calls);
         }
 
         [Theory]

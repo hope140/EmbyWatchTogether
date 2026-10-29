@@ -33,3 +33,7 @@
 - [发送器回归](../../tests/EmbyWatchTogether.Tests/SessionBridgeCommandIssuerTests.cs)
 
 本地测试证明对应的模拟时序和资源边界；真实双客户端播放响应由候选包实机验收确认。
+
+## 2026-10-29 notification policy refinement
+
+Routine pause/seek/resume stage notices are omitted in favor of one completion per participant. Completion and retry notices bind an in-memory alignment operation token and room state; retry also binds its barrier stage and is attempted once per operation. Reset/new Barrier retires the old token. Existing identity, expiry and cancellation checks remain. Already dispatched network work still cannot be recalled. Snapshot freshness protection only handles strictly older LastActivity in stable eligible Watching without Pending; it is not an event sequence or a general replay detector.
