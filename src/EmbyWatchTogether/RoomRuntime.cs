@@ -129,6 +129,8 @@ namespace Emby.Plugins.WatchTogether
         public MediaHandoffState Handoff { get; private set; }
 
         public BarrierState Barrier { get; set; }
+        internal object NotificationOperation { get; set; } = new object();
+        internal bool RetryNotificationSent { get; set; }
 
         public DateTimeOffset? BarrierRetryAtUtc { get; set; }
 
@@ -355,6 +357,8 @@ namespace Emby.Plugins.WatchTogether
 
         private void ResetToWaitingCore(bool preservePrimaryItemTransitionCandidate)
         {
+            NotificationOperation = new object();
+            RetryNotificationSent = false;
             bool preserveStopIdentity = MissingSessionSinceUtc.HasValue;
             bool preserveAutoRepairHistory = Barrier?.FromAutomaticDriftRepair == true;
             State = RoomState.Waiting;

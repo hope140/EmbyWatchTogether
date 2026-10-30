@@ -4,17 +4,22 @@
 
 ## 当前正式版
 
-- [v1.6.1.0 发布说明](v1.6.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)：2026-10-18 正式发布，当前 Latest stable。
+- [v1.7.1.0 发布说明](v1.7.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)：原生分页与媒体展示进入 stable。
 
 ## 当前测试版
 
-- [v1.7.0.1 测试版说明](v1.7.0.1.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.1)：页面初始化、分页和下拉控件兼容修正；[签名发布与核验记录](../maintenance/v1.7.0.1-beta-publication.md)。
+- [v1.7.2.3 测试版说明](v1.7.2.3.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)：同步提示与快照保护改进；真实双端播放验收尚待执行。
 
 ## 历史发布
+
+- [v1.7.2.2 测试版说明](v1.7.2.2.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.2)。
+- [v1.7.0.1](v1.7.0.1.md) 测试版说明 · [发布核验记录](../maintenance/v1.7.0.1-beta-publication.md)。
 
 - [v1.7.0.0 测试版说明](v1.7.0.0.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.0)：原生分页、视频信息与用户头像展示。
 
 ### Stable
+
+- [v1.6.1.0](v1.6.1.0.md)
 
 - [v1.5.0.0](v1.5.0.0.md)
 - [v1.4.5.0](v1.4.5.0.md)
@@ -58,14 +63,19 @@
 - [v1.2.0.13](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.13)
 - [v1.2.0.9](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.9)
 
-以上 38 项为本次正式版之前的公开历史 Release，通道分类与 GitHub 元数据一致。历史说明保留当时的版本事实。
+历史说明保留当时的版本事实。
 
 `v1.5.0.4` 只对应一次失败的 tag 尝试，没有 GitHub Release 或发布资产，不能列为成功发布。
 
+## 测试候选记录
+
+- [v1.7.2.4](v1.7.2.4.md)：待发布的更新保护与文档整理候选；尚无公开下载。
+
+- [v1.7.2.1](v1.7.2.1.md)、[v1.7.2.0](v1.7.2.0.md)：测试候选记录，并非公开 GitHub Release。
+
 ## 发布通道
 
-- `main` 对应 stable，正式 Release 由维护者手动运行发布 workflow 创建。
-- `beta` 对应 prerelease，测试版本从 `beta` 分支手动发布。
+- `main` 对应 stable，`beta` 对应 prerelease；维护者可手动运行发布 workflow，或通过[经审核的发布请求](../release-requests.md)按通道发布。
 - 新 tag 使用四段数字格式，例如 `v1.6.1.0`；不得添加 `-beta` 或 `-rc` 后缀。
 - 插件默认使用 `stable`；管理员可在配置页选择 `beta`，更新任务按所选通道获取并安装。
 - 静态测试、自动安装和维护者检查不等于真实客户端验收；Release Notes 只描述已有证据。

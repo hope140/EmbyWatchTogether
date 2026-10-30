@@ -41,15 +41,15 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版为 `1.6.1.0`，用户验收、正式发布和下载资产核验已完成。历史版本整理不移动、重命名或重建已有 tag。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版与测试版状态见[发布日志索引](releases/README.md)。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
-`v1.6.1.0` 的三项项目版本、程序集与 manifest 均为 `1.6.1.0`，tag 对应源码 `1a74ad2aab3703a438f592b62424388e8dae0032`。生产签名由 `release` Environment 的正式 workflow 生成；下载后的四个资产已通过旧版可信公钥验签、大小/哈希、ZIP 内容和内嵌源码身份核验，Latest 公开清单与按 tag 下载的清单一致。详细证据见[发布维护记录](maintenance/v1.6.1.0-publication.md)。
+历史发布记录：`v1.6.1.0` 的三项项目版本、程序集与 manifest 均为 `1.6.1.0`，tag 对应源码 `1a74ad2aab3703a438f592b62424388e8dae0032`。生产签名由 `release` Environment 的正式 workflow 生成；下载后的四个资产已通过旧版可信公钥验签、大小/哈希、ZIP 内容和内嵌源码身份核验，Latest 公开清单与按 tag 下载的清单一致。详细证据见[发布维护记录](maintenance/v1.6.1.0-publication.md)。
 
 ## 构建、测试和打包
 
-要求：PowerShell、可用的 .NET SDK，以及能够还原 `MediaBrowser.Server.Core` `4.9.0.52-beta` 的 NuGet 源。首次构建可先执行 `dotnet restore`，然后运行：
+要求：PowerShell、.NET 10 SDK（测试项目目标为 `net10.0`；插件目标为 `netstandard2.0`），以及能够还原 `MediaBrowser.Server.Core` `4.9.0.52-beta` 的 NuGet 源。验证环境与入口见[验证与交接](validation-and-handoff.md)。首次构建可先执行 `dotnet restore`，然后运行：
 
 ```powershell
 dotnet test tests/EmbyWatchTogether.Tests/EmbyWatchTogether.Tests.csproj -c Release --nologo -v minimal
@@ -69,15 +69,15 @@ dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll
 dist/EmbyWatchTogether.zip
 ```
 
-ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装已构建插件)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。
+ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。
 
 ## 签名发布流程（维护者）
 
 - `scripts/release/New-ReleaseSigningKey.ps1`：在仓库外生成 RSA PKCS#8 私钥和 `RSAKeyValue` 公钥；私钥不得写入仓库。
 - `scripts/release/Sign-ReleaseManifest.ps1`：检查 DLL 名称、程序集名和版本，流式计算大小与 SHA-256，并生成 canonical manifest 与 detached signature。
 - `tests/release-signing.tests.ps1`：验证密钥生成、清单 canonical 规则、签名和 DLL 校验流程。
-- `tests/release-workflow.tests.ps1`：验证 workflow 只允许手动触发、channel 与分支门禁、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
-- `.github/workflows/release.yml`：只接受 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入；新 tag 必须是四段规范数字；`stable` 仅允许从 `main` 触发并通过 GitHub Releases API 检查最高正式版本，要求前三段至少一段变化，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配、版本门禁或签名失败时会安全失败。
+- `tests/release-workflow.tests.ps1`：验证手动与可复用发布入口、channel 与分支门禁、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
+- `.github/workflows/release.yml`：保留 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入，也供[经审核的发布请求](release-requests.md)通过 `workflow_call` 复用；以下分支触发约束适用于手动入口，请求入口另核验固定源码 SHA、通道归属和 CI。新 tag 必须是四段规范数字；`stable` 仅允许从 `main` 触发并通过 GitHub Releases API 检查最高正式版本，要求前三段至少一段变化，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配、版本门禁或签名失败时会安全失败。
 
 ## 正式版更新实现约束
 
@@ -105,7 +105,7 @@ tests/EmbyWatchTogether.Tests/ 单元测试和同步边界回归测试
 scripts/build.ps1              构建、测试、发布 DLL 并生成 ZIP
 scripts/release/               生成签名密钥和发布清单
 tests/release-*.tests.ps1      签名与发布 workflow 静态/集成校验
-.github/workflows/release.yml  手动签名发布 workflow，不部署服务器
+.github/workflows/release.yml  手动/可复用签名发布 workflow，不部署服务器
 docs/                          当前实现说明、排错和协作流程
 ```
 
