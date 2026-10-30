@@ -1,14 +1,14 @@
 # Watch Together 路线图
 
-当前正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，于 2026-10-18 发布并核验为 Latest。详细实施状态见 [`development-roadmap.md`](development-roadmap.md)。
+当前正式版与测试版见[发布日志索引](releases/README.md)，详细实施状态见 [`development-roadmap.md`](development-roadmap.md)。
 
 ## 已整合能力
 
 - Phase A-C：双人同步观看、房间生命周期和一次性邀请。
 - Phase D：Media Handoff。主用户换片时，参与者确认打开同一 Item 后再进入 Barrier。
 - Phase E：参与者原会话短暂缺失时的有限恢复，以及持续明显漂移的低频保守重新对齐。
-- 管理页诊断、脱敏导出、更新通道和 GitHub Token 状态保留在原服务器单页中。
-- 原生控件调整保留原区域、房间布局、宿主内容宽度和既有操作语义。
+- “房间 / 创建与邀请 / 设置”三页保留诊断、脱敏导出、更新通道和 GitHub Token 状态；普通用户可访问房间与邀请。
+- 界面沿用 Emby 原生标签和控件，并保留房间操作语义。
 
 ## 当前交付状态
 

@@ -1,14 +1,18 @@
 # Watch Together 当前排期
 
-更新日期：2026-10-19。
+## 当前状态
 
-## 当前已确认目标
+当前正式版与公开测试版见[发布日志索引](releases/README.md)。当前测试版的真实双端播放验收尚待执行；具体证据和限制见[客户端兼容性记录](client-compatibility.md)。strict-follow 和多人同步观看仍无限期延期，见[路线图](roadmap.md)。
 
-当前正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，已于 2026-10-18 完成验收、签名发布与下载后独立核验，Latest 指向该版本。原服务器单页界面、同步、诊断和更新设置为当前基线。
+## 2026-10-19 排期与证据（历史）
 
-正式版 UI 来源为 `a1408e0` 的原服务器页面，`f294c67` 仅提供其上的 Phase E 诊断增量；S116 控件契约见 [`native-controls-plan.md`](native-controls-plan.md)。早期 UI VNext 为已撤回的历史候选。
+以下内容保留当时的版本、源码身份和验收记录，不代表当前发布状态。
 
-用户后续确认 S122 的原生分页、媒体与头像布局并授权测试发布；当前 beta 为 `v1.7.0.1`，在正式版同步核心上增加上述界面能力并修正页面兼容性，现行 Token、更新通道和诊断功能保留。S122 契约见 [`native-pages-media-plan.md`](native-pages-media-plan.md)，发布与真实双端待验收范围见[测试版维护记录](maintenance/v1.7.0.1-beta-publication.md)。
+当时正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，已于 2026-10-18 完成验收、签名发布与下载后独立核验，Latest 指向该版本。原服务器单页界面、同步、诊断和更新设置为当时基线。
+
+当时正式版 UI 来源为 `a1408e0` 的原服务器页面，`f294c67` 仅提供其上的 Phase E 诊断增量；S116 控件契约见 [`native-controls-plan.md`](native-controls-plan.md)。早期 UI VNext 为已撤回的历史候选。
+
+用户后续确认 S122 的原生分页、媒体与头像布局并授权测试发布；当时 beta 为 `v1.7.0.1`，在正式版同步核心上增加上述界面能力并修正页面兼容性，现行 Token、更新通道和诊断功能保留。S122 契约见 [`native-pages-media-plan.md`](native-pages-media-plan.md)，发布与真实双端待验收范围见[测试版维护记录](maintenance/v1.7.0.1-beta-publication.md)。
 
 本轮排期已完成：S116–S118 原生控件与页面适配 → S119 候选准备 → S120 文档受众整理 → S121 stable 发布与核验。具体验收边界见 [`client-compatibility.md`](client-compatibility.md)，发布证据见[维护记录](maintenance/v1.6.1.0-publication.md)。
 
@@ -16,11 +20,11 @@ S124 的 V16 页面修正完成本地部署及用户界面确认后，已完成 
 
 浏览器回归已通过 [PR #24](https://github.com/hope140/EmbyWatchTogether/pull/24) 合入 `beta`，与 .NET 检查并行运行；首次云端检查的 89 项浏览器测试、545 项 .NET 测试、构建与四组脚本门禁通过，报告已上传并下载核验。运行和报告查看方式见[浏览器测试说明](../tests/ui/README.md)。
 
-strict-follow 和多人同步观看已无限期延期，状态见 [`roadmap.md`](roadmap.md)。正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；测试发布与文档同步不移动该 tag。构建身份与 UI 验证边界分别见 `native-controls-plan.md` 和本轮 S122 契约。
+strict-follow 和多人同步观看已无限期延期，状态见 [`roadmap.md`](roadmap.md)。当时 v1.6.1.0 正式资产源码冻结在 `1a74ad2aab3703a438f592b62424388e8dae0032`；测试发布与文档同步不移动该 tag。构建身份与 UI 验证边界分别见 `native-controls-plan.md` 和本轮 S122 契约。
 
 ## 基线与证据
 
-正式版的 tag、版本、四个签名资产及 Latest 已完成远端核验。S119 的[准备记录](release-preparation-v1.6.1.0.md)保留当时的本地候选状态；以下是准备前的历史基线与整合契约，版本、部署和待办措辞只用于解释当时过程。
+当时 v1.6.1.0 的 tag、版本、四个签名资产及 Latest 已完成远端核验。S119 的[准备记录](release-preparation-v1.6.1.0.md)保留当时的本地候选状态；以下是准备前的历史基线与整合契约，版本、部署和待办措辞只用于解释当时过程。
 
 <details>
 <summary>展开历史基线、Stack 契约与整合证据</summary>

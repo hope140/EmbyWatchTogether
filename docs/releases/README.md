@@ -73,8 +73,7 @@
 
 ## 发布通道
 
-- `main` 对应 stable，正式 Release 由维护者手动运行发布 workflow 创建。
-- `beta` 对应 prerelease，测试版本从 `beta` 分支手动发布。
+- `main` 对应 stable，`beta` 对应 prerelease；维护者可手动运行发布 workflow，或通过[经审核的发布请求](../release-requests.md)按通道发布。
 - 新 tag 使用四段数字格式，例如 `v1.6.1.0`；不得添加 `-beta` 或 `-rc` 后缀。
 - 插件默认使用 `stable`；管理员可在配置页选择 `beta`，更新任务按所选通道获取并安装。
 - 静态测试、自动安装和维护者检查不等于真实客户端验收；Release Notes 只描述已有证据。
