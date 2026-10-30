@@ -8,9 +8,11 @@
 
 ## 当前测试版
 
-- [v1.7.2.3 测试版说明](v1.7.2.3.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)：同步提示与快照保护改进；真实双端播放验收尚待执行。
+- [v1.7.2.4 测试版说明](v1.7.2.4.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4) · [发布核验记录](../maintenance/v1.7.2.4-beta-publication.md)：待生效更新版本保护与文档整理；真实双端播放验收尚待执行。
 
 ## 历史发布
+
+- [v1.7.2.3 测试版说明](v1.7.2.3.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)：同步提示与快照保护改进。
 
 - [v1.7.2.2 测试版说明](v1.7.2.2.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.2)。
 - [v1.7.0.1](v1.7.0.1.md) 测试版说明 · [发布核验记录](../maintenance/v1.7.0.1-beta-publication.md)。
@@ -68,8 +70,6 @@
 `v1.5.0.4` 只对应一次失败的 tag 尝试，没有 GitHub Release 或发布资产，不能列为成功发布。
 
 ## 测试候选记录
-
-- [v1.7.2.4](v1.7.2.4.md)：待发布的更新保护与文档整理候选；尚无公开下载。
 
 - [v1.7.2.1](v1.7.2.1.md)、[v1.7.2.0](v1.7.2.0.md)：测试候选记录，并非公开 GitHub Release。
 

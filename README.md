@@ -13,9 +13,9 @@
 | 通道 | 当前版本 | 适合谁 |
 | --- | --- | --- |
 | 正式版 | [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0) · [说明](docs/releases/v1.7.1.0.md) | 希望使用 stable 版本的用户 |
-| 测试版 | [v1.7.2.3](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3) · [说明](docs/releases/v1.7.2.3.md) | 愿意测试最新改进的用户 |
+| 测试版 | [v1.7.2.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4) · [说明](docs/releases/v1.7.2.4.md) | 愿意测试最新改进的用户 |
 
-正在准备 [v1.7.2.4 测试候选](docs/releases/v1.7.2.4.md)，发布成功前下载仍以以上 Release 为准。v1.7.2 系列的真实双端播放验收仍待执行；自动化回归不能替代实机验收。查看[全部版本说明](docs/releases/README.md)。
+v1.7.2 系列的真实双端播放验收仍待执行；自动化回归不能替代实机验收。查看[全部版本说明](docs/releases/README.md)。
 
 ## 能做什么
 
@@ -26,7 +26,7 @@
 
 ## 安装
 
-1. 从 [Latest stable Release](https://github.com/hope140/EmbyWatchTogether/releases/latest) 下载 `EmbyWatchTogether.zip`。如需测试版，请从[测试版 Release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3) 下载。
+1. 从 [Latest stable Release](https://github.com/hope140/EmbyWatchTogether/releases/latest) 下载 `EmbyWatchTogether.zip`。如需测试版，请从[测试版 Release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4) 下载。
 2. 停止 Emby Server，解压并将 `Emby.Plugins.WatchTogether.dll` 直接放入 Emby Server 数据目录的 `plugins` 目录，不要再套一层子目录。
 3. 启动 Emby Server，在 **Dashboard → Plugins → Watch Together** 确认插件及设置页可用。
 
