@@ -83,6 +83,137 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
+        [Theory]
+        [InlineData(false, "3.0.0", "2.0.0")]
+        [InlineData(true, "3.0.0", "2.0.0")]
+        [InlineData(false, "2.0.0", "2.0.0.0")]
+        [InlineData(true, "2.0.0", "2.0.0.0")]
+        [InlineData(false, "2.0.0.0", "2.0.0")]
+        [InlineData(true, "2.0.0.0", "2.0.0")]
+        public async Task PendingVersion_EqualOrHigherThanCandidateIsNotOfferedOrInstalled(
+            bool automatic, string pendingVersion, string candidateVersion)
+        {
+            var configuration = new PluginConfiguration { PendingUpdateVersion = pendingVersion };
+            var release = CreateRelease(2, 0, 0);
+            release.Version = Version.Parse(candidateVersion);
+            var installation = CreateInstallationManager(out var installMock);
+            var messages = new System.Collections.Generic.List<string>();
+            var sessions = new Mock<ISessionManager>();
+            sessions.Setup(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand", It.IsAny<GeneralCommand>(), It.IsAny<CancellationToken>()))
+                .Callback<string, GeneralCommand, CancellationToken>((_, command, _) =>
+                    messages.Add(command.Arguments["Text"]))
+                .Returns(Task.CompletedTask);
+
+            using (var manager = new PluginUpdateManager(configuration, new Version(1, 0, 0),
+                new FakeReleaseClient(release), installation, sessionManager: sessions.Object))
+            {
+                var checkedStatus = await manager.CheckForUpdatesAsync(automatic);
+                var finalStatus = automatic ? checkedStatus : await manager.InstallAsync();
+
+                installMock.Verify(x => x.InstallPackage(It.IsAny<PackageVersionInfo>(), true,
+                    It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Never);
+                Assert.False(checkedStatus.UpdateAvailable);
+                Assert.False(finalStatus.UpdateAvailable);
+                Assert.Equal(pendingVersion, configuration.PendingUpdateVersion);
+                Assert.Equal(pendingVersion, finalStatus.PendingVersion);
+                Assert.True(finalStatus.RestartRequired);
+                Assert.Contains(messages, message =>
+                    message == "版本 v" + pendingVersion + " 已等待重启生效。");
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task PendingVersion_StrictlyNewerCandidateCanStillBeInstalled(bool automatic)
+        {
+            var configuration = new PluginConfiguration { PendingUpdateVersion = "2.0.0.0" };
+            var installation = CreateInstallationManager(out var installMock);
+            using (var manager = new PluginUpdateManager(configuration, new Version(1, 0, 0),
+                new FakeReleaseClient(CreateRelease(3, 0, 0)), installation))
+            {
+                var status = await manager.CheckForUpdatesAsync(automatic);
+                if (!automatic)
+                {
+                    Assert.True(status.UpdateAvailable);
+                    status = await manager.InstallAsync();
+                }
+
+                installMock.Verify(x => x.InstallPackage(
+                    It.Is<PackageVersionInfo>(package => package.versionStr == "3.0.0"), true,
+                    It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Once);
+                Assert.Equal("3.0.0", status.PendingVersion);
+                Assert.Equal("3.0.0", configuration.PendingUpdateVersion);
+                Assert.False(status.UpdateAvailable);
+                Assert.True(status.RestartRequired);
+            }
+        }
+
+        [Theory]
+        [InlineData(false, "1.5.0")]
+        [InlineData(true, "1.5.0")]
+        [InlineData(false, "2.0.0.0")]
+        [InlineData(true, "2.0.0.0")]
+        public async Task PendingVersion_SaveFailureOverridePreventsEqualOrLowerInstallation(
+            bool automatic, string candidateVersion)
+        {
+            var configuration = new PluginConfiguration();
+            var release = CreateRelease(2, 0, 0);
+            var installation = CreateInstallationManager(out var installMock);
+            using (var manager = CreateManager(configuration, () => new Version(1, 0, 0),
+                () => throw new IOException("save failed"), new FakeReleaseClient(release), installation))
+            {
+                var installed = await manager.CheckForUpdatesAsync(true);
+                Assert.Contains("保存", installed.LastError);
+                // An unsuccessful save cannot make the configuration the source
+                // of truth for the DLL that has already been installed.
+                configuration.PendingUpdateVersion = null;
+                release.Version = Version.Parse(candidateVersion);
+
+                var checkedStatus = await manager.CheckForUpdatesAsync(automatic);
+                var finalStatus = automatic ? checkedStatus : await manager.InstallAsync();
+
+                installMock.Verify(x => x.InstallPackage(It.IsAny<PackageVersionInfo>(), true,
+                    It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Once);
+                Assert.False(checkedStatus.UpdateAvailable);
+                Assert.False(finalStatus.UpdateAvailable);
+                Assert.Equal("2.0.0", finalStatus.PendingVersion);
+                Assert.True(finalStatus.RestartRequired);
+                Assert.Contains("保存", finalStatus.LastError);
+            }
+        }
+
+        [Fact]
+        public async Task PendingVersion_SuccessfulHigherInstallRefreshesEarlierSaveFailureOverride()
+        {
+            var configuration = new PluginConfiguration();
+            var release = CreateRelease(2, 0, 0);
+            var installation = CreateInstallationManager(out var installMock);
+            var saveFails = true;
+            using (var manager = CreateManager(configuration, () => new Version(1, 0, 0),
+                () => { if (saveFails) throw new IOException("save failed"); },
+                new FakeReleaseClient(release), installation))
+            {
+                var first = await manager.CheckForUpdatesAsync(true);
+                Assert.Equal("2.0.0", first.PendingVersion);
+                Assert.Contains("保存", first.LastError);
+                saveFails = false;
+                release.Version = new Version(3, 0, 0);
+
+                var higher = await manager.CheckForUpdatesAsync(true);
+
+                installMock.Verify(x => x.InstallPackage(It.IsAny<PackageVersionInfo>(), true,
+                    It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+                Assert.Equal("3.0.0", configuration.PendingUpdateVersion);
+                Assert.Equal("3.0.0", higher.PendingVersion);
+                Assert.Equal("3.0.0", manager.GetStatus().PendingVersion);
+                Assert.True(higher.RestartRequired);
+                Assert.False(higher.UpdateAvailable);
+                Assert.Contains("保存", higher.LastError);
+            }
+        }
+
         [Fact]
         public async Task EquivalentThreeAndFourPartVersionsDoNotOfferAnUpdate()
         {

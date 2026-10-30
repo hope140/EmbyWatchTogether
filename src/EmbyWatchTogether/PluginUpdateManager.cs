@@ -255,11 +255,13 @@ namespace Emby.Plugins.WatchTogether
                         }
                         else
                         {
-                            var configuration = ReadConfiguration();
-                            if (!string.IsNullOrWhiteSpace(configuration.PendingUpdateVersion) &&
-                                VersionsEqual(configuration.PendingUpdateVersion, _verifiedRelease.Release.Version))
+                            if (TryGetBlockingPendingVersion(_verifiedRelease.Release.Version, out var pendingVersion))
                             {
-                                var message = "该版本已等待重启生效。";
+                                lock (_stateLock)
+                                {
+                                    _status.UpdateAvailable = false;
+                                }
+                                var message = "版本 v" + pendingVersion + " 已等待重启生效。";
                                 SetError(message, null);
                                 await NotifyAdminAsync(message, linked.Token).ConfigureAwait(false);
                             }
@@ -355,11 +357,12 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 var release = verifiedRelease.Release;
+                var pendingBlocksUpdate = TryGetBlockingPendingVersion(release.Version, out var pendingVersion);
                 lock (_stateLock)
                 {
                     _status.LatestVersion = FormatVersion(release.Version);
                     _status.ReleaseUrl = release.HtmlUrl;
-                    _status.UpdateAvailable = IsNewer(release.Version, currentVersion);
+                    _status.UpdateAvailable = IsNewer(release.Version, currentVersion) && !pendingBlocksUpdate;
                     _verifiedRelease = verifiedRelease;
                 }
 
@@ -382,16 +385,14 @@ namespace Emby.Plugins.WatchTogether
                 // disabling or re-scheduling the task itself.
                 if (automatic)
                 {
-                    var configuration = ReadConfiguration();
-                    if (!string.IsNullOrWhiteSpace(configuration.PendingUpdateVersion) &&
-                        VersionsEqual(configuration.PendingUpdateVersion, release.Version))
+                    if (pendingBlocksUpdate)
                     {
                         lock (_stateLock)
                         {
                             _status.UpdateAvailable = false;
                         }
                         await NotifyAdminAsync(
-                            "版本 v" + FormatVersion(release.Version) + " 已等待重启生效。",
+                            "版本 v" + pendingVersion + " 已等待重启生效。",
                             cancellationToken).ConfigureAwait(false);
                     }
                     else
@@ -527,6 +528,11 @@ namespace Emby.Plugins.WatchTogether
                     _status.RestartRequired = true;
                     _status.UpdateAvailable = false;
                     _status.ReleaseUrl = release.HtmlUrl;
+
+                    if (_pendingVersionStatusOverride != null)
+                    {
+                        _pendingVersionStatusOverride = pendingVersion;
+                    }
 
                     if (!configurationSaved || notificationException != null)
                     {
@@ -773,10 +779,14 @@ namespace Emby.Plugins.WatchTogether
             return persistentDiagnostic + "；" + currentDiagnostic;
         }
 
-        private static bool VersionsEqual(string pending, Version release)
+        private bool TryGetBlockingPendingVersion(Version candidate, out string pending)
         {
+            lock (_stateLock)
+            {
+                pending = _pendingVersionStatusOverride ?? ReadConfiguration().PendingUpdateVersion;
+            }
             return Version.TryParse(pending, out var pendingVersion) &&
-                CompareVersions(pendingVersion, release) == 0;
+                CompareVersions(pendingVersion, candidate) >= 0;
         }
 
         private static bool IsPendingRestartRequired(string pending, Version current)
