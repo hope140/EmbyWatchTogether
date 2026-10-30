@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前公开测试版为 [v1.7.2.3](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)。测试版的真实双端播放验收尚待执行；各版本的事实和边界见[发布日志索引](releases/README.md)。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前公开测试版为 [v1.7.2.3](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)。测试版的真实双端播放验收尚待执行；各版本的事实和边界见[发布日志索引](releases/README.md)；历史验收与发布证据见 [v1.6.1.0 发布记录](maintenance/v1.6.1.0-publication.md)和 [v1.7.0.1 测试版发布记录](maintenance/v1.7.0.1-beta-publication.md)。
 
 ## 运行时边界
 
@@ -28,7 +28,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 - `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息目标和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份，消息网络发送在退出 gate 后通过 5 秒有界 issuer 执行；`RoomStore` 只持久化房间元数据。房间保留 `CreatorUserId` 和 `IsSelfService`，旧 JSON 缺失字段时回退到旧管理员创建语义。
 - `RoomInvitationManager` 保存运行时邀请码的校验值、创建者、名称和有效期，不保存明文邀请码或独立持久化文件。接受操作在其串行边界内调用 `RoomManager` 原子创建完整双人房间，创建成功后清除该创建者的全部待接受邀请；重启会丢弃未接受邀请。
 - `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching`、`Recovering`、`Unavailable`。`Handoff` 只负责让参与者打开主用户当前 Item，确认后再转入由 `Barrier` 负责的时间轴对齐；`Recovering` 只等待非 Primary 参与者原 User、原 SessionId 和原 ItemId 的短暂恢复，Primary 缺失继续走停止 debounce 和晚到换集候选。
-- `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后创建者或管理员可按房间权限结束自助房间。
+- `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后当前房间的任一参与者或管理员可按房间权限结束房间。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 在当前房间 gate 内重新校验房间、成员和服务器身份，返回只读、有界、脱敏的同步诊断 DTO。诊断事件环、当前选中快照、Pending、Handoff、Barrier、Recovery 和 drift telemetry 仅驻留 `RoomRuntime` 内存，房间删除或运行时重建时丢弃，不写入 `rooms.json`；导出使用 `userA`/`userB` 别名、短 hash 和稳定错误分类，不包含用户名、GUID、Token、路径或异常文本。
 
 内置 SessionBridgeCommandIssuer 通过 BoundedSessionDispatch 执行播放、PlayItem 和消息传输。独立的 5 秒有界等待涵盖同步调用入口和不响应取消的 Task；同一 Session 的播放控制与 PlayItem 共用 `playback:` 槽位，DisplayMessage 使用独立的 `message:` 槽位，两类请求仍共享每个 issuer 最多 64 个未完成传输的总量限制。发送器在超时返回后不会以迟到结果回写 RoomRuntime；旧传输实际完成后释放槽位，准入同时依据 Task 的完成状态清理已完成项，避免清理回调稍晚而误拒绝下一条正常命令。已进入底层的物理发送不能强制撤回，取消令牌仍传入下层，同一 Session 同一通道在未完成期间拒绝叠加请求。

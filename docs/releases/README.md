@@ -12,7 +12,7 @@
 
 ## 历史发布
 
-- [v1.7.2.2](v1.7.2.2.md)、[v1.7.2.1](v1.7.2.1.md)、[v1.7.2.0](v1.7.2.0.md) 测试版说明。
+- [v1.7.2.2 测试版说明](v1.7.2.2.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.2)。
 - [v1.7.0.1](v1.7.0.1.md) 测试版说明 · [发布核验记录](../maintenance/v1.7.0.1-beta-publication.md)。
 
 - [v1.7.0.0 测试版说明](v1.7.0.0.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.0)：原生分页、视频信息与用户头像展示。
@@ -66,6 +66,10 @@
 历史说明保留当时的版本事实。
 
 `v1.5.0.4` 只对应一次失败的 tag 尝试，没有 GitHub Release 或发布资产，不能列为成功发布。
+
+## 测试候选记录
+
+- [v1.7.2.1](v1.7.2.1.md)、[v1.7.2.0](v1.7.2.0.md)：测试候选记录，并非公开 GitHub Release。
 
 ## 发布通道
 
