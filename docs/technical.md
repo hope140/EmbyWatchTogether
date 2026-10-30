@@ -69,15 +69,15 @@ dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll
 dist/EmbyWatchTogether.zip
 ```
 
-ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装已构建插件)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。
+ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。
 
 ## 签名发布流程（维护者）
 
 - `scripts/release/New-ReleaseSigningKey.ps1`：在仓库外生成 RSA PKCS#8 私钥和 `RSAKeyValue` 公钥；私钥不得写入仓库。
 - `scripts/release/Sign-ReleaseManifest.ps1`：检查 DLL 名称、程序集名和版本，流式计算大小与 SHA-256，并生成 canonical manifest 与 detached signature。
 - `tests/release-signing.tests.ps1`：验证密钥生成、清单 canonical 规则、签名和 DLL 校验流程。
-- `tests/release-workflow.tests.ps1`：验证 workflow 只允许手动触发、channel 与分支门禁、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
-- `.github/workflows/release.yml`：只接受 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入；新 tag 必须是四段规范数字；`stable` 仅允许从 `main` 触发并通过 GitHub Releases API 检查最高正式版本，要求前三段至少一段变化，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配、版本门禁或签名失败时会安全失败。
+- `tests/release-workflow.tests.ps1`：验证手动与可复用发布入口、channel 与分支门禁、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
+- `.github/workflows/release.yml`：保留 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入，也供[经审核的发布请求](release-requests.md)通过 `workflow_call` 复用；以下分支触发约束适用于手动入口，请求入口另核验固定源码 SHA、通道归属和 CI。新 tag 必须是四段规范数字；`stable` 仅允许从 `main` 触发并通过 GitHub Releases API 检查最高正式版本，要求前三段至少一段变化，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配、版本门禁或签名失败时会安全失败。
 
 ## 正式版更新实现约束
 
@@ -105,7 +105,7 @@ tests/EmbyWatchTogether.Tests/ 单元测试和同步边界回归测试
 scripts/build.ps1              构建、测试、发布 DLL 并生成 ZIP
 scripts/release/               生成签名密钥和发布清单
 tests/release-*.tests.ps1      签名与发布 workflow 静态/集成校验
-.github/workflows/release.yml  手动签名发布 workflow，不部署服务器
+.github/workflows/release.yml  手动/可复用签名发布 workflow，不部署服务器
 docs/                          当前实现说明、排错和协作流程
 ```
 
