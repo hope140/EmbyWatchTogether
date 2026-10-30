@@ -4,9 +4,9 @@
 
 [安装](#安装) · [开始使用](#开始一起观看) · [兼容性与帮助](#兼容性与帮助) · [开发者文档](docs/README.md)
 
-![一起观看的概念流程：两位用户通过 Emby Server 上的 Watch Together 房间协调播放](docs/images/watch-together-flow.svg)
+![Watch Together 房间首页示意：视频展示区、双人状态与房间控制](docs/images/watch-together-preview.png)
 
-*概念示意图，非实际界面截图。*
+*基于用户截图经 AI 脱敏及示意处理，部分界面文字与实际产品不同，并非原始截图；操作以本文说明及实际界面为准。电影素材权利与来源见[图像说明](docs/images/README.md)。*
 
 ## 选择版本
 
@@ -15,7 +15,7 @@
 | 正式版 | [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0) · [说明](docs/releases/v1.7.1.0.md) | 希望使用 stable 版本的用户 |
 | 测试版 | [v1.7.2.3](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3) · [说明](docs/releases/v1.7.2.3.md) | 愿意测试最新改进的用户 |
 
-v1.7.2.3 的真实双端播放验收仍待执行；自动化回归不能替代实机验收。查看[全部版本说明](docs/releases/README.md)。
+正在准备 [v1.7.2.4 测试候选](docs/releases/v1.7.2.4.md)，发布成功前下载仍以以上 Release 为准。v1.7.2 系列的真实双端播放验收仍待执行；自动化回归不能替代实机验收。查看[全部版本说明](docs/releases/README.md)。
 
 ## 能做什么
 
@@ -65,4 +65,4 @@ Emby 的 **Dashboard → 计划任务 → Watch Together 更新检查**可调整
 
 开发者和维护者请从[文档索引](docs/README.md)进入，构建、API 和排错细节见[技术文档](docs/technical.md)。
 
-项目按 [Apache License 2.0](LICENSE) 许可；概念图的来源与许可见[图像说明](docs/images/README.md)。
+项目按 [Apache License 2.0](LICENSE) 许可；文档图片的来源与许可见[图像说明](docs/images/README.md)。
