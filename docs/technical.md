@@ -69,7 +69,7 @@ dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll
 dist/EmbyWatchTogether.zip
 ```
 
-ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。
+ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。自定义 `-OutputDirectory` 必须避开仓库源码、测试、脚本、文档、协作配置和 `.publish/`；输出与暂存路径及其祖先不得经过符号链接或 reparse point。可先加 `-ValidatePathsOnly` 只读验证路径；默认 `dist/` 和独立的仓库外物理目录仍受支持。
 
 ## 签名发布流程（维护者）
 

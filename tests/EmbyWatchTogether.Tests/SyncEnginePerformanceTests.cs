@@ -174,6 +174,32 @@ namespace Emby.Plugins.WatchTogether.Tests
             h.EnableNotifications();
             double monotonic = 0;
             h.SetMonotonic(() => Volatile.Read(ref monotonic));
+            var gate = (IDisposable)typeof(RoomManager).GetMethod("TryEnterRoom",
+                BindingFlags.Instance | BindingFlags.NonPublic).Invoke(h.Rooms, new object[] { h.Room.Id });
+            try
+            {
+                h.Enqueue("u2");
+                Assert.True(h.WaitUntilNoticeDequeued(), "Worker did not dequeue the notice");
+                // The worker has left the queue and is waiting for this gate.
+                if (expireSnapshot) h.Now = h.Now.AddSeconds(61);
+                else Volatile.Write(ref monotonic, 10.001);
+            }
+            finally { gate.Dispose(); }
+            await h.Idle.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Empty(h.Messages.Calls);
+        }
+
+        [Theory]
+        [InlineData("session")]
+        [InlineData("item")]
+        [InlineData("capability")]
+        [InlineData("unchanged")]
+        public async Task DequeuedNotice_WaitingForRoomGate_SamplesCurrentTargetAfterAcquiringGate(string change)
+        {
+            using var h = new Harness();
+            h.EnterWatching();
+            h.EnableNotifications();
+            h.Messages.Release.Set();
             using var sampled = new ManualResetEventSlim();
             h.Provider.Sampled = sampled.Set;
             var gate = (IDisposable)typeof(RoomManager).GetMethod("TryEnterRoom",
@@ -181,12 +207,41 @@ namespace Emby.Plugins.WatchTogether.Tests
             try
             {
                 h.Enqueue("u2");
-                Assert.True(sampled.Wait(TimeSpan.FromSeconds(5)), "Worker did not sample candidates");
-                // The worker has left the queue and is waiting for this gate.
-                if (expireSnapshot) h.Now = h.Now.AddSeconds(61);
-                else Volatile.Write(ref monotonic, 10.001);
+                Assert.True(h.WaitUntilNoticeDequeued(), "Worker did not dequeue the notice");
+                Assert.False(sampled.Wait(TimeSpan.FromMilliseconds(200)),
+                    "A notice must not sample its target before acquiring the room gate");
+                switch (change)
+                {
+                    case "session": h.ReplacePeer(session: "replacement"); break;
+                    case "item": h.ReplacePeer(item: "replacement"); break;
+                    case "capability": h.ReplacePeer(display: false); break;
+                }
             }
             finally { gate.Dispose(); }
+
+            await h.Idle.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(sampled.IsSet);
+            Assert.Equal(change == "unchanged" ? 1 : 0, h.Messages.Calls.Count);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task DequeuedNotice_RechecksExpiryAndShutdownAfterSampling(bool stop)
+        {
+            using var h = new Harness();
+            h.EnterWatching();
+            h.EnableNotifications();
+            h.Messages.Release.Set();
+            double monotonic = 0;
+            h.SetMonotonic(() => Volatile.Read(ref monotonic));
+            h.Provider.Sampled = () =>
+            {
+                if (stop) h.Engine.Stop();
+                else Volatile.Write(ref monotonic, 10.001);
+            };
+
+            h.Enqueue("u2");
             await h.Idle.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Empty(h.Messages.Calls);
         }
@@ -269,6 +324,20 @@ namespace Emby.Plugins.WatchTogether.Tests
                     .GetValue(Engine);
                 dispatcher.GetType().GetField("_elapsedSeconds", BindingFlags.Instance | BindingFlags.NonPublic)
                     .SetValue(dispatcher, monotonic);
+            }
+            internal bool WaitUntilNoticeDequeued()
+            {
+                var dispatcher = typeof(SyncEngine).GetField("_notifications", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(Engine);
+                var queueGate = dispatcher.GetType().GetField("_gate", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(dispatcher);
+                var queue = dispatcher.GetType().GetField("_queue", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(dispatcher);
+                return SpinWait.SpinUntil(() =>
+                {
+                    lock (queueGate)
+                        return (int)queue.GetType().GetProperty("Count").GetValue(queue) == 0;
+                }, TimeSpan.FromSeconds(5));
             }
             internal SessionSnapshot Snapshot(string user, bool paused, int seconds, string session = null,
                 string item = "item", bool display = true, bool stopped = false) =>

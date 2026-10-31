@@ -62,6 +62,55 @@ function Test-SameOrAncestorPath {
     return $Candidate.StartsWith($ancestorPrefix, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+function Assert-NoReparsePointPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    # Reject aliases instead of trying to resolve links/junctions differently
+    # on each platform. Inspect ancestors even when the output does not exist.
+    $currentPath = $Path
+    while (-not [string]::IsNullOrEmpty($currentPath)) {
+        try {
+            $attributes = [System.IO.File]::GetAttributes($currentPath)
+            if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing OutputDirectory '$OutputDirectory': build path '$currentPath' is a symbolic link or reparse point. Choose a physical output directory."
+            }
+        }
+        catch [System.IO.FileNotFoundException] {
+            # A missing output is expected; an existing ancestor may be a link.
+        }
+        catch [System.IO.DirectoryNotFoundException] {
+            # Continue toward the nearest existing ancestor.
+        }
+        catch {
+            throw "Refusing OutputDirectory '$OutputDirectory': build path '$currentPath' cannot be safely inspected. $($_.Exception.Message)"
+        }
+
+        $currentPath = [System.IO.Path]::GetDirectoryName($currentPath)
+    }
+}
+
+function Assert-SafeBuildPaths {
+    foreach ($directoryName in @('src', 'tests', 'scripts', 'docs', '.github', '.git', '.codex', '.agents')) {
+        $protectedPath = Join-Path $root $directoryName
+        if ((Test-SameOrAncestorPath -Ancestor $protectedPath -Candidate $outputDirectoryPath) -or
+            (Test-SameOrAncestorPath -Ancestor $outputDirectoryPath -Candidate $protectedPath)) {
+            throw "Refusing OutputDirectory '$OutputDirectory': it overlaps protected repository path '$protectedPath'. Choose a dedicated output directory such as '$root/dist'."
+        }
+    }
+
+    if ((Test-SameOrAncestorPath -Ancestor $publishDir -Candidate $outputDirectoryPath) -or
+        (Test-SameOrAncestorPath -Ancestor $outputDirectoryPath -Candidate $publishDir)) {
+        throw "Refusing OutputDirectory '$OutputDirectory': it overlaps publish staging '$publishDir'. Choose a separate output directory."
+    }
+
+    foreach ($path in @($outputDirectoryPath, $pluginDir, $archivePath, $publishDir)) {
+        Assert-NoReparsePointPath -Path $path
+    }
+}
+
 $root = ConvertTo-NormalizedAbsolutePath -Path (Split-Path -Parent $PSScriptRoot)
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $root 'dist'
@@ -89,6 +138,8 @@ $testProject = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $root 'tests\Em
 $publishDir = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $root '.publish')
 $archivePath = ConvertTo-NormalizedAbsolutePath -Path (Join-Path $outputDirectoryPath 'EmbyWatchTogether.zip')
 
+Assert-SafeBuildPaths
+
 if ($ValidatePathsOnly) {
     Write-Output 'Path validation passed.'
     Write-Output "==> output directory: $outputDirectoryPath"
@@ -106,12 +157,14 @@ dotnet test $testProject -c $Configuration --nologo -v minimal
 if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
 
 Write-Output "==> dotnet publish $project"
+Assert-SafeBuildPaths
 if (Test-Path -LiteralPath $publishDir) {
     [System.IO.Directory]::Delete($publishDir, $true)
 }
 dotnet publish $project -c $Configuration -o $publishDir --nologo
 if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
 
+Assert-SafeBuildPaths
 if (Test-Path -LiteralPath $pluginDir) {
     [System.IO.Directory]::Delete($pluginDir, $true)
 }

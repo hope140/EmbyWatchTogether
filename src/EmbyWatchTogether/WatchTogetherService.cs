@@ -644,7 +644,7 @@ namespace Emby.Plugins.WatchTogether
                     }
 
                     messages.Add(new DisplayMessageTarget(
-                        room.Id,
+                        room,
                         room.AdminUserId,
                         userId,
                         snapshot,
@@ -656,9 +656,14 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var message in messages)
             {
-                if (TrySendDisplayMessage(plugin, message))
+                var result = TrySendDisplayMessage(plugin, message);
+                if (result == DisplayMessageResult.Sent)
                 {
                     sent++;
+                }
+                else if (result == DisplayMessageResult.Skipped)
+                {
+                    skipped++;
                 }
                 else
                 {
@@ -767,7 +772,7 @@ namespace Emby.Plugins.WatchTogether
                         continue;
                     }
                     messages.Add(new DisplayMessageTarget(
-                        room.Id,
+                        room,
                         room.AdminUserId,
                         userId,
                         snapshot,
@@ -811,7 +816,7 @@ namespace Emby.Plugins.WatchTogether
                         continue;
                     }
                     messages.Add(new DisplayMessageTarget(
-                        room.Id,
+                        room,
                         room.AdminUserId,
                         userId,
                         snapshot,
@@ -827,10 +832,38 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private static bool TrySendDisplayMessage(Plugin plugin, DisplayMessageTarget message)
+        private static DisplayMessageResult TrySendDisplayMessage(Plugin plugin, DisplayMessageTarget message)
         {
             try
             {
+                SessionSnapshot snapshot;
+                var rooms = plugin.Rooms;
+                using (var access = rooms?.TryEnterRoom(message.RoomId))
+                {
+                    if (access == null || !ReferenceEquals(access.Room, message.Room) ||
+                        !ReferenceEquals(plugin.Rooms, rooms) || plugin.Bridge == null ||
+                        !access.Room.IsJoined(message.UserId) ||
+                        !IsSameServer(message.ServerId, plugin.ResolveServerId()))
+                    {
+                        return DisplayMessageResult.Skipped;
+                    }
+
+                    var snapshots = BuildSnapshots(plugin, access.Room);
+                    if (!snapshots.TryGetValue(message.UserId, out snapshot) ||
+                        snapshot == null || !snapshot.Online ||
+                        snapshot.Capabilities?.CanDisplayMessage != true ||
+                        !HasSameSessionIdentity(message.Snapshot, snapshot) ||
+                        !ReferenceEquals(plugin.Rooms, rooms) || !rooms.IsCurrentRoom(message.Room) ||
+                        !access.Room.IsJoined(message.UserId) ||
+                        !IsSameServer(message.ServerId, plugin.ResolveServerId()))
+                    {
+                        return DisplayMessageResult.Skipped;
+                    }
+                }
+
+                // A preceding send can block while membership or session identity
+                // changes. Revalidate each unsent target, but keep transport outside
+                // the gate so it cannot prevent those lifecycle transitions.
                 var messageIssuer = plugin.Issuer as IMessageIssuer;
                 if (messageIssuer != null)
                 {
@@ -838,30 +871,30 @@ namespace Emby.Plugins.WatchTogether
                         message.RoomId,
                         message.ControllingUserId,
                         message.UserId,
-                        message.Snapshot,
+                        snapshot,
                         message.Header,
                         message.Text,
                         message.TimeoutMs,
                         DateTimeOffset.UtcNow,
-                        out _);
+                        out _) ? DisplayMessageResult.Sent : DisplayMessageResult.Failed;
                 }
 
                 using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
                 {
                     plugin.Bridge.SendDisplayMessageAsync(
                             message.ControllingUserId,
-                            message.Snapshot.SessionId,
+                            snapshot.SessionId,
                             message.Header,
                             message.Text,
                             message.TimeoutMs,
                             timeout.Token)
                         .GetAwaiter().GetResult();
-                    return true;
+                    return DisplayMessageResult.Sent;
                 }
             }
             catch
             {
-                return false;
+                return DisplayMessageResult.Failed;
             }
         }
 
@@ -875,10 +908,17 @@ namespace Emby.Plugins.WatchTogether
             NotifyMembershipChange(plugin, roomId, requesterUserId, "参与者已请求重新同步，请稍候");
         }
 
+        private enum DisplayMessageResult
+        {
+            Sent,
+            Failed,
+            Skipped,
+        }
+
         private sealed class DisplayMessageTarget
         {
             public DisplayMessageTarget(
-                string roomId,
+                Room room,
                 string controllingUserId,
                 string userId,
                 SessionSnapshot snapshot,
@@ -886,7 +926,8 @@ namespace Emby.Plugins.WatchTogether
                 string text,
                 int timeoutMs)
             {
-                RoomId = roomId;
+                Room = room;
+                ServerId = room.ServerId;
                 ControllingUserId = controllingUserId;
                 UserId = userId;
                 Snapshot = snapshot;
@@ -895,7 +936,11 @@ namespace Emby.Plugins.WatchTogether
                 TimeoutMs = timeoutMs;
             }
 
-            public string RoomId { get; }
+            public Room Room { get; }
+
+            public string RoomId => Room.Id;
+
+            public string ServerId { get; }
 
             public string ControllingUserId { get; }
 

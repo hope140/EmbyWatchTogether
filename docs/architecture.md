@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前公开测试版为 [v1.7.2.3](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)。测试版的真实双端播放验收尚待执行；各版本的事实和边界见[发布日志索引](releases/README.md)；历史验收与发布证据见 [v1.6.1.0 发布记录](maintenance/v1.6.1.0-publication.md)和 [v1.7.0.1 测试版发布记录](maintenance/v1.7.0.1-beta-publication.md)。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前公开测试版为 [v1.7.2.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4)。测试版的真实双端播放验收尚待执行；各版本的事实和边界见[发布日志索引](releases/README.md)；历史验收与发布证据见 [v1.6.1.0 发布记录](maintenance/v1.6.1.0-publication.md)和 [v1.7.0.1 测试版发布记录](maintenance/v1.7.0.1-beta-publication.md)。
 
 ## 运行时边界
 
@@ -35,11 +35,11 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 同步引擎的提示通过 `SyncNotificationDispatcher` 发送，每个引擎最多一个发送 worker、64 条等待消息；队满丢弃新提示，排队超过 10 秒的提示按单调时钟过期。发送前重新选择当前会话，并在房间 gate 内核对原房间引用、当前服务器、成员加入状态、Session/Item 身份、快照保护和通知设置，网络发送在退出 gate 后执行。停止时清空等待队列并取消在途提示；底层忽略取消或取消回调阻塞时，停止调用不等待其完成。提示发送不修改同步状态，取舍见 [ADR-005](adr/005-sync-notification-dispatch.md)。
 
-Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。
+Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。 更新提示通过按 `ISessionManager` 共享的有界发送槽位执行，最多等待 5 秒；不响应取消的传输继续占位直到实际完成，后续计划任务不会叠加发送。提示超时或失败不阻止安装、不改写已安装事实，调用方真实取消仍向上传播。
 
 ## 嵌入式 UI
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV16`、`WatchTogetherInviteV16`、`WatchTogetherSettingsV16`，共享 `WatchTogetherNativeV16.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV17`、`WatchTogetherInviteV17`、`WatchTogetherSettingsV17`，共享 `WatchTogetherNativeV17.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
 
