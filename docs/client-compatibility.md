@@ -2,7 +2,7 @@
 
 ## 当前验收状态
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前测试版为 [v1.7.2.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4)；后者真实双端播放验收尚待执行。用户于 2026-10-18 确认的 v1.6.1.0 相关验收及以下记录保留其原有证据边界；不补写未提供的客户端型号、版本、媒体或时长，多跳集诊断仍需按现场证据判断。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前测试版为 [v1.7.2.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.5)；后者真实双端播放验收尚待执行。用户于 2026-10-18 确认的 v1.6.1.0 相关验收及以下记录保留其原有证据边界；不补写未提供的客户端型号、版本、媒体或时长，多跳集诊断仍需按现场证据判断。
 
 ## v1.7.0.0 界面测试线
 
