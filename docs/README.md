@@ -38,6 +38,7 @@
 
 - [发布日志索引](releases/README.md)
 - [v1.7.1.0 正式版说明](releases/v1.7.1.0.md)
+- [v1.7.2.7 测试版说明](releases/v1.7.2.7.md) · [发布核验记录](maintenance/v1.7.2.7-beta-publication.md)
 - [v1.7.2.6 测试版说明](releases/v1.7.2.6.md) · [发布核验记录](maintenance/v1.7.2.6-beta-publication.md)
 - [v1.7.2.5 测试版说明](releases/v1.7.2.5.md) · [发布核验记录](maintenance/v1.7.2.5-beta-publication.md)
 - [v1.7.2.4 测试版说明](releases/v1.7.2.4.md)
