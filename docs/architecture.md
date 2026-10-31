@@ -39,7 +39,7 @@ Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用
 
 ## 嵌入式 UI
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV17`、`WatchTogetherInviteV17`、`WatchTogetherSettingsV17`，共享 `WatchTogetherNativeV17.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV18`、`WatchTogetherInviteV18`、`WatchTogetherSettingsV18`，共享 `WatchTogetherNativeV18.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
 
@@ -50,6 +50,8 @@ S124 已随 v1.7.0.1 发布，使用 V16 页面/控制器缓存键，去除 Dash
 房间外层使用浅色细边框。参与者头像仅从当前房间两位成员及其受限摘要中取 ID，通过宿主 `getUserImageUrl` 生成同服务器地址，不新增用户资料查询。头像与同步状态独立；缺图或失败保留首字，页面代次内抑制重复失败请求。账号、服务器、房间或页面生命周期变化使旧图片回调失效，清除图片 src；头像信息不进入诊断、日志或持久缓存。
 
 邀请、房间操作、确认、配置保存和按需诊断沿用既有业务。Token 不回显，离页清空敏感输入；所有旧代次回调与操作入口都核对页面身份。清理页面时也恢复三个静态创建/接受按钮的 busy 和文字，管理员创建按钮随后按权限与当前表单重新判定可用性；旧请求不能解锁新代次操作。详细候选边界和验证见 [S122 契约](native-pages-media-plan.md)；此前原生控件验证保留在 `native-controls-plan.md`。
+
+管理员创建房间的结果显示在当前创建表单内，独立于输入校验和房间卡反馈。POST 成功后立即保留创建成功事实，后续列表读取失败仍单独显示读取错误；离页清空结果，旧代次请求不能写入新页面。
 
 ## 状态与持久化
 

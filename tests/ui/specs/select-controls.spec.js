@@ -16,7 +16,7 @@ for (const host of ['legacy', 'modern']) {
       await page.goto(`/?scenario=admin-member&select_host=${host}`);
       await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
       for (const route of ['Invite', 'Settings']) {
-        await page.locator(`.tabs-viewmenubar a[href*="WatchTogether${route}V17"]`).click();
+        await page.locator(`.tabs-viewmenubar a[href*="WatchTogether${route}V18"]`).click();
         // Rooms can retain aria-busy=false while the target route reloads permissions.
         const panel = page.locator(route === 'Invite' ? '#wtAdminSection' : '#wtSettingsSection');
         await expect(panel).toBeVisible();

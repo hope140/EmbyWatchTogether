@@ -61,6 +61,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         page._wtInvitationCode = null;
         page._wtInvitationCopied = false;
         page._wtPendingCreatedFeedback = null;
+        setCreateStatus(page, '', false);
         // Retired request continuations cannot reset controls in a new lifecycle.
         ['#wtCreate', '#wtCreateInvitation', '#wtAcceptInvitation'].forEach(function (selector) {
             setButtonBusy(page.querySelector(selector), false);
@@ -823,6 +824,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
     }
 
+    function setCreateStatus(page, text, isError) {
+        var el = page.querySelector('#wtCreateStatus');
+        if (el) {
+            el.textContent = text || '';
+            el.hidden = !text;
+            el.classList.toggle('error', !!isError);
+            el.setAttribute('role', isError ? 'alert' : 'status');
+        }
+    }
+
     function setInvitationStatus(page, text, isError) {
         page._wtInvitationFeedback = { text: text || '', isError: !!isError };
         var el = page.querySelector('#wtInvitationStatus');
@@ -1167,9 +1178,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV17',
-        invite: 'WatchTogetherInviteV17',
-        settings: 'WatchTogetherSettingsV17'
+        rooms: 'WatchTogetherRoomsV18',
+        invite: 'WatchTogetherInviteV18',
+        settings: 'WatchTogetherSettingsV18'
     };
 
     function currentRoute(page) {
@@ -2652,6 +2663,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
 
         setButtonBusy(createButton, true, '创建中…');
+        setCreateStatus(page, '正在创建房间…', false);
         setStatus(page, '正在创建房间…');
         apiSend(page, 'WatchTogether/Rooms', 'POST', {
             Name: name,
@@ -2659,6 +2671,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             PrimaryUserId: primary.value
         }).then(function (result) {
             var created = result || {};
+            // A successful POST is a completed fact, independent of list refresh.
+            setCreateStatus(page, '房间“' + name + '”已创建，请让双方打开同一视频。', false);
             page._wtPendingCreatedFeedback = {
                 name: name,
                 roomId: created.RoomId
@@ -2667,6 +2681,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             syncForm(page);
             return loadRooms(page, true);
         }).catch(function (err) {
+            setCreateStatus(page, '创建失败：' + errorMessage(err), true);
             setStatus(page, '创建失败：' + errorMessage(err), true);
         }).then(function () {
             setButtonBusy(createButton, false);
