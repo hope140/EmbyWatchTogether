@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V16"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V17"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -540,6 +540,43 @@ test('Recovering 状态只针对临时掉线参与者，主用户缺失仍显示
   await expect(page.locator('.wt-roomState')).not.toHaveClass(/wt-roomState-recovering/);
   const narrowMetrics = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   expect(narrowMetrics.width).toBeLessThanOrEqual(narrowMetrics.client + 1);
+});
+
+test('过期快照诊断保留精确标签和安全导出代码，未知值仍被清洗', async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => {
+    const original = window.ApiClient.getJSON;
+    window.ApiClient.getJSON = async path => {
+      const value = await original(path);
+      if (!path.endsWith('/Diagnostics')) return value;
+      return Object.assign({}, value, {
+        Events: [
+          { Type: 'observed', Result: 'observed' },
+          { Type: 'snapshot_ignored private-event-token', Result: 'older_activity private-result-token' },
+          { Type: 'snapshot_ignored', Result: 'older_activity', Alias: 'userB', AtUtc: '2026-10-31T00:00:00Z' }
+        ]
+      });
+    };
+  });
+  await page.locator('.wt-roomCard button[data-act="diagnostics"]').click();
+  const events = page.locator('.wt-diagnosticList li');
+  await expect(events).toHaveCount(3);
+  await expect(events.nth(0)).toContainText('忽略过期快照');
+  await expect(events.nth(0)).toContainText('活动时间较旧');
+  await expect(events.nth(1)).toContainText('观察事件');
+  await expect(events.nth(2)).toContainText('观察事件，已记录');
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('.wt-diagnosticToolbar button').click();
+  const stream = await (await downloadPromise).createReadStream();
+  let exported = '';
+  for await (const chunk of stream) exported += chunk.toString();
+  const diagnostic = JSON.parse(exported);
+  expect(diagnostic.events[0]).toMatchObject({ type: 'snapshot_ignored', result: 'older_activity', alias: 'userB' });
+  expect(diagnostic.events[1]).toMatchObject({ type: 'observed', result: null });
+  expect(diagnostic.events[2]).toMatchObject({ type: 'observed', result: 'observed' });
+  expect(await page.locator('.wt-diagnostics').innerText()).not.toContain('private-');
+  expect(exported).not.toContain('private-');
 });
 
 test('TransientRecovery 和 Drift 诊断清洗后展示并导出，390px 无溢出', async ({ page }) => {

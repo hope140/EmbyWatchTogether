@@ -14,6 +14,7 @@ using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
 {
+    [Collection(TransportTimingCollection.Name)]
     public class PluginUpdateManagerTests
     {
         [Fact]
@@ -385,6 +386,131 @@ namespace Emby.Plugins.WatchTogether.Tests
                     await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
                         manager.CheckForUpdatesAsync(true, cancellation.Token));
                 }
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task AutomaticCheck_StalledNotificationIsBoundedAcrossManagersAndLateFailureIsIgnored(
+            bool synchronous)
+        {
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var transport = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var releaseSynchronousCall = new ManualResetEventSlim();
+            var notificationCount = 0;
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand", It.IsAny<GeneralCommand>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, GeneralCommand _, CancellationToken _) =>
+                {
+                    if (Interlocked.Increment(ref notificationCount) > 1)
+                    {
+                        return Task.CompletedTask;
+                    }
+
+                    entered.TrySetResult(true);
+                    if (synchronous)
+                    {
+                        releaseSynchronousCall.Wait();
+                    }
+                    return transport.Task;
+                });
+            var configuration = new PluginConfiguration();
+            var installation = CreateInstallationManager(out var installMock);
+            using var manager = new PluginUpdateManager(configuration, new Version(1, 0, 0),
+                new FakeReleaseClient(CreateRelease(2, 0, 0)), installation,
+                sessionManager: sessionManager.Object);
+            Task<PluginUpdateStatus> check = null;
+            try
+            {
+                // Task.Run also lets the regression fail with a bounded wait
+                // against the old synchronous-prefix implementation.
+                check = Task.Run(() => manager.CheckForUpdatesAsync(true));
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var status = await check.WaitAsync(TimeSpan.FromSeconds(8));
+
+                Assert.True(status.RestartRequired);
+                Assert.Equal("2.0.0", configuration.PendingUpdateVersion);
+                Assert.Null(status.LastError);
+                Assert.False(status.IsChecking);
+                Assert.False(status.IsInstalling);
+                installMock.Verify(x => x.InstallPackage(It.IsAny<PackageVersionInfo>(), true,
+                    It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Once);
+                Assert.Equal(1, Volatile.Read(ref notificationCount));
+
+                // Scheduled tasks construct fresh managers. The unresolved send
+                // must still own the same server's notification slot.
+                using var nextManager = new PluginUpdateManager(configuration, new Version(1, 0, 0),
+                    new FakeReleaseClient(CreateRelease(2, 0, 0)), installation,
+                    sessionManager: sessionManager.Object);
+                var nextStatus = await nextManager.CheckForUpdatesAsync(true).WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(nextStatus.RestartRequired);
+                Assert.Null(nextStatus.LastError);
+                Assert.Equal(1, Volatile.Read(ref notificationCount));
+
+                transport.TrySetException(new InvalidOperationException("late notification failure"));
+                releaseSynchronousCall.Set();
+                // A later successful send proves the abandoned transport has
+                // actually settled and released its slot before checking facts.
+                for (var attempt = 0; attempt < 100 && Volatile.Read(ref notificationCount) == 1; attempt++)
+                {
+                    nextStatus = await nextManager.CheckForUpdatesAsync(true).WaitAsync(TimeSpan.FromSeconds(2));
+                    await Task.Delay(10);
+                }
+
+                Assert.Equal(2, Volatile.Read(ref notificationCount));
+                Assert.Null(manager.GetStatus().LastError);
+                Assert.Null(nextStatus.LastError);
+                Assert.Equal("2.0.0", manager.GetStatus().PendingVersion);
+                Assert.True(manager.GetStatus().RestartRequired);
+                installMock.Verify(x => x.InstallPackage(It.IsAny<PackageVersionInfo>(), true,
+                    It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Once);
+            }
+            finally
+            {
+                releaseSynchronousCall.Set();
+                transport.TrySetResult(true);
+                if (check != null)
+                {
+                    try { await check.WaitAsync(TimeSpan.FromSeconds(2)); }
+                    catch { /* Preserve the original regression failure. */ }
+                }
+            }
+        }
+
+        [Fact]
+        public async Task AutomaticCheck_CallerCancellationStopsWaitingForUncooperativeNotification()
+        {
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var transport = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var sessionManager = new Mock<ISessionManager>();
+            sessionManager.Setup(x => x.SendMessageToAdminSessions(
+                    "GeneralCommand", It.IsAny<GeneralCommand>(), It.IsAny<CancellationToken>()))
+                .Callback(() => entered.TrySetResult(true))
+                .Returns(transport.Task);
+            var configuration = new PluginConfiguration();
+            var installation = CreateInstallationManager(out var installMock);
+            using var cancellation = new CancellationTokenSource();
+            using var manager = new PluginUpdateManager(configuration, new Version(1, 0, 0),
+                new FakeReleaseClient(CreateRelease(2, 0, 0)), installation,
+                sessionManager: sessionManager.Object);
+            var check = manager.CheckForUpdatesAsync(true, cancellation.Token);
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                cancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                    check.WaitAsync(TimeSpan.FromSeconds(2)));
+                Assert.Null(configuration.PendingUpdateVersion);
+                installMock.Verify(x => x.InstallPackage(It.IsAny<PackageVersionInfo>(), true,
+                    It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Never);
+            }
+            finally
+            {
+                transport.TrySetCanceled();
+                try { await check.WaitAsync(TimeSpan.FromSeconds(2)); }
+                catch { /* Cancellation is expected; preserve assertion failures. */ }
             }
         }
 

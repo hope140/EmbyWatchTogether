@@ -178,6 +178,261 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Empty(results);
         }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void PollOnce_AfterShutdownDoesNotIssueCommands(bool dispose)
+        {
+            var room = CreateRoom();
+            using var engine = CreateEngine();
+            SetCandidates(Snapshot("s1", "u1", false, 0), Snapshot("s2", "u2", false, 0));
+
+            if (dispose) engine.Dispose(); else engine.Stop();
+
+            Assert.Empty(engine.PollOnce(_clock.Now));
+            Assert.Empty(_issuer.Issued);
+            Assert.Equal(RoomState.Waiting, _rooms.GetRuntime(room.Id).State);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task ShutdownDuringSnapshotRead_DiscardsReturnedSnapshots(bool dispose)
+        {
+            var room = CreateRoom();
+            using var provider = new BlockingSnapshotProvider(new[]
+            {
+                Snapshot("s1", "u1", false, 0), Snapshot("s2", "u2", false, 0),
+            });
+            using var engine = new SyncEngine(_rooms, provider, _issuer, () => "server-1", () => _clock.Now);
+            var poll = Task.Run(() => engine.PollOnce(_clock.Now));
+            try
+            {
+                Assert.True(provider.Entered.Wait(TimeSpan.FromSeconds(2)));
+                if (dispose) engine.Dispose(); else engine.Stop();
+            }
+            finally { provider.Release.Set(); }
+
+            Assert.Empty(await poll.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Empty(_issuer.Issued);
+            Assert.Equal(RoomState.Waiting, _rooms.GetRuntime(room.Id).State);
+        }
+
+        [Theory]
+        [InlineData(false, false)]
+        [InlineData(true, false)]
+        [InlineData(false, true)]
+        [InlineData(true, true)]
+        public async Task ShutdownDuringIssue_DiscardsLateSuccessAndSkipsRemainingTargets(bool dispose, bool playItem)
+        {
+            var room = CreateRoom();
+            using var issuer = new BlockingShutdownIssuer();
+            using var engine = new SyncEngine(_rooms, _provider, issuer, () => "server-1", () => _clock.Now,
+                notifyOnSyncActions: false);
+            if (playItem) EnterWatching(engine, room);
+            var next = _rooms.CreateRoom("server-1", "", "next", "admin-1", new[] { "u3", "u4" }, "u3");
+            SetCandidates(
+                Snapshot("s1", "u1", false, 0, itemId: playItem ? "i2" : "i1"),
+                Snapshot("s2", "u2", false, 0),
+                Snapshot("s3", "u3", false, 0), Snapshot("s4", "u4", false, 0));
+            issuer.Block = true;
+            issuer.Calls = 0;
+            var poll = Task.Run(() => engine.PollOnce(_clock.Now));
+            try
+            {
+                Assert.True(issuer.Entered.Wait(TimeSpan.FromSeconds(2)));
+                if (dispose) engine.Dispose(); else engine.Stop();
+            }
+            finally { issuer.Release.Set(); }
+
+            await poll.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(1, issuer.Calls);
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.Empty(runtime.Pending);
+            if (playItem)
+            {
+                Assert.NotNull(runtime.Handoff);
+                Assert.False(runtime.Handoff.PlayItemPending);
+                Assert.Null(runtime.Handoff.PlayItemIssuedAtUtc);
+                Assert.Null(runtime.Handoff.NextRetryAtUtc);
+            }
+            Assert.Equal(RoomState.Waiting, _rooms.GetRuntime(next.Id).State);
+        }
+
+        [Theory]
+        [InlineData(false, false)]
+        [InlineData(true, false)]
+        [InlineData(false, true)]
+        [InlineData(true, true)]
+        public async Task Shutdown_CancelsBuiltInPlaybackTransport(bool dispose, bool playItem)
+        {
+            var room = CreateRoom();
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            bool block = false;
+            int calls = 0;
+            Task Dispatch(CancellationToken token)
+            {
+                if (!block) return Task.CompletedTask;
+                Interlocked.Increment(ref calls);
+                token.Register(() => cancelled.TrySetResult(true));
+                entered.TrySetResult(true);
+                return release.Task;
+            }
+            var manager = new Mock<ISessionManager>();
+            manager.Setup(m => m.SendPlaystateCommand(It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                .Returns<string, string, PlaystateRequest, CancellationToken>((_, __, ___, token) => Dispatch(token));
+            manager.Setup(m => m.SendPlayCommand(It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                .Returns<string, string, PlayRequest, CancellationToken>((_, __, ___, token) => Dispatch(token));
+            using var bridge = new SessionBridge(manager.Object);
+            using var engine = new SyncEngine(_rooms, _provider, new SessionBridgeCommandIssuer(bridge),
+                () => "server-1", () => _clock.Now, notifyOnSyncActions: false);
+            if (playItem) EnterWatching(engine, room);
+            SetCandidates(
+                Snapshot("s1", "u1", false, 0, itemId: playItem ? "2" : "i1"),
+                Snapshot("s2", "u2", false, 0));
+            block = true;
+            engine.Start();
+            Task shutdown = null;
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                shutdown = Task.Run(() => { if (dispose) engine.Dispose(); else engine.Stop(); });
+                await shutdown.WaitAsync(TimeSpan.FromSeconds(2));
+                await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(1, Volatile.Read(ref calls));
+                Assert.Empty(_rooms.GetRuntime(room.Id).Pending);
+            }
+            finally
+            {
+                release.TrySetResult(true);
+                if (shutdown != null) await shutdown.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task Shutdown_DoesNotRunBlockingPlaybackCancellationOnCaller(bool dispose)
+        {
+            var room = CreateRoom();
+            using var issuer = new BlockingShutdownIssuer { BlockCancellation = true };
+            using var engine = new SyncEngine(_rooms, _provider, issuer, () => "server-1", () => _clock.Now,
+                notifyOnSyncActions: false);
+            EnterWatching(engine, room);
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "i2"), Snapshot("s2", "u2", false, 0));
+            issuer.Block = true;
+            var poll = Task.Run(() => engine.PollOnce(_clock.Now));
+            Task shutdown = null;
+            try
+            {
+                Assert.True(issuer.Entered.Wait(TimeSpan.FromSeconds(2)));
+                shutdown = Task.Run(() => { if (dispose) engine.Dispose(); else engine.Stop(); });
+                await shutdown.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(issuer.CancellationEntered.Wait(TimeSpan.FromSeconds(2)));
+                Assert.False(issuer.CancellationExited.IsSet);
+                // A transport callback must also be unable to hold the engine lock.
+                await Task.Run(() => engine.UpdateOptions(new SyncEngineOptions(1, true, true)))
+                    .WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            finally
+            {
+                issuer.ReleaseCancellation.Set();
+                issuer.Release.Set();
+                if (shutdown != null) await shutdown.WaitAsync(TimeSpan.FromSeconds(2));
+                await poll.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+        }
+
+        [Theory]
+        [InlineData(false, false)]
+        [InlineData(true, false)]
+        [InlineData(false, true)]
+        [InlineData(true, true)]
+        public async Task Shutdown_CancellationWaitingForRoomGateDoesNotHoldPoll(bool dispose, bool playItem)
+        {
+            var room = CreateRoom();
+            var roomGates = (Dictionary<string, object>)typeof(RoomManager)
+                .GetField("_roomGates", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(_rooms);
+            object roomGate = roomGates[room.Id];
+            var transportEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var callbackEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var callbackAcquiredGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var callbackExited = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseTransport = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var releaseCallback = new ManualResetEventSlim();
+            bool block = false;
+            Task Dispatch(CancellationToken token)
+            {
+                if (!block) return Task.CompletedTask;
+                token.Register(() =>
+                {
+                    callbackEntered.TrySetResult(true);
+                    try
+                    {
+                        // Timed admission gives a failing test an escape path;
+                        // success requires the poll itself to release this gate.
+                        while (!releaseCallback.IsSet)
+                        {
+                            if (Monitor.TryEnter(roomGate, TimeSpan.FromMilliseconds(20)))
+                            {
+                                try
+                                {
+                                    callbackAcquiredGate.TrySetResult(true);
+                                    releaseCallback.Wait();
+                                }
+                                finally { Monitor.Exit(roomGate); }
+                                return;
+                            }
+                        }
+                    }
+                    finally { callbackExited.TrySetResult(true); }
+                });
+                transportEntered.TrySetResult(true);
+                return releaseTransport.Task;
+            }
+            var manager = new Mock<ISessionManager>();
+            manager.Setup(m => m.SendPlaystateCommand(It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                .Returns<string, string, PlaystateRequest, CancellationToken>((_, __, ___, token) => Dispatch(token));
+            manager.Setup(m => m.SendPlayCommand(It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                .Returns<string, string, PlayRequest, CancellationToken>((_, __, ___, token) => Dispatch(token));
+            using var bridge = new SessionBridge(manager.Object);
+            using var engine = new SyncEngine(_rooms, _provider, new SessionBridgeCommandIssuer(bridge),
+                () => "server-1", () => _clock.Now, notifyOnSyncActions: false);
+            if (playItem) EnterWatching(engine, room);
+            SetCandidates(
+                Snapshot("s1", "u1", false, 0, itemId: playItem ? "2" : "i1"),
+                Snapshot("s2", "u2", false, 0));
+            block = true;
+            var poll = Task.Run(() => engine.PollOnce(_clock.Now));
+            try
+            {
+                await transportEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                if (dispose) engine.Dispose(); else engine.Stop();
+                await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                releaseTransport.TrySetResult(true);
+
+                // Neither poll completion nor room-gate release may depend on
+                // returning from a transport's cancellation callback.
+                await poll.WaitAsync(TimeSpan.FromSeconds(2));
+                await callbackAcquiredGate.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.False(callbackExited.Task.IsCompleted);
+                Assert.Empty(_rooms.GetRuntime(room.Id).Pending);
+            }
+            finally
+            {
+                releaseCallback.Set();
+                releaseTransport.TrySetResult(true);
+                await poll.WaitAsync(TimeSpan.FromSeconds(2));
+                await callbackExited.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+        }
+
         [Fact]
         public void SnapshotProviderFailure_ProtectsAfterDebounce_AndRecoversFromFreshSnapshot()
         {
@@ -6098,6 +6353,53 @@ namespace Emby.Plugins.WatchTogether.Tests
             {
                 Entered.Dispose();
                 Release.Dispose();
+            }
+        }
+
+        private sealed class BlockingShutdownIssuer : ICommandIssuer, IPlayItemIssuer, IDisposable
+        {
+            internal bool Block;
+            internal bool BlockCancellation;
+            internal int Calls;
+            internal readonly ManualResetEventSlim Entered = new ManualResetEventSlim();
+            internal readonly ManualResetEventSlim Release = new ManualResetEventSlim();
+            internal readonly ManualResetEventSlim CancellationEntered = new ManualResetEventSlim();
+            internal readonly ManualResetEventSlim CancellationExited = new ManualResetEventSlim();
+            internal readonly ManualResetEventSlim ReleaseCancellation = new ManualResetEventSlim();
+
+            public bool TryIssue(string roomId, string controllingUserId, string userId, SessionSnapshot snapshot,
+                string command, long? positionTicks, DateTimeOffset now, out string error) =>
+                Issue(CancellationToken.None, out error);
+
+            public bool TryIssuePlayItem(string roomId, string controllingUserId, string userId, SessionSnapshot snapshot,
+                string itemId, DateTimeOffset now, CancellationToken cancellationToken, out string error) =>
+                Issue(cancellationToken, out error);
+
+            private bool Issue(CancellationToken token, out string error)
+            {
+                Calls++;
+                if (Block)
+                {
+                    if (BlockCancellation)
+                    {
+                        token.Register(() =>
+                        {
+                            CancellationEntered.Set();
+                            ReleaseCancellation.Wait();
+                            CancellationExited.Set();
+                        });
+                    }
+                    Entered.Set();
+                    Release.Wait();
+                }
+                error = null;
+                return true;
+            }
+
+            public void Dispose()
+            {
+                Release.Set();
+                ReleaseCancellation.Set();
             }
         }
 

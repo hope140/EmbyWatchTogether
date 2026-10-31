@@ -235,6 +235,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         recovered: '已恢复',
         changed: '已变化',
         cleared: '已清除',
+        older_activity: '活动时间较旧',
         observed: '已记录'
     };
     var diagnosticBarrierStageLabels = {
@@ -262,6 +263,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         stop_confirmed: '确认停止',
         snapshot_protection_entered: '进入保护状态',
         snapshot_protection_recovered: '保护状态恢复',
+        snapshot_ignored: '忽略过期快照',
         eligibility_changed: '同步条件变化',
         manual_action: '手动操作',
         resync: '重新同步',
@@ -1165,9 +1167,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV16',
-        invite: 'WatchTogetherInviteV16',
-        settings: 'WatchTogetherSettingsV16'
+        rooms: 'WatchTogetherRoomsV17',
+        invite: 'WatchTogetherInviteV17',
+        settings: 'WatchTogetherSettingsV17'
     };
 
     function currentRoute(page) {

@@ -1147,7 +1147,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(
                 leavingUserId,
                 (IEnumerable<string>)response.GetType().GetProperty("Users").GetValue(response));
-            Assert.Equal(2, sessionReads);
+            // Action selection, notice preparation, and immediate send revalidation.
+            Assert.Equal(3, sessionReads);
         }
 
         [Fact]
@@ -1291,8 +1292,19 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.True(capturedToken.CanBeCanceled);
         }
 
-        [Fact]
-        public async Task Message_BlockingIssuerDoesNotHoldRoomGate()
+        [Theory]
+        [InlineData("member_left", "message")]
+        [InlineData("room_deleted", "message")]
+        [InlineData("room_replaced", "message")]
+        [InlineData("server_changed", "message")]
+        [InlineData("session_changed", "message")]
+        [InlineData("item_changed", "message")]
+        [InlineData("capability_lost", "message")]
+        [InlineData("unchanged", "message")]
+        [InlineData("member_left", "pause")]
+        [InlineData("member_left", "resync")]
+        public async Task Message_BlockingIssuerDoesNotHoldRoomGate_AndRevalidatesLaterTargets(
+            string change, string action)
         {
             var primaryUserId = Guid.NewGuid().ToString("N");
             var otherUserId = Guid.NewGuid().ToString("N");
@@ -1302,27 +1314,77 @@ namespace Emby.Plugins.WatchTogether.Tests
                 new[] { primaryUserId, otherUserId }, primaryUserId);
 
             var sessionManager = new Mock<ISessionManager>();
-            sessionManager.Setup(s => s.Sessions).Returns(new[]
+            var sessions = new[]
             {
                 NewSession(sessionManager, "session-primary", primaryUserId),
                 NewSession(sessionManager, "session-other", otherUserId),
-            });
+            };
+            sessionManager.Setup(s => s.Sessions).Returns(() => sessions);
             using var bridge = new SessionBridge(sessionManager.Object);
             var issuer = new BlockingMessageIssuer();
             var plugin = NewPlugin(manager, bridge, issuer, "server-1");
             var service = NewService(primaryUserId, administrator: true);
             SetRuntimePlugin(service, plugin);
 
-            var messageTask = Task.Run(() =>
-                service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "hello" }));
+            var messageTask = Task.Run(() => action == "message"
+                ? service.Post(new SendRoomMessageRequest { Id = room.Id, Text = "hello" })
+                : service.Post(new ControlRoomRequest { Id = room.Id, Action = action }));
 
-            await issuer.EnteredTask.WaitAsync(TimeSpan.FromSeconds(2));
-            var membershipTask = Task.Run(() => manager.SetParticipantJoined(room.Id, otherUserId, false));
-            Assert.True(await membershipTask.WaitAsync(TimeSpan.FromSeconds(2)));
-
-            issuer.Release.Set();
+            try
+            {
+                await issuer.EnteredTask.WaitAsync(TimeSpan.FromSeconds(2));
+                var changeTask = Task.Run(() =>
+                {
+                    // Entering this gate must remain possible while transport is blocked.
+                    using (EnterRoomGate(manager, room.Id))
+                    {
+                        switch (change)
+                        {
+                            case "member_left":
+                                Assert.True(manager.SetParticipantJoined(room.Id, otherUserId, false));
+                                break;
+                            case "room_deleted":
+                            case "room_replaced":
+                                Assert.True(manager.DeleteRoom(room.Id));
+                                if (change == "room_replaced")
+                                {
+                                    manager.CreateRoom("server-1", "http://emby", "replacement", "admin-1",
+                                        new[] { primaryUserId, otherUserId }, primaryUserId);
+                                }
+                                break;
+                            case "server_changed":
+                                SetPluginProperty(plugin, "ServerId", "server-2");
+                                break;
+                            case "session_changed":
+                                sessions[1] = NewSession(sessionManager, "replacement-session", otherUserId);
+                                break;
+                            case "item_changed":
+                                sessions[1] = NewSession(sessionManager, "session-other", otherUserId, "item-2");
+                                break;
+                            case "capability_lost":
+                                sessions[1] = NewSession(sessionManager, "session-other", otherUserId,
+                                    new[] { "Pause", "Unpause", "Seek" });
+                                break;
+                        }
+                    }
+                });
+                await changeTask.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            finally
+            {
+                issuer.Release.Set();
+            }
             var response = await messageTask.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.Equal(2, GetInt(response, "Sent"));
+            var expectedSent = change == "unchanged" ? 2 : 1;
+            Assert.Equal(expectedSent, issuer.TargetSessions.Count);
+            Assert.Equal("session-primary", issuer.TargetSessions[0]);
+            if (expectedSent == 2) Assert.Equal("session-other", issuer.TargetSessions[1]);
+            if (action == "message")
+            {
+                Assert.Equal(expectedSent, GetInt(response, "Sent"));
+                Assert.Equal(2 - expectedSent, GetInt(response, "Skipped"));
+                Assert.Equal(0, GetInt(response, "Failed"));
+            }
         }
 
         [Theory]
@@ -1563,16 +1625,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             var sessionManager = new Mock<ISessionManager>();
             sessionManager.Setup(s => s.Sessions).Returns(() =>
             {
-                if (Interlocked.Increment(ref sessionReads) == 1)
+                if (Interlocked.Increment(ref sessionReads) == 2)
                 {
-                    return new List<SessionInfo>
-                    {
-                        NewSession(sessionManager, "session-primary", primaryUserId),
-                        NewSession(sessionManager, "session-leaving", leavingUserId),
-                    };
+                    Assert.True(manager.SetParticipantJoined(room.Id, leavingUserId, true));
                 }
 
-                Assert.True(manager.SetParticipantJoined(room.Id, leavingUserId, true));
                 return new List<SessionInfo>
                 {
                     NewSession(sessionManager, "session-primary", primaryUserId),
@@ -1588,7 +1645,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.True(GetBoolean(response, "Changed"));
             Assert.Empty(issuer.Issued);
-            Assert.Equal(2, sessionReads);
+            // Before leave, notice preparation (rejoin), then notice send revalidation.
+            Assert.Equal(3, sessionReads);
         }
 
         [Fact]
@@ -1862,6 +1920,8 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             public ManualResetEventSlim Release { get; } = new ManualResetEventSlim(false);
 
+            public List<string> TargetSessions { get; } = new List<string>();
+
             public bool TryIssue(
                 string roomId,
                 string controllingUserId,
@@ -1887,6 +1947,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 DateTimeOffset now,
                 out string error)
             {
+                TargetSessions.Add(snapshot.SessionId);
                 if (Interlocked.Increment(ref _calls) == 1)
                 {
                     _entered.TrySetResult(true);

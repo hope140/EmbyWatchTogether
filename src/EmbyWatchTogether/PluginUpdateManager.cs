@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Updates;
@@ -18,6 +19,11 @@ namespace Emby.Plugins.WatchTogether
     /// </summary>
     public sealed class PluginUpdateManager : IDisposable
     {
+        // Scheduled runs create fresh update managers. Keep one notification
+        // flight per server until its transport actually ends, even on timeout.
+        private static readonly ConditionalWeakTable<ISessionManager, BoundedSessionDispatch>
+            AdminNotificationDispatchers = new ConditionalWeakTable<ISessionManager, BoundedSessionDispatch>();
+
         private readonly object _stateLock = new object();
         private readonly SemaphoreSlim _operationGate = new SemaphoreSlim(1, 1);
         private readonly IPluginReleaseClient _releaseClient;
@@ -599,10 +605,16 @@ namespace Emby.Plugins.WatchTogether
                     message,
                     timeoutMs: 3000);
 
-                await _sessionManager.SendMessageToAdminSessions(
-                    "GeneralCommand",
-                    command,
-                    cancellationToken).ConfigureAwait(false);
+                var sessionManager = _sessionManager;
+                var dispatcher = AdminNotificationDispatchers.GetValue(sessionManager,
+                    _ => new BoundedSessionDispatch(TimeSpan.FromSeconds(5)));
+                // DisplayMessage.TimeoutMs controls presentation only. The
+                // existing dispatcher bounds both synchronous entry and Tasks
+                // that ignore cancellation; timeout remains best-effort here.
+                await Task.Run(() => dispatcher.Execute(
+                    "admin-update-notification",
+                    token => sessionManager.SendMessageToAdminSessions("GeneralCommand", command, token),
+                    cancellationToken), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

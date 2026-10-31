@@ -238,9 +238,11 @@
 ## 33. 取消令牌与有界等待是两个约束
 
 - 现象：底层返回不完成的 Task，或在返回 Task 前同步阻塞时，仅 CancelAfter 不能释放调用方。
+- 管理员更新提示的 `DisplayMessage.TimeoutMs` 只控制展示时间，不是传输截止时间。自动更新在安装前会等待提示，因此也要复用有界发送；未完成传输的占位按 `ISessionManager` 共享，不能随每次计划任务新建的更新管理器丢弃。`PluginUpdateManagerTests.AutomaticCheck_StalledNotificationIsBoundedAcrossManagersAndLateFailureIsIgnored` 与取消用例覆盖同步阻塞、未完成 Task、跨管理器占位和迟到失败；提示失败不改变安装及待重启事实。
 - 结论：内置发送器使用独立有界等待，工厂在实际开始前核对已用时间与取消状态；计时不完全依赖线程池回调。
 - 规则：不响应取消的传输保留对应会话通道槽位并限制总量；播放控制与 PlayItem 共用通道，DisplayMessage 独立占位，两类通道共享 issuer 的 64 个未完成传输上限。迟到成功或失败只清理资源、观察异常，不回写房间状态。Task 完成发布与 continuation 清理不是原子操作，下一次准入要依据 Task.IsCompleted；旧清理不能删除后续传输的新槽位。
 - 验证：SessionBridgeCommandIssuerTests 的不协作 Task、同步阻塞、排队过期、容量和清理竞争用例，以及 SyncEngineTests.PollOnce_UncooperativeTransportTimesOutAndNextRoomStillRuns。
+- 引擎停止还必须覆盖正在执行的轮询：先发布停止状态，再在独立任务中取消传输令牌；每房间及命令入口重查停止状态，返回后的迟到结果不得建立 Pending 或推进 Handoff。取消回调不能在引擎锁内执行，取消源在回调完成后释放。关联取消源的 `Dispose()` 也可能同步等待父取消回调，因此正常释放与停止启动需在同一锁下串行；停止期间未完成的命令取消源由现有取消任务在回调结束后统一释放，轮询不得持有房间锁等待它。`SyncEngineTests` 的 `Shutdown*` 与 `PollOnce_AfterShutdownDoesNotIssueCommands` 用例覆盖快照阻塞、播放/换片发送、迟到成功和阻塞取消回调；已进入底层的物理发送仍不可强制撤回。
 
 ## 34. 确认停止要显式终止旧 Pending 序列
 
@@ -274,6 +276,7 @@
 
 - 规则：每引擎一个提示 worker、64 条等待消息；队满丢弃新提示，超过 10 秒寿命丢弃。寿命使用单调时间，并在出队后、等待 room gate 后和网络发送前重查；墙上时钟跳变不应改变排队寿命，当前时间仍用于会话过期选择。
 - 规则：排队时的身份只能作为目标绑定，发送前重新选取当前会话并核验原房间引用、服务器、joined 成员、Session/Item、能力、快照保护、通知设置和停止状态；消息网络发送在 gate 外执行。停止清空等待队列，取消在途工作而不等待不协作传输或取消回调。
+- 当前会话快照必须在取得房间 gate 后采样，不能使用等待 gate 前的结果。服务端批量消息也要在每个尚未发送的目标前重新核验：前一条网络发送期间可能发生暂离、房间删除、服务器或会话变化，失效目标应计为跳过。`SyncEnginePerformanceTests.DequeuedNotice_*` 与 `WatchTogetherServiceRoomTests.Message_BlockingIssuerDoesNotHoldRoomGate_AndRevalidatesLaterTargets` 覆盖这些交错，网络发送仍在 gate 外。
 - 集成约束：仅移出轮询线程仍不够；若 DisplayMessage 与播放控制占同一会话槽，慢提示仍可能使 Pause/Seek 被误判为超时。内部通道前缀隔离占位，Emby 接收原 SessionId，总未完成传输容量继续受限。
 - 验证：SyncNotificationDispatcherTests、SyncEnginePerformanceTests 的容量、异常恢复、边界过期、等待 gate、身份失效与 Stop/Dispose 用例，以及 SessionBridgeCommandIssuerTests 的双向通道隔离、容量和迟到清理用例。取舍见 [ADR-005](adr/005-sync-notification-dispatch.md)。
 
@@ -290,3 +293,10 @@
 - Routine seek/pause/resume stages do not each need a toast. Report one completed alignment per participant; bound retry attempts by the alignment operation and discard queued notices after operation or stage changes. Already dispatched transport cannot be recalled.
 - LastActivityDateUtc is not a playback sequence. Only reject strictly older activity in an eligible, complete, identity-stable Watching pair with no Pending. Never let this guard hide missing/stopped users, identity changes, eligibility loss or Pending deadlines. Equal/new timestamps keep real user controls, including the unavoidable fresh-timestamp replay ambiguity.
 - SyncToastTests and SyncToastReplayTests cover normal seek, pause-drag-resume, repeated polls, delayed confirmation, operation/stage retirement, older/equal/new timestamps and identity/capability negative cases. These fixtures are not evidence of the user's real network/client cause.
+- 诊断事件代码要同时进入服务端脱敏白名单与浏览器标签映射。`snapshot_ignored` / `older_activity` 在两层均保留后，才能显示及导出忽略旧快照的准确原因；未知或混入额外文本的值仍按原规则清洗。`SyncDiagnosticsTests.ExportPreservesSafeIgnoredSnapshotCodesOnly` 与浏览器诊断导出用例验证这条链路；页面/控制器/路由缓存键同步递增为 V17。
+
+## 41. 构建输出清理必须避开源码与路径别名
+
+- 现象：只拒绝仓库根目录及其祖先仍不够；`-OutputDirectory src` 会让待清理的插件输出目录指向 `src/EmbyWatchTogether`。旧实现的 `-ValidatePathsOnly` 实际接受该路径，后续递归删除会危及源码。
+- 规则：构建前及清理前拒绝输出与源码、测试、脚本、文档、协作配置目录或 `.publish` 暂存目录重叠；检查输出、归档、暂存路径及其祖先，遇到符号链接或 reparse point 直接拒绝。默认 `dist` 与独立仓库外物理输出目录保持可用；路径验证不创建、删除或改写文件。
+- 验证：`tests/build-path-guard.tests.ps1` 覆盖受保护目录及子目录、`..` 别名、暂存冲突、目录链接和安全输出；Linux 下修复后全部通过，正常 Release 构建、.NET 测试和单 DLL/ZIP 打包已在本地验证。Windows junction 分支尚未运行，仍须由 Windows CI 验证；本地验证不代表发布或部署。

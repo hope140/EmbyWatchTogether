@@ -71,11 +71,17 @@ namespace Emby.Plugins.WatchTogether
         private DateTimeOffset? _lastSnapshotProviderErrorAtUtc;
         private bool _snapshotProviderProtectionActive;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+        private readonly CancellationToken _stopToken;
         private readonly AutoResetEvent _wakeEvent = new AutoResetEvent(false);
         private Thread _thread;
+        private volatile bool _stopRequested;
         private bool _disposed;
         private bool _resourcesDisposed;
         private bool _threadExited;
+        private bool _cancellationCompleted;
+        private bool _cancellationSourceDisposed;
+        private readonly List<CancellationTokenSource> _deferredCommandTimeoutDisposals =
+            new List<CancellationTokenSource>();
 
         public SyncEngine(
             RoomManager roomManager,
@@ -90,6 +96,7 @@ namespace Emby.Plugins.WatchTogether
             ILogManager logManager = null,
             bool notifyOnSyncActions = true)
         {
+            _stopToken = _cts.Token;
             _roomManager = roomManager ?? throw new ArgumentNullException(nameof(roomManager));
             _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
             _issuer = issuer;
@@ -120,7 +127,7 @@ namespace Emby.Plugins.WatchTogether
         {
             lock (_lock)
             {
-                if (_disposed || _thread != null)
+                if (_disposed || _stopRequested || _thread != null)
                 {
                     return;
                 }
@@ -206,8 +213,9 @@ namespace Emby.Plugins.WatchTogether
 
         public IReadOnlyList<RoomPollResult> PollOnce(DateTimeOffset now)
         {
-            var options = GetOptionsSnapshot();
             var results = new List<RoomPollResult>();
+            if (_stopRequested) return results;
+            var options = GetOptionsSnapshot();
             var rooms = _roomManager.ListRooms();
             var roomIds = new HashSet<string>(rooms.Select(r => r.Id), StringComparer.OrdinalIgnoreCase);
             _differentVideoNoticeRooms.RemoveWhere(id => !roomIds.Contains(id));
@@ -220,10 +228,12 @@ namespace Emby.Plugins.WatchTogether
             var validRoomIds = new List<string>();
             foreach (var listedRoom in rooms)
             {
+                if (_stopRequested) return results;
                 try
                 {
                     using (var access = _roomManager.TryEnterRoom(listedRoom.Id))
                     {
+                        if (_stopRequested) return results;
                         if (access == null)
                         {
                             continue;
@@ -260,7 +270,7 @@ namespace Emby.Plugins.WatchTogether
                 }
             }
 
-            if (validRoomIds.Count == 0)
+            if (_stopRequested || validRoomIds.Count == 0)
             {
                 return results;
             }
@@ -272,10 +282,12 @@ namespace Emby.Plugins.WatchTogether
             }
             catch (Exception ex)
             {
+                if (_stopRequested) return results;
                 HandleSnapshotProviderFailure(now, validRoomIds, results, ex);
                 return results;
             }
 
+            if (_stopRequested) return results;
             if (HandleSnapshotProviderSuccess(now, validRoomIds, results))
             {
                 // A protected room is intentionally not allowed to process
@@ -287,10 +299,12 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var roomId in validRoomIds)
             {
+                if (_stopRequested) break;
                 try
                 {
                     using (var access = _roomManager.TryEnterRoom(roomId))
                     {
+                        if (_stopRequested) break;
                         if (access == null)
                         {
                             continue;
@@ -644,6 +658,10 @@ namespace Emby.Plugins.WatchTogether
                         results.Add(Result(room, runtime, eligible));
                     }
                 }
+                catch (OperationCanceledException) when (_stopRequested)
+                {
+                    break;
+                }
                 catch (Exception ex)
                 {
                     // A broken room must not prevent the remaining rooms from
@@ -684,11 +702,11 @@ namespace Emby.Plugins.WatchTogether
 
         private void Loop()
         {
-            var token = _cts.Token;
+            var token = _stopToken;
             var waitHandles = new WaitHandle[] { token.WaitHandle, _wakeEvent };
             try
             {
-                while (!token.IsCancellationRequested)
+                while (!_stopRequested)
                 {
                     try
                     {
@@ -773,13 +791,30 @@ namespace Emby.Plugins.WatchTogether
 
         private void CancelLocked()
         {
-            try
+            if (!_stopRequested)
             {
-                _cts.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Disposal has already completed the cancellation path.
+                _stopRequested = true;
+                // Transport callbacks can block or throw. Publish shutdown
+                // immediately, but never run those callbacks on this caller
+                // or under the engine lock. Repeated shutdown queues no work.
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try { _cts.Cancel(); }
+                    catch { /* Shutdown cancellation is best effort. */ }
+                    finally
+                    {
+                        lock (_lock)
+                        {
+                            _cancellationCompleted = true;
+                            foreach (var timeout in _deferredCommandTimeoutDisposals)
+                            {
+                                timeout.Dispose();
+                            }
+                            _deferredCommandTimeoutDisposals.Clear();
+                            DisposeCancellationSourceLocked();
+                        }
+                    }
+                });
             }
 
             SignalWakeLocked();
@@ -835,13 +870,41 @@ namespace Emby.Plugins.WatchTogether
                 // Dispose is best effort after the thread has exited.
             }
 
-            try
+            lock (_lock)
             {
+                DisposeCancellationSourceLocked();
+            }
+        }
+
+        private void DisposeCancellationSourceLocked()
+        {
+            if (_resourcesDisposed && _cancellationCompleted && !_cancellationSourceDisposed)
+            {
+                _cancellationSourceDisposed = true;
                 _cts.Dispose();
             }
-            catch
+        }
+
+        private void ThrowIfStopping()
+        {
+            if (_stopRequested) throw new OperationCanceledException(_stopToken);
+        }
+
+        private void DisposeCommandTimeout(CancellationTokenSource timeout)
+        {
+            lock (_lock)
             {
-                // Dispose is best effort after the thread has exited.
+                // Disposing a linked registration can wait for a cancellation
+                // callback that needs the room gate currently held by this poll.
+                // Serialize ordinary cleanup against cancellation startup; once
+                // stopping, the one cancellation worker owns unfinished cleanup.
+                if (_stopRequested && !_cancellationCompleted)
+                {
+                    _deferredCommandTimeoutDisposals.Add(timeout);
+                    return;
+                }
+
+                timeout.Dispose();
             }
         }
 
@@ -2921,6 +2984,7 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now,
             out string error)
         {
+            ThrowIfStopping();
             error = null;
             if (room == null || snapshot == null || !snapshot.Online ||
                 string.IsNullOrEmpty(itemId) ||
@@ -2939,10 +3003,13 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
-            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stopToken);
+            try
             {
+                timeout.CancelAfter(ExternalCallTimeout);
                 try
                 {
+                    ThrowIfStopping();
                     bool accepted = issuer.TryIssuePlayItem(
                         room.Id,
                         room.AdminUserId,
@@ -2952,6 +3019,7 @@ namespace Emby.Plugins.WatchTogether
                         now,
                         timeout.Token,
                         out error);
+                    ThrowIfStopping();
                     if (!accepted && string.IsNullOrEmpty(error))
                     {
                         error = MediaHandoffPlayItemFailedError;
@@ -2961,15 +3029,18 @@ namespace Emby.Plugins.WatchTogether
                 }
                 catch (OperationCanceledException)
                 {
+                    ThrowIfStopping();
                     error = "command_timeout";
                     return false;
                 }
                 catch
                 {
+                    ThrowIfStopping();
                     error = "command_failed";
                     return false;
                 }
             }
+            finally { DisposeCommandTimeout(timeout); }
         }
 
         private bool TryIssueCommand(
@@ -2982,6 +3053,7 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now,
             out string error)
         {
+            ThrowIfStopping();
             if (_issuer == null)
             {
                 error = "no command issuer configured";
@@ -2994,7 +3066,7 @@ namespace Emby.Plugins.WatchTogether
                 // Keep legacy test doubles and third-party implementations
                 // source-compatible while the built-in issuer uses the
                 // cancellation-aware path below.
-                return _issuer.TryIssue(
+                bool accepted = _issuer.TryIssue(
                     roomId,
                     controllingUserId,
                     userId,
@@ -3003,11 +3075,16 @@ namespace Emby.Plugins.WatchTogether
                     positionTicks,
                     now,
                     out error);
+                ThrowIfStopping();
+                return accepted;
             }
 
-            using (var timeout = new CancellationTokenSource(ExternalCallTimeout))
+            var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stopToken);
+            try
             {
-                return cancellable.TryIssue(
+                timeout.CancelAfter(ExternalCallTimeout);
+                ThrowIfStopping();
+                bool accepted = cancellable.TryIssue(
                     roomId,
                     controllingUserId,
                     userId,
@@ -3017,7 +3094,10 @@ namespace Emby.Plugins.WatchTogether
                     now,
                     timeout.Token,
                     out error);
+                ThrowIfStopping();
+                return accepted;
             }
+            finally { DisposeCommandTimeout(timeout); }
         }
 
         private void QueueNotification(
@@ -3042,15 +3122,14 @@ namespace Emby.Plugins.WatchTogether
             string adminUserId = room.AdminUserId;
             _notifications.TryEnqueueFresh((token, isFresh) =>
             {
-                if (!isFresh() || token.IsCancellationRequested || _disposed || _cts.IsCancellationRequested) return;
-                var candidates = _snapshotProvider.GetSessionSnapshots();
+                if (!isFresh() || token.IsCancellationRequested || _stopRequested) return;
                 DateTimeOffset now;
                 SessionSnapshot target;
                 using (var access = _roomManager.TryEnterRoom(room.Id))
                 {
                     if (access == null || !ReferenceEquals(access.Room, room) ||
                         access.Runtime.SnapshotUnavailable || token.IsCancellationRequested ||
-                        !isFresh() || _disposed || _cts.IsCancellationRequested ||
+                        !isFresh() || _stopRequested ||
                         !string.Equals(room.ServerId, _serverIdProvider(), StringComparison.OrdinalIgnoreCase) ||
                         !room.JoinedParticipantUserIds.Contains(userId, StringComparer.OrdinalIgnoreCase)) return;
 
@@ -3060,6 +3139,10 @@ namespace Emby.Plugins.WatchTogether
                     if (operation != null && (!ReferenceEquals(runtime.NotificationOperation, operation) ||
                         runtime.State != expectedState ||
                         (expectedStage.HasValue && runtime.Barrier?.Stage != expectedStage.Value))) return;
+                    // Gate contention can outlive a session/item or capability
+                    // change. Sample only after obtaining current room authority.
+                    var candidates = _snapshotProvider.GetSessionSnapshots();
+                    if (!isFresh() || token.IsCancellationRequested || _stopRequested) return;
                     now = _clock();
                     var selected = SessionSelector.SelectWithPreviousDiagnostics(
                         candidates, room.JoinedParticipantUserIds, now,
@@ -3069,10 +3152,10 @@ namespace Emby.Plugins.WatchTogether
                         !string.Equals(target.UserId, userId, StringComparison.OrdinalIgnoreCase) ||
                         !HasSameIdentity(sessionId, itemId, target) ||
                         target.Capabilities?.CanDisplayMessage != true || !isFresh() ||
-                        token.IsCancellationRequested || _disposed || _cts.IsCancellationRequested) return;
+                        token.IsCancellationRequested || _stopRequested) return;
                 }
 
-                if (!isFresh() || token.IsCancellationRequested || _disposed || _cts.IsCancellationRequested) return;
+                if (!isFresh() || token.IsCancellationRequested || _stopRequested) return;
                 TryIssueMessage(room.Id, adminUserId, userId, target, header, text,
                     NotificationTimeoutMs, now, token, out _);
             });
@@ -3153,6 +3236,7 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now,
             out string failure)
         {
+            ThrowIfStopping();
             failure = null;
             if (runtime.Pending.TryGetValue(userId, out var existing))
             {
@@ -3187,6 +3271,7 @@ namespace Emby.Plugins.WatchTogether
                 positionTicks,
                 now,
                 out var error);
+            ThrowIfStopping();
 
             if (!ok)
             {

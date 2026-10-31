@@ -16,7 +16,7 @@ for (const host of ['legacy', 'modern']) {
       await page.goto(`/?scenario=admin-member&select_host=${host}`);
       await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
       for (const route of ['Invite', 'Settings']) {
-        await page.locator(`.tabs-viewmenubar a[href*="WatchTogether${route}V16"]`).click();
+        await page.locator(`.tabs-viewmenubar a[href*="WatchTogether${route}V17"]`).click();
         await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
         await page.locator('.selectLabelText').evaluateAll(nodes => nodes.forEach(node => {
           node.textContent = '用于验证标签换行后箭头仍然与下拉框垂直居中的较长说明 '.repeat(3);

@@ -121,6 +121,26 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal("stale", exported.SnapshotHealth);
         }
 
+        [Theory]
+        [InlineData("snapshot_ignored", "older_activity", "snapshot_ignored", "older_activity")]
+        [InlineData(" SNAPSHOT_IGNORED ", " OLDER_ACTIVITY ", "snapshot_ignored", "older_activity")]
+        [InlineData("snapshot_ignored private-token", "older_activity private-token", "observed", "observed")]
+        public void ExportPreservesSafeIgnoredSnapshotCodesOnly(
+            string type, string result, string expectedType, string expectedResult)
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "u1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            var now = new DateTimeOffset(2026, 10, 31, 0, 0, 0, TimeSpan.Zero);
+            Record(runtime, type, "u2", null, result, null, null, now);
+
+            var exported = SyncDiagnostics.Build(room, runtime, "server-1", "1.7.2.3", "watching", now);
+            var diagnosticEvent = Assert.Single(exported.Events);
+            Assert.Equal(expectedType, diagnosticEvent.Type);
+            Assert.Equal(expectedResult, diagnosticEvent.Result);
+            Assert.Equal("userB", diagnosticEvent.Alias);
+        }
+
         [Fact]
         public void ExportIncludesHandoffStateWithHashesAliasesAndStableError()
         {

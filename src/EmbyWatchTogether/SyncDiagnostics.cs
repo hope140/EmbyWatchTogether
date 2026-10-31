@@ -220,6 +220,7 @@ namespace Emby.Plugins.WatchTogether
             new[] { "barrier_started", "barrier_stage_changed", "entered_watching", "command_issued",
                 "command_acknowledged", "command_failed", "retry_scheduled", "stop_confirmed",
                 "snapshot_protection_entered", "snapshot_protection_recovered", "eligibility_changed",
+                "snapshot_ignored",
                 "manual_action", "resync", "resync_barrier_started", "handoff_started",
                 "handoff_play_requested", "handoff_target_confirmed", "handoff_barrier_started",
                 "handoff_completed", "handoff_failed", "handoff_superseded", "primary_item_changed",
@@ -286,6 +287,7 @@ namespace Emby.Plugins.WatchTogether
                 case "cleared": return "cleared";
                 case "recovered": return "recovered";
                 case "changed": return "changed";
+                case "older_activity": return "older_activity";
                 default: return "observed";
             }
         }

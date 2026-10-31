@@ -54,7 +54,7 @@ v1.7.2 系列的真实双端播放验收仍待执行；自动化回归不能替�
 
 管理员可在“设置”中控制停止时暂停另一方、停止提示和同步操作提示，默认均开启。设置保存后在下一轮同步中生效。
 
-Emby 的 **Dashboard → 计划任务 → Watch Together 更新检查**可调整时间、禁用或手动执行更新。`stable` 通道使用 GitHub Latest；`beta` 从公开、非 draft 的 stable 和 prerelease 中选择最高规范版本。安装前会校验签名、大小、哈希、程序集名称和版本，安装成功后按提示重启 Emby。可选 GitHub Token 用于 beta 的 Releases API 查询，页面不回显 Token，匿名查询也可使用。
+Emby 的 **Dashboard → 计划任务 → Watch Together → Update Plugin** 可调整时间、禁用或手动执行更新；其中 Watch Together 是任务分类，Update Plugin 是任务名称。`stable` 通道使用 GitHub Latest；`beta` 从公开、非 draft 的 stable 和 prerelease 中选择最高规范版本。安装前会校验签名、大小、哈希、程序集名称和版本，安装成功后按提示重启 Emby。可选 GitHub Token 用于 beta 的 Releases API 查询，页面不回显 Token，匿名查询也可使用。
 
 ## 兼容性与帮助
 
