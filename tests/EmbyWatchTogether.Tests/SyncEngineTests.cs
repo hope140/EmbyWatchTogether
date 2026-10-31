@@ -1845,7 +1845,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
-        public void WaitingPauseRetryLimit_SameItemRemoteFailureRemainsBounded(bool immediateFailure)
+        public void WaitingPauseRetryLimit_SameItemIneligibilityRemainsBounded(bool immediateFailure)
         {
             var room = CreateRoom();
             using var engine = CreateEngine();
@@ -1855,9 +1855,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             for (int poll = 0; poll < 20; poll++)
             {
                 SetCandidates(
-                    Snapshot("s1", "u1", false, 0, supportsRemoteControl: false,
+                    Snapshot("s1", "u1", false, 0, playbackRate: 1.5,
                         capabilities: capabilities, lastActivityDateUtc: _clock.Now),
-                    Snapshot("s2", "u2", false, 0, supportsRemoteControl: false,
+                    Snapshot("s2", "u2", false, 0, playbackRate: 1.5,
                         capabilities: capabilities, lastActivityDateUtc: _clock.Now));
                 engine.PollOnce(_clock.Now);
                 // Repeated polls of the same snapshot must not renew the budget.
@@ -1869,11 +1869,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal("waiting pause retry limit reached", runtime.Error);
             Assert.Empty(runtime.Pending);
 
-            // Late pause confirmation is not remote-control recovery.
+            // Late pause confirmation does not restore the required playback rate.
             SetCandidates(
-                Snapshot("s1", "u1", true, 0, supportsRemoteControl: false,
+                Snapshot("s1", "u1", true, 0, playbackRate: 1.5,
                     capabilities: capabilities, lastActivityDateUtc: _clock.Now),
-                Snapshot("s2", "u2", true, 0, supportsRemoteControl: false,
+                Snapshot("s2", "u2", true, 0, playbackRate: 1.5,
                     capabilities: capabilities, lastActivityDateUtc: _clock.Now));
             engine.PollOnce(_clock.Now);
             Assert.Equal(RoomState.Waiting, runtime.State);
@@ -1918,9 +1918,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             for (int attempt = 0; attempt < SyncConstants.MaxWaitingPauseAttempts; attempt++)
             {
                 SetCandidates(
-                    Snapshot("s1", "u1", false, 0, supportsRemoteControl: false,
+                    Snapshot("s1", "u1", false, 0, playbackRate: 1.5,
                         capabilities: capabilities, lastActivityDateUtc: _clock.Now),
-                    Snapshot("s2", "u2", false, 0, supportsRemoteControl: false,
+                    Snapshot("s2", "u2", false, 0, playbackRate: 1.5,
                         capabilities: capabilities, lastActivityDateUtc: _clock.Now));
                 engine.PollOnce(_clock.Now);
                 _clock.Advance(SyncConstants.PendingTimeoutSeconds + SyncConstants.WaitingPauseRetryDelaySeconds + 1);
@@ -1928,11 +1928,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             int count = _issuer.Issued.Count;
             SetCandidates(
                 Snapshot(change == "session" ? "s1-new" : "s1", "u1", false, 0,
-                    itemId: change == "item" ? "i2" : "i1", supportsRemoteControl: false,
+                    itemId: change == "item" ? "i2" : "i1", playbackRate: 1.5,
                     capabilities: change == "capability"
                         ? new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek", "DisplayMessage" })
                         : capabilities, lastActivityDateUtc: _clock.Now),
-                Snapshot("s2", "u2", false, 0, supportsRemoteControl: false,
+                Snapshot("s2", "u2", false, 0, playbackRate: 1.5,
                     capabilities: capabilities, lastActivityDateUtc: _clock.Now));
             engine.PollOnce(_clock.Now);
             var runtime = _rooms.GetRuntime(room.Id);
@@ -2734,11 +2734,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             var result = engine.PollOnce(_clock.Now).Single();
 
             Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Equal(2, _issuer.Issued.Count(issued => issued.command == RemoteCommands.Pause));
-            Assert.Equal(new[] { "u1", "u2" }, _issuer.Issued
-                .Where(issued => issued.command == RemoteCommands.Pause)
-                .Select(issued => issued.userId)
-                .OrderBy(userId => userId));
+            var pause = Assert.Single(_issuer.Issued);
+            Assert.Equal("u2", pause.userId);
+            Assert.Equal(RemoteCommands.Pause, pause.command);
         }
 
         [Fact]
@@ -2923,7 +2921,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             var result = engine.PollOnce(_clock.Now).Single();
 
             Assert.Equal(RoomState.Waiting, result.State);
-            Assert.Equal(2, _issuer.Issued.Count(issued => issued.command == RemoteCommands.Pause));
+            Assert.Single(_issuer.Issued);
+            Assert.Equal("u2", _issuer.Issued[0].userId);
+            Assert.Equal(RemoteCommands.Pause, _issuer.Issued[0].command);
         }
 
         [Fact]
@@ -3846,9 +3846,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                     Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
 
                     itemId = "item-b";
-                    SetFreshCandidates(itemId, false, positionTicks, positionTicks);
-                    _clock.Advance(1);
-                    Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+                    ConfirmAutomaticHandoffReady(engine, "s1", itemId, positionTicks);
                     CompleteBarrierAtTarget(engine, room);
                     positionTicks = runtime.Previous[room.PrimaryUserId].PositionTicks;
                     continue;
@@ -4823,11 +4821,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             engine.PollOnce(_clock.Now);
             Assert.Single(issuer.PlayItems);
 
-            SetCandidates(
-                Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
-                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
-            _clock.Advance(1);
-            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+            ConfirmAutomaticHandoffReady(engine, "s1", "item-b", 50 * SessionSnapshot.TicksPerSecond);
             Assert.Single(issuer.PlayItems);
 
             SetCandidates(
@@ -4953,11 +4947,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
             Assert.Single(issuer.PlayItems);
 
-            SetCandidates(
-                Snapshot("s1-new", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
-                Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
-            _clock.Advance(1);
-            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
+            ConfirmAutomaticHandoffReady(engine, "s1-new", "item-b", 50 * SessionSnapshot.TicksPerSecond);
 
             SetCandidates(
                 Snapshot("s1-new", "u1", paused: true, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
@@ -4981,6 +4971,329 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Single(issuer.PlayItems);
             Assert.DoesNotContain(issuer.CommandDetails,
                 command => command.command == RemoteCommands.Seek && command.itemId != "item-b");
+        }
+
+        [Theory]
+        [InlineData(true, 0.5)]
+        [InlineData(false, 0.5)]
+        [InlineData(true, 3.3)]
+        [InlineData(false, 3.3)]
+        [InlineData(true, 7.0)]
+        [InlineData(false, 7.0)]
+        public void MediaHandoff_RawControlFlap_RetainsBoundCandidateUntilControlReturns(
+            bool dropsAtFirstStop, double primaryReturnsAfter)
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            var runtime = _rooms.GetRuntime(room.Id);
+            _clock.Advance(1);
+            var started = _clock.Now;
+            SetCandidates(LateFollowParticipant(rawControl: !dropsAtFirstStop));
+            engine.PollOnce(_clock.Now);
+            if (dropsAtFirstStop)
+                Assert.Single(SyncDiagnostics.Build(room, runtime, "server-1", "test", "waiting", _clock.Now).Events,
+                    e => e.Type == "primary_transition_waiting");
+            if (!dropsAtFirstStop)
+            {
+                _clock.Advance(0.2);
+                SetCandidates(LateFollowParticipant(rawControl: false));
+                engine.PollOnce(_clock.Now);
+            }
+            Assert.NotNull(GetRecoveryProperty(runtime, "PrimaryItemTransitionCandidate"));
+
+            _clock.Advance(primaryReturnsAfter - (_clock.Now - started).TotalSeconds);
+            SetCandidates(
+                Snapshot("s1-new", "u1", false, 0, itemId: "item-b"),
+                LateFollowParticipant(rawControl: false));
+            engine.PollOnce(_clock.Now);
+            Assert.Empty(issuer.PlayItems);
+            Assert.Empty(issuer.Commands);
+            Assert.NotNull(GetRecoveryProperty(runtime, "PrimaryItemTransitionCandidate"));
+            // An additional poll must not let generic Waiting/error handling
+            // discard the retained old-item identity.
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Empty(issuer.PlayItems);
+            Assert.Empty(issuer.Commands);
+
+            _clock.Advance(0.1);
+            SetCandidates(
+                Snapshot("s1-new", "u1", false, 0, itemId: "item-b"),
+                LateFollowParticipant(rawControl: true));
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Single(issuer.PlayItems);
+            Assert.Equal(("u2", "item-b", "s2", "i1"), issuer.PlayItems[0]);
+            Assert.Null(GetRecoveryProperty(runtime, "PrimaryItemTransitionCandidate"));
+            engine.PollOnce(_clock.Now);
+            Assert.Single(issuer.PlayItems);
+            Assert.Single(SyncDiagnostics.Build(room, runtime, "server-1", "test", "waiting", _clock.Now).Events,
+                e => e.Type == "primary_transition_waiting");
+        }
+
+        [Theory]
+        [InlineData(9.999, true)]
+        [InlineData(10.0, false)]
+        [InlineData(10.1, false)]
+        public void MediaHandoff_RawControlFlap_UsesOriginalAbsoluteDeadline(double restoredAt, bool follows)
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            _clock.Advance(1);
+            var started = _clock.Now;
+            SetCandidates(LateFollowParticipant(rawControl: false));
+            engine.PollOnce(_clock.Now);
+            foreach (var offset in new[] { 2.1, 4.0, 7.0, 9.0 })
+            {
+                _clock.Advance(offset - (_clock.Now - started).TotalSeconds);
+                SetCandidates(LateFollowParticipant(rawControl: offset == 4.0));
+                engine.PollOnce(_clock.Now);
+            }
+            _clock.Advance(restoredAt - (_clock.Now - started).TotalSeconds);
+            SetCandidates(Snapshot("s1-new", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(true));
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(follows ? 1 : 0, issuer.PlayItems.Count);
+        }
+
+        [Theory]
+        [InlineData("stopped")]
+        [InlineData("missing")]
+        [InlineData("session")]
+        [InlineData("item")]
+        [InlineData("capability")]
+        [InlineData("partial-capability")]
+        [InlineData("runtime")]
+        [InlineData("runtime-change")]
+        [InlineData("rate")]
+        [InlineData("membership")]
+        [InlineData("ambiguous")]
+        public void MediaHandoff_RawControlFlap_InvalidParticipantCannotReviveCandidate(string change)
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            _clock.Advance(1);
+            SetCandidates(LateFollowParticipant(true));
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(2.1);
+            SetCandidates(LateFollowParticipant(false));
+            engine.PollOnce(_clock.Now);
+            Assert.NotNull(GetRecoveryProperty(_rooms.GetRuntime(room.Id), "PrimaryItemTransitionCandidate"));
+            SessionSnapshot participant = LateFollowParticipant(false);
+            if (change == "stopped") participant = Snapshot("s2", "u2", false, 0, stopped: true);
+            if (change == "session") participant = Snapshot("s2-new", "u2", false, 50 * SessionSnapshot.TicksPerSecond);
+            if (change == "item") participant = Snapshot("s2", "u2", false, 0, itemId: "item-c");
+            if (change == "capability") participant = Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond, supportsRemoteControl: false);
+            if (change == "partial-capability") participant = Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond,
+                supportsRemoteControl: false, capabilities: new SessionCapabilityReport(true, new[] { RemoteCommands.Pause }));
+            if (change == "runtime") participant = new SessionSnapshot("s2", "u2", "i1", "m1", 0, 0, false, 1, false, false, participant.Capabilities);
+            if (change == "runtime-change") participant = new SessionSnapshot("s2", "u2", "i1", "m1", 0, 200 * SessionSnapshot.TicksPerSecond, false, 1, false, false, participant.Capabilities);
+            if (change == "rate") participant = Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond, playbackRate: 1.5,
+                supportsRemoteControl: false, capabilities: participant.Capabilities);
+            if (change == "membership")
+            {
+                Assert.True(_rooms.LeaveParticipant(room.Id, "u2"));
+                Assert.True(_rooms.SetParticipantJoined(room.Id, "u2", joined: true));
+            }
+            SetCandidates(change == "missing" ? Array.Empty<SessionSnapshot>() :
+                change == "ambiguous" ? new[] {
+                    Snapshot("s2-other-a", "u2", false, 0), Snapshot("s2-other-b", "u2", false, 0) } : new[] { participant });
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Null(GetRecoveryProperty(_rooms.GetRuntime(room.Id), "PrimaryItemTransitionCandidate"));
+
+            SetCandidates(Snapshot("s1-new", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(true));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void MediaHandoff_RawControlFlap_PrimaryReturnsToSourceClearsCandidate()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            _clock.Advance(1);
+            SetCandidates(LateFollowParticipant(false));
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(2.1);
+            engine.PollOnce(_clock.Now);
+            SetCandidates(Snapshot("s1", "u1", false, 0), LateFollowParticipant(false));
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Null(GetRecoveryProperty(_rooms.GetRuntime(room.Id), "PrimaryItemTransitionCandidate"));
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(true));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void MediaHandoff_RawControlFlap_ConfirmsOnlyPrimaryStopWithoutSendingPause()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            var infos = new List<string>();
+            using var engine = CreateHandoffEngine(issuer, CreateLogManager(new List<string>(), infos).Object);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            SetCandidates(LateFollowParticipant(false));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(2.0);
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            var stops = infos.Where(message => message.Contains("playback stopped by")).ToList();
+            Assert.Single(stops);
+            Assert.Contains("playback stopped by u1;", stops[0]);
+            Assert.Empty(issuer.Commands);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void MediaHandoff_RawControlFlap_DirectTransitionAndRetryWaitForRawControl()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(false));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Empty(issuer.PlayItems);
+            Assert.Empty(issuer.Commands);
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(true));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Single(issuer.PlayItems);
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(false));
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + 0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Single(issuer.PlayItems);
+            Assert.Empty(issuer.Commands);
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(true));
+            _clock.Advance(0.1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(2, issuer.PlayItems.Count);
+        }
+
+        [Theory]
+        [InlineData("capability")]
+        [InlineData("participant-session")]
+        [InlineData("participant-item")]
+        [InlineData("primary-session")]
+        [InlineData("primary-item")]
+        [InlineData("missing")]
+        [InlineData("stopped")]
+        [InlineData("runtime")]
+        public void MediaHandoff_RawControlFlap_RecoveredHandoffMustRevalidateHeldIdentity(string change)
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(false));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Empty(issuer.PlayItems);
+            var primary = Snapshot(change == "primary-session" ? "s1-new" : "s1", "u1", false, 0,
+                itemId: change == "primary-item" ? "item-c" : "item-b");
+            var participant = Snapshot(change == "participant-session" ? "s2-new" : "s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond,
+                itemId: change == "participant-item" ? "item-c" : "i1", stopped: change == "stopped",
+                capabilities: change == "capability" ? new SessionCapabilityReport(false, Array.Empty<string>()) : null);
+            if (change == "runtime") participant = new SessionSnapshot("s2", "u2", "i1", "m1", 0,
+                200 * SessionSnapshot.TicksPerSecond, false, 1, false, true, participant.Capabilities);
+            SetCandidates(change == "missing" ? new[] { primary } : new[] { primary, participant });
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(issuer.PlayItems);
+            Assert.Empty(issuer.Commands);
+        }
+
+        [Fact]
+        public void MediaHandoff_RawControlFlap_HandoffDeadlineCannotRenewOnRecovery()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(false));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.MediaHandoffTimeoutSeconds);
+            SetCandidates(Snapshot("s1", "u1", false, 0, itemId: "item-b"),
+                Snapshot("s2", "u2", false, 0, itemId: "item-b"));
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Empty(issuer.PlayItems);
+            Assert.Empty(issuer.Commands);
+        }
+
+        [Theory]
+        [InlineData("server")]
+        [InlineData("reset")]
+        [InlineData("snapshot-protection")]
+        public void MediaHandoff_RawControlFlap_LifecycleChangeClearsCandidate(string change)
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            string server = "server-1";
+            using var engine = new SyncEngine(_rooms, _provider, issuer, () => server, () => _clock.Now,
+                notifyOnSyncActions: false, notifyOtherOnPlaybackStop: false);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            SetCandidates(LateFollowParticipant(false));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            var runtime = _rooms.GetRuntime(room.Id);
+            Assert.NotNull(GetRecoveryProperty(runtime, "PrimaryItemTransitionCandidate"));
+            if (change == "server")
+            {
+                server = "other-server";
+                engine.PollOnce(_clock.Now);
+                server = "server-1";
+            }
+            else if (change == "reset") runtime.ResetToWaiting();
+            else typeof(RoomRuntime).GetMethod("EnterSnapshotUnavailableProtection", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(runtime, null);
+            Assert.Null(GetRecoveryProperty(runtime, "PrimaryItemTransitionCandidate"));
+            SetCandidates(Snapshot("s1-new", "u1", false, 0, itemId: "item-b"), LateFollowParticipant(true));
+            _clock.Advance(3);
+            engine.PollOnce(_clock.Now);
+            Assert.Empty(issuer.PlayItems);
+        }
+
+        [Fact]
+        public void MediaHandoff_RawControlFlap_WaitingNeverDispatchesToCachedOnlyControl()
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            for (int poll = 0; poll < 12; poll++)
+            {
+                SetCandidates(
+                    Snapshot("s1", "u1", false, 0, supportsRemoteControl: false,
+                        capabilities: LateFollowParticipant(false).Capabilities, lastActivityDateUtc: _clock.Now),
+                    Snapshot("s2", "u2", false, 0, supportsRemoteControl: false,
+                        capabilities: LateFollowParticipant(false).Capabilities, lastActivityDateUtc: _clock.Now));
+                engine.PollOnce(_clock.Now);
+                _clock.Advance(4);
+            }
+            Assert.Equal(RoomState.Waiting, _rooms.GetRuntime(room.Id).State);
+            Assert.Empty(issuer.Commands);
+            Assert.Empty(issuer.PlayItems);
+            Assert.Empty(_rooms.GetRuntime(room.Id).Pending);
+        }
+
+        private static SessionSnapshot LateFollowParticipant(bool rawControl)
+        {
+            return Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond,
+                supportsRemoteControl: rawControl,
+                capabilities: new SessionCapabilityReport(true, new[] { RemoteCommands.Pause, RemoteCommands.Unpause, RemoteCommands.Seek }));
         }
 
         [Fact]
@@ -5216,6 +5529,8 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Snapshot("s1", "u1", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"),
                 Snapshot("s2", "u2", paused: false, position: 50 * SessionSnapshot.TicksPerSecond, itemId: "item-b"));
             _clock.Advance(1);
+            Assert.Equal(RoomState.Waiting, engine.PollOnce(_clock.Now).Single().State);
+            Assert.Equal("accepted", _rooms.RequestParticipantResync(room.Id, "u2", () => "server-1", _clock.Now).Status);
             Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
         }
 
@@ -5296,7 +5611,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void MediaHandoff_PrimarySessionRebindInvalidatesOldPending()
+        public void MediaHandoff_PrimarySessionRebindCancelsAutomaticHold()
         {
             var room = CreateRoom();
             var issuer = new HandoffIssuer();
@@ -5316,8 +5631,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
 
-            Assert.Equal(2, issuer.PlayItems.Count);
-            Assert.Equal("s1-new", _rooms.GetRuntime(room.Id).Handoff.PrimarySessionId);
+            Assert.Single(issuer.PlayItems);
+            Assert.Null(_rooms.GetRuntime(room.Id).Handoff);
+            Assert.Equal(RoomState.Waiting, _rooms.GetRuntime(room.Id).State);
         }
 
         [Fact]
@@ -5545,6 +5861,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var infos = new List<string>();
             var engine = CreateHandoffEngine(issuer, CreateLogManager(new List<string>(), infos).Object);
             EnterWatchingWithIssuer(engine, room, issuer);
+            Assert.Equal("accepted", _rooms.RequestParticipantResync(room.Id, "u2", () => "server-1", _clock.Now).Status);
             infos.Clear();
 
             SetCandidates(
@@ -5629,6 +5946,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 logManager: logManager.Object))
             {
                 EnterWatching(engine, room);
+                Assert.Equal("accepted", _rooms.RequestParticipantResync(room.Id, "u2", () => "server-1", _clock.Now).Status);
                 infos.Clear();
 
                 SetCandidates(
@@ -5682,6 +6000,20 @@ namespace Emby.Plugins.WatchTogether.Tests
                         Times.Once);
                 }
             }
+        }
+
+        private void ConfirmAutomaticHandoffReady(SyncEngine engine, string primarySession, string item, long position)
+        {
+            SetCandidates(
+                Snapshot(primarySession, "u1", false, position + SessionSnapshot.TicksPerSecond, itemId: item, lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", false, position, itemId: item, lastActivityDateUtc: _clock.Now));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Handoff, engine.PollOnce(_clock.Now).Single().State);
+            SetCandidates(
+                Snapshot(primarySession, "u1", true, position + SessionSnapshot.TicksPerSecond, itemId: item, lastActivityDateUtc: _clock.Now),
+                Snapshot("s2", "u2", false, position + SessionSnapshot.TicksPerSecond, itemId: item, lastActivityDateUtc: _clock.Now));
+            _clock.Advance(1);
+            Assert.Equal(RoomState.Barrier, engine.PollOnce(_clock.Now).Single().State);
         }
 
         private SyncEngine CreateHandoffEngine(HandoffIssuer issuer, ILogManager logManager = null)

@@ -420,6 +420,7 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 runtime.ParticipantResyncRequestedAtUtc = now;
+                runtime.HandoffRequiresResync = false;
                 runtime.ResetToWaiting();
                 runtime.ParticipantResyncRequestedUserId = userId;
                 runtime.RecordDiagnosticEvent(
@@ -588,6 +589,7 @@ namespace Emby.Plugins.WatchTogether
                             };
                         }
 
+                        runtime.HandoffRequiresResync = false;
                         runtime.ResetToWaiting();
                         runtime.RecordDiagnosticEvent(
                             "resync", null, null, "success", null, null, now);

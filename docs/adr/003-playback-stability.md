@@ -3,6 +3,7 @@
 - 状态：accepted
 - 日期：2026-09-16
 - 决策修订：2026-10-18，保留 beta 主用户晚到换集行为，明确参与者 Recovery 的适用边界。
+- 决策补充：2026-10-31，明确晚到换集的有限远控等待与停止后大位置差的显式确认。
 - 相关组件：SyncEngine、RoomRuntime、Barrier、SyncDiagnostics、Watch Together 管理页
 
 ## 背景
@@ -18,6 +19,8 @@ SessionInfo 轮询和客户端连接都可能出现短暂缺失。长期播放�
 5. 只有绝对 drift 至少 3 秒并持续 5 秒，且双方 actively playing、无 Pending/Handoff/Barrier/Recovering 时，才触发一次现有 Barrier。
 6. 不实现 continuous drift chasing；自动纠偏完成或失败后使用 120 秒 time-based cooldown。
 7. explicit user action、Handoff、Recovery 和 Barrier 优先于自动纠偏；所有 hold/cooldown 都使用 UTC 时间，不依赖 poll 次数。
+8. 主用户停止观察期间，仅原参与者的 raw 远控标志暂失、原 User/Session/Item/时长连续且有效播放能力仍完整时，可保留既有晚到换集候选。期限仍从首次停止观察起算，满 10 秒即失效；身份、媒体、真实停止、权限或房间生命周期变化立即失效。等待不授权向 raw=false 目标发送命令，也不续期已开始的 Handoff。
+9. 确认停止后，同视频位置差超过 5 秒仍需用户在房间内显式重新同步，界面应说明如何恢复。请求按当前主用户位置对齐并保留其暂停/播放意图；不同视频仍需既有显式参与者请求才可换片。PlaybackStart 事件接收时间和暂停命令确认均不足以独立证明恢复期间没有新用户操作，不增加自动 Seek。
 
 ## 诊断与安全边界
 
@@ -30,5 +33,7 @@ SessionInfo 轮询和客户端连接都可能出现短暂缺失。长期播放�
 - `src/EmbyWatchTogether/SyncDiagnostics.cs`
 - `tests/EmbyWatchTogether.Tests/SyncEngineTests.cs`
 - `tests/EmbyWatchTogether.Tests/SyncDiagnosticsTests.cs`
+- `tests/EmbyWatchTogether.Tests/StoppedPositionRecoveryTests.cs`
+- `tests/ui/specs/stop-recovery.spec.js`
 
 Phase E 的真实双客户端、真实媒体和长时间网络环境验收仍由维护者按最终清单执行；自动测试不替代该验收。

@@ -202,6 +202,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         snapshot_stale: '播放会话数据已过期',
         different_video: '两位参与者打开了不同视频',
         playback_stopped: '播放已停止，等待重新打开视频',
+        stop_resume_confirmation_required: '停止后进度差较大，等待确认重新同步',
         action_conflict: '检测到手动操作冲突',
         barrier_retry_exhausted: '对齐重试次数已用尽',
         waiting_pause_retry_limit: '等待暂停重试次数已用尽',
@@ -237,6 +238,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         changed: '已变化',
         cleared: '已清除',
         older_activity: '活动时间较旧',
+        expired: '已过期',
+        source_resumed: '主用户回到原视频',
         observed: '已记录'
     };
     var diagnosticBarrierStageLabels = {
@@ -262,6 +265,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         command_failed: '控制失败',
         retry_scheduled: '安排重试',
         stop_confirmed: '确认停止',
+        stop_resume_confirmation_required: '停止后等待确认恢复',
+        primary_transition_candidate: '观察主用户停止后的换片',
+        primary_transition_waiting: '换片等待远控条件恢复',
+        primary_transition_expired: '换片观察窗口已过期',
+        primary_transition_invalidated: '换片观察已失效',
         snapshot_protection_entered: '进入保护状态',
         snapshot_protection_recovered: '保护状态恢复',
         snapshot_ignored: '忽略过期快照',
@@ -272,6 +280,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         handoff_started: '开始媒体切换',
         handoff_play_requested: '请求打开视频',
         handoff_target_confirmed: '目标视频已确认',
+        handoff_primary_pause_requested: '请求主用户暂停等待',
+        handoff_primary_paused: '主用户已暂停等待',
+        handoff_primary_hold_interrupted: '主用户操作取消换片等待',
         handoff_barrier_started: '媒体切换开始对齐',
         handoff_completed: '媒体切换完成',
         handoff_failed: '媒体切换失败',
@@ -1178,9 +1189,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV18',
-        invite: 'WatchTogetherInviteV18',
-        settings: 'WatchTogetherSettingsV18'
+        rooms: 'WatchTogetherRoomsV19',
+        invite: 'WatchTogetherInviteV19',
+        settings: 'WatchTogetherSettingsV19'
     };
 
     function currentRoute(page) {
@@ -1674,6 +1685,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         snapshot_unavailable: '暂时无法读取播放会话，自动同步已进入保护状态；恢复后会重新对齐。',
         different_video: '两位参与者打开了不同视频，请打开同一视频。',
         playback_stopped: '播放已停止，请双方重新打开同一视频。',
+        stop_resume_confirmation_required: '双方已打开同一视频，但停止后的进度差较大。如需以主用户当前进度恢复，请使用房间内的重新同步操作。',
         command_failed: '播放控制未完成，请检查两位参与者的客户端。',
         member_left: '仍有参与者未加入，请先让双方加入房间。',
         aligning: '正在对齐播放位置，请稍候。',
@@ -1681,6 +1693,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         remote_control_unavailable: '当前客户端不支持远程控制，请更换或更新客户端。',
         media_mismatch: '两位参与者的媒体信息不一致，请打开同一视频。',
         media_handoff: '正在让另一位参与者打开主用户当前视频，请稍候。',
+        handoff_failed: '换片等待或对齐未完成，已停止自动恢复。请确认双方播放状态后使用重新同步。',
         unsupported_playback_rate: '播放速度不是 1 倍，请恢复正常速度后重试。',
         waiting_for_playback: '等待双方打开同一视频并开始播放。',
         transient_recovery: '正在等待临时掉线的参与者恢复。'
@@ -2335,6 +2348,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             groupHeading(playback, '播放控制');
             if (room.CurrentUserJoined && !room.IsAdmin) {
                 playback.appendChild(createActionButton(page, room, 'participantResync'));
+                var resyncHint = document.createElement('p');
+                resyncHint.className = 'fieldDescription wt-resyncHint';
+                resyncHint.textContent = '以主用户当前视频和进度为准，必要时会切换视频。';
+                playback.appendChild(resyncHint);
             }
             var pauseButton = null;
             if (room.IsAdmin) {

@@ -220,7 +220,9 @@ namespace Emby.Plugins.WatchTogether
             new[] { "barrier_started", "barrier_stage_changed", "entered_watching", "command_issued",
                 "command_acknowledged", "command_failed", "retry_scheduled", "stop_confirmed",
                 "snapshot_protection_entered", "snapshot_protection_recovered", "eligibility_changed",
-                "snapshot_ignored",
+                "snapshot_ignored", "stop_resume_confirmation_required",
+                "handoff_primary_pause_requested", "handoff_primary_paused", "handoff_primary_hold_interrupted",
+                "primary_transition_candidate", "primary_transition_waiting", "primary_transition_expired", "primary_transition_invalidated",
                 "manual_action", "resync", "resync_barrier_started", "handoff_started",
                 "handoff_play_requested", "handoff_target_confirmed", "handoff_barrier_started",
                 "handoff_completed", "handoff_failed", "handoff_superseded", "primary_item_changed",
@@ -288,6 +290,8 @@ namespace Emby.Plugins.WatchTogether
                 case "recovered": return "recovered";
                 case "changed": return "changed";
                 case "older_activity": return "older_activity";
+                case "expired": return "expired";
+                case "source_resumed": return "source_resumed";
                 default: return "observed";
             }
         }
@@ -576,9 +580,11 @@ namespace Emby.Plugins.WatchTogether
                 case "manual action conflicts with active synchronization": return "action_conflict";
                 case "两位参与者打开了不同视频，暂不发送同步指令": return "different_video";
                 case "播放已停止，等待双方重新打开同一视频": return "playback_stopped";
+                case "停止后播放位置相差较大，请使用重新同步确认恢复": return "stop_resume_confirmation_required";
                 case "barrier seek retry budget exhausted": return "barrier_retry_exhausted";
                 case "waiting pause retry limit reached": return "waiting_pause_retry_limit";
                 case "media handoff play item issuer unavailable": return "handoff_failed";
+                case "media handoff hold requires explicit resync": return "handoff_failed";
                 case "media handoff play item failed": return "handoff_failed";
                 case "media handoff timed out": return "handoff_failed";
                 case "media handoff identity invalid": return "handoff_failed";

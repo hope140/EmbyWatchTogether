@@ -25,6 +25,8 @@ namespace Emby.Plugins.WatchTogether
     public sealed class SyncEngine : IDisposable
     {
         private const string StoppedPlaybackError = "播放已停止，等待双方重新打开同一视频";
+        private const string StoppedPositionConfirmationError = "停止后播放位置相差较大，请使用重新同步确认恢复";
+        private const string HandoffHoldRequiresResyncError = "media handoff hold requires explicit resync";
         private const string StoppedPlaybackMessageHeader = "一起观看";
         private const string StoppedPlaybackMessageText = "对方已停止播放，请重新打开视频";
         private const string AutomaticResyncMessageHeader = "一起观看";
@@ -386,7 +388,29 @@ namespace Emby.Plugins.WatchTogether
                             snapshots,
                             now);
 
-                        bool primaryItemTransition = IsPrimaryItemTransition(runtime, room, snapshots, now);
+                        if (runtime.HandoffRequiresResync)
+                        {
+                            runtime.Error = HandoffHoldRequiresResyncError;
+                            results.Add(Result(room, runtime, eligible));
+                            continue;
+                        }
+
+                        // Once a stop has been observed, only the identity-bound
+                        // candidate may authorize its late (or early) replacement.
+                        // Process it before the ordinary Watching handoff path.
+                        if (TryProcessLatePrimaryItemTransition(
+                                runtime,
+                                room,
+                                snapshots,
+                                eligibility,
+                                now))
+                        {
+                            results.Add(Result(room, runtime, eligible));
+                            continue;
+                        }
+
+                        bool primaryItemTransition = !runtime.MissingSessionSinceUtc.HasValue &&
+                            IsPrimaryItemTransition(runtime, room, snapshots, now);
                         if ((runtime.State == RoomState.Watching && primaryItemTransition) ||
                             runtime.State == RoomState.Handoff)
                         {
@@ -401,17 +425,6 @@ namespace Emby.Plugins.WatchTogether
                                 results.Add(Result(room, runtime, eligible));
                                 continue;
                             }
-                        }
-
-                        if (TryProcessLatePrimaryItemTransition(
-                                runtime,
-                                room,
-                                snapshots,
-                                eligibility,
-                                now))
-                        {
-                            results.Add(Result(room, runtime, eligible));
-                            continue;
                         }
 
                         if (TryProcessTransientSessionRecovery(
@@ -432,10 +445,7 @@ namespace Emby.Plugins.WatchTogether
                             // same stop condition can be observed on every poll until
                             // the participant starts again. Apply stop side effects
                             // only on the transition into the stopped state.
-                            bool stopAlreadyHandled = string.Equals(
-                                runtime.Error,
-                                StoppedPlaybackError,
-                                StringComparison.Ordinal);
+                            bool stopAlreadyHandled = IsStoppedPlaybackWaitingError(runtime.Error);
                             if (!stopAlreadyHandled)
                             {
                                 // Confirmed Stop terminates the old playback sequence.
@@ -478,14 +488,23 @@ namespace Emby.Plugins.WatchTogether
                         // stop transition. Once both sides are back near the same position,
                         // the next poll is allowed to start a fresh barrier.
                         if (runtime.State == RoomState.Waiting &&
-                            runtime.Error == StoppedPlaybackError)
+                            IsStoppedPlaybackWaitingError(runtime.Error))
                         {
+                            if (!eligible)
+                                runtime.Error = StoppedPlaybackError;
                             if (sameItem && !HasLargePositionGap(snapshots))
                             {
                                 runtime.Error = null;
                             }
                             else if (sameItem)
                             {
+                                if (eligible && runtime.Error != StoppedPositionConfirmationError)
+                                {
+                                    runtime.Error = StoppedPositionConfirmationError;
+                                    var positions = snapshots.Values.Select(s => s.PositionTicks).ToArray();
+                                    runtime.RecordDriftDiagnosticEvent("stop_resume_confirmation_required",
+                                        "pending", Math.Abs((double)positions[0] - positions[1]) / SessionSnapshot.TicksPerSecond, now);
+                                }
                                 results.Add(Result(room, runtime, eligible));
                                 continue;
                             }
@@ -1179,15 +1198,18 @@ namespace Emby.Plugins.WatchTogether
                 room.JoinedParticipantUserIds.Count != 2 ||
                 runtime.State != RoomState.Watching &&
                 !(runtime.State == RoomState.Waiting &&
-                  string.Equals(runtime.Error, StoppedPlaybackError, StringComparison.Ordinal)))
+                  IsStoppedPlaybackWaitingError(runtime.Error)))
             {
+                runtime.RecordDiagnosticEvent("primary_transition_invalidated", null, null, "changed", null, null, now);
                 runtime.ClearPrimaryItemTransitionCandidate();
                 return false;
             }
 
-            if ((now - candidate.StartedAtUtc).TotalSeconds >=
+            if (now < candidate.StartedAtUtc ||
+                (now - candidate.StartedAtUtc).TotalSeconds >=
                 SyncConstants.PrimaryItemTransitionRecoveryGraceSeconds)
             {
+                runtime.RecordDiagnosticEvent("primary_transition_expired", null, null, "expired", null, null, now);
                 runtime.ClearPrimaryItemTransitionCandidate();
                 return false;
             }
@@ -1197,32 +1219,34 @@ namespace Emby.Plugins.WatchTogether
             if (!string.Equals(candidate.PrimaryUserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(candidate.ParticipantUserId, participantUserId, StringComparison.OrdinalIgnoreCase))
             {
+                runtime.RecordDiagnosticEvent("primary_transition_invalidated", null, null, "changed", null, null, now);
                 runtime.ClearPrimaryItemTransitionCandidate();
                 return false;
             }
 
             if (!snapshots.TryGetValue(candidate.ParticipantUserId, out var participant) ||
-                participant == null || !participant.Online || participant.Stopped ||
-                !string.Equals(participant.UserId, candidate.ParticipantUserId, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(participant.SessionId, candidate.ParticipantSessionId, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(participant.ItemId, candidate.SourceItemId, StringComparison.OrdinalIgnoreCase) ||
-                !participant.SupportsRemoteControl)
+                !CanRetainPrimaryTransitionParticipant(participant, candidate.ParticipantUserId,
+                    candidate.ParticipantSessionId, candidate.SourceItemId, candidate.ParticipantRunTimeTicks))
             {
-                // The candidate requires a current, trusted participant
-                // snapshot. A missing/stopped/offline participant, different
-                // Item/session, or lost capability invalidates it immediately.
+                // Retention requires a current bound playback observation.
+                // Cached capabilities permit waiting, never sending while raw=false.
+                runtime.RecordDiagnosticEvent("primary_transition_invalidated", null, null, "changed", null, null, now);
                 runtime.ClearPrimaryItemTransitionCandidate();
                 return false;
             }
 
+            bool stoppedWaiting = runtime.State == RoomState.Waiting &&
+                IsStoppedPlaybackWaitingError(runtime.Error);
             if (!snapshots.TryGetValue(room.PrimaryUserId, out var primary) ||
                 primary == null || !primary.Online || primary.Stopped ||
                 !string.Equals(primary.UserId, candidate.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrEmpty(primary.SessionId) ||
-                string.IsNullOrEmpty(primary.ItemId) ||
-                !primary.SupportsRemoteControl)
+                string.IsNullOrEmpty(primary.ItemId))
             {
-                return false;
+                // Watching must still pass through the two-second stop debounce.
+                // After confirmation, avoid generic Waiting resets/error changes.
+                if (!participant.SupportsRemoteControl) RecordPrimaryTransitionControlWait(runtime, candidate, now);
+                return stoppedWaiting;
             }
 
             if (string.IsNullOrEmpty(candidate.SourceItemId) ||
@@ -1231,9 +1255,22 @@ namespace Emby.Plugins.WatchTogether
             {
                 if (string.Equals(primary.ItemId, candidate.SourceItemId, StringComparison.OrdinalIgnoreCase))
                 {
+                    runtime.RecordDiagnosticEvent("primary_transition_invalidated", null, null, "source_resumed", null, null, now);
                     runtime.ClearPrimaryItemTransitionCandidate();
                 }
                 return false;
+            }
+
+            if (!HasEffectivePlaybackControl(primary))
+            {
+                runtime.RecordDiagnosticEvent("primary_transition_invalidated", null, null, "changed", null, null, now);
+                runtime.ClearPrimaryItemTransitionCandidate();
+                return false;
+            }
+            if (!primary.SupportsRemoteControl || !participant.SupportsRemoteControl)
+            {
+                RecordPrimaryTransitionControlWait(runtime, candidate, now);
+                return stoppedWaiting;
             }
 
             runtime.RecordDiagnosticEvent(
@@ -1254,6 +1291,31 @@ namespace Emby.Plugins.WatchTogether
                 eligibility,
                 primaryItemTransition: false,
                 now);
+        }
+
+        private static void RecordPrimaryTransitionControlWait(RoomRuntime runtime, PrimaryItemTransitionCandidate candidate, DateTimeOffset now)
+        {
+            if (candidate.ControlWaitReported) return;
+            candidate.ControlWaitReported = true;
+            runtime.RecordDiagnosticEvent("primary_transition_waiting", null, null, "pending", null, null, now);
+        }
+
+        private static bool HasEffectivePlaybackControl(SessionSnapshot snapshot)
+        {
+            return snapshot != null && snapshot.Online && !snapshot.Stopped &&
+                snapshot.Capabilities?.CanControlPlayback == true &&
+                snapshot.RunTimeTicks > 0 &&
+                Math.Abs(snapshot.PlaybackRate - 1.0) <= SyncConstants.PlaybackRateTolerance;
+        }
+
+        private static bool CanRetainPrimaryTransitionParticipant(
+            SessionSnapshot snapshot, string userId, string sessionId, string sourceItemId, long runtimeTicks)
+        {
+            return HasEffectivePlaybackControl(snapshot) &&
+                !string.IsNullOrEmpty(sessionId) && !string.IsNullOrEmpty(sourceItemId) &&
+                string.Equals(snapshot.UserId, userId, StringComparison.OrdinalIgnoreCase) &&
+                HasSameIdentity(sessionId, sourceItemId, snapshot) && runtimeTicks > 0 &&
+                Math.Abs(snapshot.RunTimeTicks - runtimeTicks) <= SyncConstants.MaxRuntimeDifferenceTicks;
         }
 
         private bool TryProcessTransientSessionRecovery(
@@ -1642,6 +1704,15 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 snapshots.TryGetValue(participantUserId, out var participant);
+                if (participant != null && !participant.SupportsRemoteControl &&
+                    (!runtime.Previous.TryGetValue(participantUserId, out var boundParticipant) ||
+                     boundParticipant == null || !boundParticipant.SupportsRemoteControl ||
+                     !CanRetainPrimaryTransitionParticipant(participant, participantUserId,
+                         boundParticipant.SessionId, boundParticipant.ItemId, boundParticipant.RunTimeTicks)))
+                {
+                    FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                    return true;
+                }
                 string sourceItemId = participant?.ItemId;
                 if (string.IsNullOrEmpty(sourceItemId) &&
                     runtime.Previous.TryGetValue(participantUserId, out var previousParticipant) &&
@@ -1669,12 +1740,59 @@ namespace Emby.Plugins.WatchTogether
                 return true;
             }
 
+            // A target/ACK arriving at the deadline cannot reopen this operation.
+            if (FailMediaHandoffIfExpired(runtime, room, now)) return true;
+
+            // A raw-control flap cannot consume retries, rebind identities or
+            // renew the handoff deadline. Revalidate fresh snapshots on recovery.
+            snapshots.TryGetValue(handoff.PrimaryUserId, out var heldPrimary);
+            snapshots.TryGetValue(handoff.ParticipantUserId, out var heldParticipant);
+            var heldIdentity = runtime.HandoffControlRecoveryParticipant;
+            if (heldIdentity != null ||
+                heldPrimary != null && !heldPrimary.SupportsRemoteControl ||
+                heldParticipant != null && !heldParticipant.SupportsRemoteControl)
+            {
+                if (FailMediaHandoffIfExpired(runtime, room, now)) return true;
+                if (!HasEffectivePlaybackControl(heldPrimary) || !HasEffectivePlaybackControl(heldParticipant) ||
+                    !string.Equals(heldPrimary.UserId, handoff.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
+                    !HasSameIdentity(handoff.PrimarySessionId, handoff.TargetItemId, heldPrimary) ||
+                    !string.Equals(heldParticipant.UserId, handoff.ParticipantUserId, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(heldParticipant.SessionId, handoff.ParticipantSessionId, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.Equals(heldParticipant.ItemId, handoff.SourceItemId, StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(heldParticipant.ItemId, handoff.TargetItemId, StringComparison.OrdinalIgnoreCase)) ||
+                    (heldIdentity != null &&
+                     string.Equals(heldIdentity.ItemId, heldParticipant.ItemId, StringComparison.OrdinalIgnoreCase) &&
+                     Math.Abs(heldIdentity.RunTimeTicks - heldParticipant.RunTimeTicks) > SyncConstants.MaxRuntimeDifferenceTicks))
+                {
+                    FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                    return true;
+                }
+                if (!heldPrimary.SupportsRemoteControl || !heldParticipant.SupportsRemoteControl)
+                {
+                    runtime.HandoffControlRecoveryParticipant = heldIdentity ?? heldParticipant;
+                    return true;
+                }
+                runtime.HandoffControlRecoveryParticipant = null;
+            }
+
             if (!snapshots.TryGetValue(room.PrimaryUserId, out var currentPrimary) ||
                 currentPrimary == null || !currentPrimary.Online ||
                 !string.Equals(currentPrimary.UserId, handoff.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrEmpty(currentPrimary.ItemId))
             {
+                if (handoff.PrimaryHold != null)
+                {
+                    FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                    return true;
+                }
                 FailMediaHandoffIfExpired(runtime, room, now);
+                return true;
+            }
+
+            if (handoff.PrimaryHold != null &&
+                !string.Equals(currentPrimary.SessionId, handoff.PrimarySessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
                 return true;
             }
 
@@ -1724,11 +1842,20 @@ namespace Emby.Plugins.WatchTogether
             if (!snapshots.TryGetValue(handoff.ParticipantUserId, out var participantSnapshot) ||
                 participantSnapshot == null || !participantSnapshot.Online)
             {
+                MaintainHandoffPrimaryHold(runtime, room, handoff, currentPrimary, now);
                 FailMediaHandoffIfExpired(runtime, room, now);
                 return true;
             }
 
             if (!string.Equals(participantSnapshot.UserId, handoff.ParticipantUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                return true;
+            }
+
+            if (handoff.PrimaryHold != null &&
+                (participantSnapshot.Capabilities?.CanControlPlayback != true ||
+                 !(Math.Abs(participantSnapshot.PlaybackRate - 1.0) <= SyncConstants.PlaybackRateTolerance)))
             {
                 FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
                 return true;
@@ -1774,6 +1901,10 @@ namespace Emby.Plugins.WatchTogether
 
             if (string.Equals(participantSnapshot.ItemId, handoff.TargetItemId, StringComparison.OrdinalIgnoreCase))
             {
+                bool primaryReady = MaintainHandoffPrimaryHold(runtime, room, handoff, currentPrimary, now);
+                if (runtime.Handoff != handoff) return true;
+                bool participantReady = IsHandoffParticipantStarted(handoff, participantSnapshot, now);
+                if (!primaryReady || !participantReady) return true;
                 if (!eligibility.IsEligible)
                 {
                     FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
@@ -1784,11 +1915,15 @@ namespace Emby.Plugins.WatchTogether
                     _logger, room, room.Id, handoff, participantSnapshot, now);
                 runtime.RecordDiagnosticEvent(
                     "handoff_target_confirmed", null, RemoteCommands.PlayItem, "confirmed", null, null, now);
+                bool? pausedIntent = handoff.PrimaryHold?.PrimaryPaused;
                 runtime.ClearMediaHandoff();
-                StartBarrier(runtime, room, snapshots, now, fromMediaHandoff: true);
+                StartBarrier(runtime, room, snapshots, now, primaryPausedOverride: pausedIntent, fromMediaHandoff: true);
                 BarrierTick(runtime, room, snapshots, now);
                 return true;
             }
+
+            MaintainHandoffPrimaryHold(runtime, room, handoff, currentPrimary, now);
+            if (runtime.Handoff != handoff) return true;
 
             if (FailMediaHandoffIfExpired(runtime, room, now))
             {
@@ -1855,6 +1990,114 @@ namespace Emby.Plugins.WatchTogether
             return true;
         }
 
+        private bool MaintainHandoffPrimaryHold(
+            RoomRuntime runtime, Room room, MediaHandoffState handoff, SessionSnapshot primary, DateTimeOffset now)
+        {
+            var hold = handoff.PrimaryHold;
+            if (hold == null) return true;
+            if (!string.Equals(hold.PrimaryMediaSourceId, primary.MediaSourceId, StringComparison.OrdinalIgnoreCase) ||
+                (hold.PrimaryRunTimeTicks > 0 && primary.RunTimeTicks > 0 &&
+                 Math.Abs(hold.PrimaryRunTimeTicks - primary.RunTimeTicks) > SyncConstants.MaxRuntimeDifferenceTicks))
+            {
+                FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                return false;
+            }
+            if (primary.Capabilities?.CanControlPlayback != true ||
+                !primary.SupportsRemoteControl || !primary.Online || primary.Stopped ||
+                !(Math.Abs(primary.PlaybackRate - 1.0) <= SyncConstants.PlaybackRateTolerance))
+            {
+                FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                return false;
+            }
+            if (primary.RunTimeTicks <= 0)
+            {
+                if (hold.Acknowledged || hold.PauseAttempts > 0)
+                {
+                    FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
+                    return false;
+                }
+                hold.PrimaryRunTimeTicks = 0;
+                hold.ObservedAtUtc = now;
+                hold.InitialPositionTicks = primary.PositionTicks;
+                return false;
+            }
+            if (hold.Acknowledged)
+            {
+                if (!primary.IsPaused ||
+                    Math.Abs(primary.PositionTicks - hold.PausedPositionTicks) > SyncConstants.SeekToleranceTicks)
+                {
+                    runtime.RecordDiagnosticEvent("handoff_primary_hold_interrupted", null, null, "changed", null, null, now);
+                    FailMediaHandoff(runtime, room, HandoffHoldRequiresResyncError, now);
+                    return false;
+                }
+                return true;
+            }
+            if (primary.IsPaused)
+            {
+                // A pause observed before our request is user/player intent,
+                // so it must never inherit an automatic playing restore.
+                if (hold.PauseAttempts == 0) hold.PrimaryPaused = true;
+                if (hold.PauseIssuedAtUtc.HasValue && now <= hold.PauseIssuedAtUtc.Value) return false;
+                hold.Acknowledged = true;
+                hold.PausedPositionTicks = primary.PositionTicks;
+                runtime.RecordDiagnosticEvent("handoff_primary_paused", room.PrimaryUserId, RemoteCommands.Pause,
+                    "acknowledged", primary.PositionTicks,
+                    hold.PauseIssuedAtUtc.HasValue ? (double?)(now - hold.PauseIssuedAtUtc.Value).TotalSeconds : null, now);
+                return true;
+            }
+            if (hold.PrimaryRunTimeTicks <= 0)
+            {
+                hold.PrimaryRunTimeTicks = primary.RunTimeTicks;
+                hold.ObservedAtUtc = now;
+                hold.InitialPositionTicks = primary.PositionTicks;
+                return false;
+            }
+            if (hold.PauseAttempts == 0)
+            {
+                if ((now - hold.ObservedAtUtc).TotalSeconds < SyncConstants.MediaHandoffStartupObservationSeconds ||
+                    primary.PositionTicks <= hold.InitialPositionTicks) return false;
+            }
+            else
+            {
+                double timeout = SyncConstants.PendingTimeoutSeconds +
+                    (hold.PauseAttempts > SyncConstants.MaxPendingRetries ? SyncConstants.PendingRetryGraceSeconds : 0);
+                if ((now - hold.PauseIssuedAtUtc.Value).TotalSeconds < timeout) return false;
+                if (hold.PauseAttempts >= SyncConstants.MaxPendingRetries + 1)
+                {
+                    FailMediaHandoff(runtime, room, MediaHandoffTimedOutError, now);
+                    return false;
+                }
+            }
+            hold.PauseAttempts++;
+            hold.PauseIssuedAtUtc = now;
+            bool accepted = TryIssueCommand(room.Id, room.AdminUserId, primary.UserId, primary, RemoteCommands.Pause, null, now, out _);
+            runtime.RecordDiagnosticEvent("handoff_primary_pause_requested", room.PrimaryUserId, RemoteCommands.Pause,
+                accepted ? "pending" : "failed", null, null, now);
+            if (!accepted) FailMediaHandoff(runtime, room, MediaHandoffPlayItemFailedError, now);
+            return false;
+        }
+
+        private static bool IsHandoffParticipantStarted(MediaHandoffState handoff, SessionSnapshot participant, DateTimeOffset now)
+        {
+            var hold = handoff.PrimaryHold;
+            if (hold == null) return true;
+            if (participant.RunTimeTicks <= 0) return false;
+            if (!string.Equals(hold.ParticipantSessionId, participant.SessionId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(hold.ParticipantMediaSourceId, participant.MediaSourceId, StringComparison.OrdinalIgnoreCase) ||
+                Math.Abs(hold.ParticipantRunTimeTicks - participant.RunTimeTicks) > SyncConstants.MaxRuntimeDifferenceTicks)
+            {
+                hold.ParticipantSessionId = participant.SessionId;
+                hold.ParticipantMediaSourceId = participant.MediaSourceId;
+                hold.ParticipantRunTimeTicks = participant.RunTimeTicks;
+                hold.ParticipantObservedAtUtc = now;
+                hold.ParticipantInitialPositionTicks = participant.PositionTicks;
+                return false;
+            }
+            return hold.ParticipantObservedAtUtc.HasValue &&
+                (now - hold.ParticipantObservedAtUtc.Value).TotalSeconds >= SyncConstants.MediaHandoffStartupObservationSeconds &&
+                (participant.IsPaused || participant.PositionTicks > hold.ParticipantInitialPositionTicks);
+        }
+
         private bool FailMediaHandoffIfExpired(
             RoomRuntime runtime,
             Room room,
@@ -1897,6 +2140,18 @@ namespace Emby.Plugins.WatchTogether
                     userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase)),
                 participant?.SessionId);
             handoff.IsParticipantResync = isParticipantResync;
+            if (!isParticipantResync &&
+                !string.Equals(participant?.ItemId, primary.ItemId, StringComparison.OrdinalIgnoreCase))
+            {
+                handoff.PrimaryHold = new HandoffPrimaryHoldState
+                {
+                    PrimaryPaused = primary.IsPaused,
+                    ObservedAtUtc = now,
+                    InitialPositionTicks = primary.PositionTicks,
+                    PrimaryMediaSourceId = primary.MediaSourceId,
+                    PrimaryRunTimeTicks = primary.RunTimeTicks,
+                };
+            }
             runtime.State = RoomState.Handoff;
             runtime.Error = null;
             runtime.Barrier = null;
@@ -1922,6 +2177,7 @@ namespace Emby.Plugins.WatchTogether
             string error,
             DateTimeOffset now)
         {
+            bool heldPrimary = runtime?.Handoff?.PrimaryHold != null;
             HandoffTrace.Failed(_logger, room?.Id, runtime?.Handoff, error, now);
             runtime.RecordDiagnosticEvent(
                 "handoff_failed", null, RemoteCommands.PlayItem, "failed", null, null, now);
@@ -1932,6 +2188,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.SyncItemId = null;
             runtime.BarrierRetryAtUtc = null;
             runtime.Error = error;
+            if (heldPrimary) runtime.HandoffRequiresResync = true;
         }
 
         private static void FailParticipantResync(
@@ -1984,14 +2241,13 @@ namespace Emby.Plugins.WatchTogether
                 else if (runtime.MissingSessionSinceUtc.HasValue &&
                     (!runtime.Previous.TryGetValue(userId, out var previous) ||
                      previous == null ||
-                     !HasSameIdentity(previous.SessionId, previous.ItemId, current) ||
-                     !current.SupportsRemoteControl))
+                     !HasSameIdentity(previous.SessionId, previous.ItemId, current)))
                 {
                     // Once a stop observation has started, an online snapshot
                     // is a recovery only when it proves continuity with the
-                    // previously bound session and remains remotely
-                    // controllable. A replacement session (even one that is
-                    // controllable) must not clear the debounce window.
+                    // previously bound session. A raw-control failure alone
+                    // is not a second stopped user. A replacement session, even
+                    // when controllable, must not clear the debounce window.
                     stoppedUsers.Add(userId);
                     stopObserved = true;
                 }
@@ -2039,16 +2295,14 @@ namespace Emby.Plugins.WatchTogether
                 userId => !string.Equals(userId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase));
             if (string.IsNullOrEmpty(participantUserId) ||
                 !snapshots.TryGetValue(participantUserId, out var currentParticipant) ||
-                currentParticipant == null || !currentParticipant.Online || currentParticipant.Stopped ||
-                !currentParticipant.SupportsRemoteControl ||
                 !runtime.Previous.TryGetValue(participantUserId, out var previousParticipant) ||
                 previousParticipant == null || !previousParticipant.Online ||
                 string.IsNullOrEmpty(previousParticipant.SessionId) ||
                 string.IsNullOrEmpty(previousParticipant.ItemId) ||
                 !previousParticipant.SupportsRemoteControl ||
-                !string.Equals(currentParticipant.UserId, participantUserId, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(currentParticipant.SessionId, previousParticipant.SessionId, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(currentParticipant.ItemId, previousParticipant.ItemId, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(previousParticipant.ItemId, previousPrimary.ItemId, StringComparison.OrdinalIgnoreCase) ||
+                !CanRetainPrimaryTransitionParticipant(currentParticipant, participantUserId,
+                    previousParticipant.SessionId, previousParticipant.ItemId, previousParticipant.RunTimeTicks))
             {
                 return;
             }
@@ -2058,7 +2312,11 @@ namespace Emby.Plugins.WatchTogether
                 room.PrimaryUserId,
                 previousPrimary.ItemId,
                 participantUserId,
-                previousParticipant.SessionId);
+                previousParticipant.SessionId,
+                previousParticipant.RunTimeTicks);
+            runtime.RecordDiagnosticEvent("primary_transition_candidate", null, null, "entered", null, null, now);
+            if (!currentParticipant.SupportsRemoteControl)
+                RecordPrimaryTransitionControlWait(runtime, runtime.PrimaryItemTransitionCandidate, now);
         }
 
         private void PauseOtherAfterPlaybackStopped(
@@ -2071,7 +2329,7 @@ namespace Emby.Plugins.WatchTogether
             foreach (var pair in snapshots)
             {
                 var snapshot = pair.Value;
-                if (snapshot == null || !snapshot.Online || snapshot.Stopped ||
+                if (snapshot == null || !snapshot.Online || snapshot.Stopped || !snapshot.SupportsRemoteControl ||
                     (stoppedUsers != null && stoppedUsers.Contains(pair.Key)))
                 {
                     continue;
@@ -2288,6 +2546,10 @@ namespace Emby.Plugins.WatchTogether
             double difference = Math.Abs(current.PositionTicks - expectedPosition);
             return difference >= seekDetectionThresholdTicks;
         }
+
+        private static bool IsStoppedPlaybackWaitingError(string error) =>
+            string.Equals(error, StoppedPlaybackError, StringComparison.Ordinal) ||
+            string.Equals(error, StoppedPositionConfirmationError, StringComparison.Ordinal);
 
         private static bool HasLargePositionGap(IReadOnlyDictionary<string, SessionSnapshot> snapshots)
         {
@@ -2996,6 +3258,12 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
+            if (!snapshot.SupportsRemoteControl)
+            {
+                error = "remote_control_unsupported";
+                return false;
+            }
+
             var issuer = _issuer as IPlayItemIssuer;
             if (issuer == null)
             {
@@ -3054,6 +3322,11 @@ namespace Emby.Plugins.WatchTogether
             out string error)
         {
             ThrowIfStopping();
+            if (snapshot == null || !snapshot.Online || !snapshot.SupportsRemoteControl)
+            {
+                error = "remote_control_unsupported";
+                return false;
+            }
             if (_issuer == null)
             {
                 error = "no command issuer configured";

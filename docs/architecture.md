@@ -39,7 +39,7 @@ Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用
 
 ## 嵌入式 UI
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV18`、`WatchTogetherInviteV18`、`WatchTogetherSettingsV18`，共享 `WatchTogetherNativeV18.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV19`、`WatchTogetherInviteV19`、`WatchTogetherSettingsV19`，共享 `WatchTogetherNativeV19.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
 
@@ -61,7 +61,13 @@ Barrier 在当前快照已满足条件且没有待确认命令时，同轮继续
 
 主用户在 `Watching` 中从 Item A 切换到 Item B 时，`SyncEngine` 先记录主用户 Item 变化并进入独立的 `Handoff` runtime。该 runtime 绑定目标 Item、主用户 Session identity、参与者 Session identity 和 generation。参与者尚未位于 B 时，通过 `IPlayItemIssuer` 发起一次有界的 `PlayItem(B)`，随后只接受当前参与者用户、当前 Session 和 `SessionSnapshot.ItemId == B` 的确认；目标变化会使旧 generation 失效。参与者已经位于 B 时跳过 PlayItem，直接进入 `Barrier`，由 Barrier 重新暂停、定位和恢复播放意图。PlayItem 请求本身的成功不等于播放器完成打开，确认超时或有限重试失败会清理 Handoff 并回到安全的 `Waiting`。
 
+自动 Handoff 需要等待参与者加载时，主用户在同一目标/会话/媒体、完整有效能力与时长下至少观察 1 秒且位置推进后请求暂停，避免只看 Item 就立刻暂停加载。参与者先正常收到 PlayItem，并独立等待至少 1 秒有效目标观察；playing 必须有位置推进，已暂停不另发 Pause。主用户暂停需后续快照 ACK，最多两次，期限仍为 Handoff 原 10 秒；完成后向 Barrier 传递原暂停意图，已有或请求前自行暂停保持暂停。主用户主动继续/明显 Seek、身份/媒体/权限变化或失败不恢复旧意图，失败标记阻止所有自动命令，只有获接受的显式 resync 清除。该标记跨通用 reset 保留但不持久化；见 [ADR-002](adr/002-media-handoff.md)。服务器观察不能证明首帧已显示。
+
 `PlaybackStopped` 只唤醒轮询。主用户停止 A 后，现有 2 秒停止 debounce 同时作为有限的媒体切换观察窗口；窗口内选中 B 时识别为 Handoff，不执行普通停止副作用。窗口结束仍无新 Item 时继续原有 Stop 行为，但从首次缺失开始保留最多 10 秒的仅内存、身份绑定候选，停止确认后若主用户以可信会话打开 B 且参与者仍以原可信会话停留在 A，仍可恢复到同一 Handoff；候选过期、参与者换 Item/会话、能力不可信或房间成员改变时清除。参与者自行切换 Item 不触发主用户跟随；只有显式 Participant Resync 请求才会让非 Primary 参与者通过同一 Handoff/Barrier 流程回到主用户当前 Item。运行时快照、Pending 命令、Handoff、恢复窗口和 Barrier 阶段不写入 `rooms.json`；房间文件采用候选文件替换并保留备份，损坏时报告错误而不静默覆盖。
+
+迟到换片候选允许原参与者仅原始远控标志短暂为 false，前提是仍在线、未停止、原 User/Session/Item 和时长连续、完整有效能力与正常倍速仍成立。此时只等待，原 10 秒期限不延期；远控恢复后按新快照重新核验，再进入 Handoff。已开始的 Handoff 同样冻结原期限并复核绑定身份，不消耗不可控期间的发送重试。播放命令和停止副作用 Pause 的入口均拒绝 raw=false 目标，缓存能力不能授权发送。候选创建、首次远控等待、过期和失效使用有界脱敏诊断事件记录。
+
+确认停止后，双方重新打开同一视频但位置差超过 5 秒时，保持安全 Waiting，给出 `stop_resume_confirmation_required` 原因和房间内重新同步指引；当前快照不再完整或失去资格时撤回该指引。成员或管理员显式重新同步复用主用户锚点 Barrier，保留主用户当前暂停/播放意图；参与者请求在视频不同的情况下仍可能通过既有 Handoff 切换视频，按钮旁明确说明。位置、活动时间和 PlaybackStart 接收时间都不足以证明持续用户意图，因此本次没有增加自动 Seek 恢复。
 
 Phase E 在现有 `Watching` 逻辑旁增加独立的 `Recovering` runtime。仅非 Primary 参与者从选中快照中短暂消失时最多等待 10 秒；缺失会话按原 User、原 SessionId 和原 ItemId 恢复时重新执行一次现有 Barrier。Primary 缺失、停止、Session 或 Item 变化会先退出 Recovery，再由既有停止 debounce 或晚到换集 Handoff 处理；参与者替换 SessionId 或其他不受控的 Item 变化会回到 `Waiting`，不自动换绑设备。双方 actively playing 且无 Pending/Handoff/Barrier/Recovering 时记录 `Participant.PositionTicks - Primary.PositionTicks` 的 signed drift；绝对 drift 至少 3 秒并持续 5 秒才触发一次 Barrier，自动纠偏之间冷却 120 秒，不执行连续追帧式 Seek。
 
