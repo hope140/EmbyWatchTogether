@@ -48,4 +48,6 @@ V12 新增 `page-actions.spec.js`，覆盖创建邀请码、接受邀请、管�
 
 S124 V14 候选将默认 fixture 对齐当前 Server Web，不提供旧的 `Dashboard` 全局；新增初始化、分页和离页回归，以及保留旧宿主全局情况下的下拉选项稳定性回归。导航解析 anchor pathname/query，复现宿主对相对链接的处理，避免把 `#!/` 链接直接赋给地址栏掩盖 emby-linkbutton 路由错误。刷新或编辑名称保留未变化的 option，修改参与者仍更新主用户选项与有效选择。当前总计 84 个浏览器用例；这些检查不代表已复现或验收真实客户端的临时卡住问题。
 
-当前 V17 的 `select-controls.spec.js` 包含五项检查：四个控件沿用 Madby 的宿主默认单选模式，以及 `select_host=legacy|modern` 下 390/1280px 的箭头中线定位。fixture 仅按已核对的两种宿主 DOM/CSS 建立几何夹具；长标签换行后仍要求箭头偏差小于 1px，不能用此证明真实菜单打开或客户端运行验收。当前合计 90 个浏览器用例。
+当前 V18 的 `select-controls.spec.js` 包含五项检查：四个控件沿用 Madby 的宿主默认单选模式，以及 `select_host=legacy|modern` 下 390/1280px 的箭头中线定位。fixture 仅按已核对的两种宿主 DOM/CSS 建立几何夹具；长标签换行后仍要求箭头偏差小于 1px，不能用此证明真实菜单打开或客户端运行验收。
+
+`create-feedback.spec.js` 覆盖当前创建页的可见成功结果、POST 成功后列表刷新失败、真正的 POST 失败、离页后的旧请求隔离及反馈清理。当前合计 95 个浏览器用例。
