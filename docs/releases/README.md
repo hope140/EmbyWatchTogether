@@ -8,9 +8,11 @@
 
 ## 当前测试版
 
-- [v1.7.2.4 测试版说明](v1.7.2.4.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4) · [发布核验记录](../maintenance/v1.7.2.4-beta-publication.md)：待生效更新版本保护与文档整理；真实双端播放验收尚待执行。
+- [v1.7.2.5 测试版说明](v1.7.2.5.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.5) · [发布核验记录](../maintenance/v1.7.2.5-beta-publication.md)：停止同步、提示发送和更新安装的边界保护，以及诊断提示与打包修正；真实服务器升级和双端播放验收尚待执行。
 
 ## 历史发布
+
+- [v1.7.2.4 测试版说明](v1.7.2.4.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4) · [发布核验记录](../maintenance/v1.7.2.4-beta-publication.md)：待生效更新版本保护与文档整理。
 
 - [v1.7.2.3 测试版说明](v1.7.2.3.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)：同步提示与快照保护改进。
 

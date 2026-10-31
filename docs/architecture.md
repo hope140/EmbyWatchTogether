@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前公开测试版为 [v1.7.2.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4)。测试版的真实双端播放验收尚待执行；各版本的事实和边界见[发布日志索引](releases/README.md)；历史验收与发布证据见 [v1.6.1.0 发布记录](maintenance/v1.6.1.0-publication.md)和 [v1.7.0.1 测试版发布记录](maintenance/v1.7.0.1-beta-publication.md)。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前公开测试版为 [v1.7.2.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.5)。测试版的真实双端播放验收尚待执行；各版本的事实和边界见[发布日志索引](releases/README.md)；历史验收与发布证据见 [v1.6.1.0 发布记录](maintenance/v1.6.1.0-publication.md)和 [v1.7.0.1 测试版发布记录](maintenance/v1.7.0.1-beta-publication.md)。
 
 ## 运行时边界
 
