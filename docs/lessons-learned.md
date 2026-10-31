@@ -232,6 +232,7 @@
 - 箭头差异：当前 Web 在独立 `.emby-select-wrapper` 内用 top/bottom 与 flex 居中；旧 Theater 把 label、select、带隐藏占位的 `.selectArrowContainer` 放在同一父节点，依赖顶部偏移和 margin-top。客户端 GenericEdit 适配层已有基于控件 grid 行的修正，但其作用域不覆盖本插件页面。
 - 修正：V16 四个 select 与 Madby 普通单选一样使用 `is="emby-select"`，菜单由宿主默认规则选择。插件自己的 `.wt-selectField` 仅将旧版直属 label、select、说明与原有箭头放到对应 grid 行，隐藏旧箭头占位并清除其 margin-top；新版 wrapper 内的箭头继续由宿主管理，不绘制第二个箭头，不改客户端安装文件。V15 曾错误地强制 custom，现已按用户最终参考撤回。
 - 验证：菜单模式与旧版 390px 长标签几何回归修正前失败，后者偏差约 64.88px；修正后旧/新两种 DOM、390/1280px 与四个控件的中线偏差小于 1px。完整浏览器 89/89、.NET 545/545，构建打包通过。fixture 只模拟两种实际结构及定位规则，不模拟真实菜单运行；真实 Web 和客户端证据必须单独记录。
+- 浏览器测试切页后须等待目标面板及其预期控件可见，不能把旧房间容器残留的 `aria-busy=false` 当作目标路由已就绪。管理员权限重新读取期间，Settings 会暂时回退到 rooms；Windows CI 曾在这个窗口读到零个 select。挂起 Settings 的 Users 响应可稳定复现，改为目标面板和控件数量等待后通过，原箭头中线及右边距断言保留。
 - 真实 Web 对照：神医与 Madby 的表单由 `genericui / GenericEdit` 生成。神医“搜索范围”为 multiple select，展开的是带复选框的虚拟滚动 actionSheet；Madby“元数据语言 / 图片语言 / 国家地区”为普通单选，未指定 custom，沿用系统单选菜单。不能用前者的多选展开形态定义全部原生单选的默认外观。V15 一起看显式 custom 的单选使用同一宿主 actionSheet 的单选形态；其闭合态实测高度约 34.615px、字号 14.424px、内边距与 Madby 单选相同，Web 箭头偏差约 0.0052px。这些测量只证明相应几何与组件事实，最终外观反馈见下条。
 - 最终反馈：用户在 V16 部署后确认“可以了，进行下一步”。本轮最终普通单选外观与箭头方案据此记为用户确认；该反馈不扩大为原始客户端临时卡住已复现、真实双端播放已验收或公开发布授权。后续本地 1.7.0.1 包和已部署的 1.7.0.0/V16 候选保持身份区分。
 
@@ -299,4 +300,4 @@
 
 - 现象：只拒绝仓库根目录及其祖先仍不够；`-OutputDirectory src` 会让待清理的插件输出目录指向 `src/EmbyWatchTogether`。旧实现的 `-ValidatePathsOnly` 实际接受该路径，后续递归删除会危及源码。
 - 规则：构建前及清理前拒绝输出与源码、测试、脚本、文档、协作配置目录或 `.publish` 暂存目录重叠；检查输出、归档、暂存路径及其祖先，遇到符号链接或 reparse point 直接拒绝。默认 `dist` 与独立仓库外物理输出目录保持可用；路径验证不创建、删除或改写文件。
-- 验证：`tests/build-path-guard.tests.ps1` 覆盖受保护目录及子目录、`..` 别名、暂存冲突、目录链接和安全输出；Linux 下修复后全部通过，正常 Release 构建、.NET 测试和单 DLL/ZIP 打包已在本地验证。Windows junction 分支尚未运行，仍须由 Windows CI 验证；本地验证不代表发布或部署。
+- 验证：`tests/build-path-guard.tests.ps1` 覆盖受保护目录及子目录、`..` 别名、暂存冲突、目录链接和安全输出；Linux 下修复后全部通过，正常 Release 构建、.NET 测试和单 DLL/ZIP 打包已在本地验证。[Windows CI 的 Validate job](https://github.com/hope140/EmbyWatchTogether/actions/runs/41171129653/job/124449125528)通过 25 项受保护路径、4 项别名（含 junction）和 5 项安全输出检查；该 run 的独立浏览器 job 失败，不能据此将整次 CI 标为通过。构建验证不代表发布或部署。

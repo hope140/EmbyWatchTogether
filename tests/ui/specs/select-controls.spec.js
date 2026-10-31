@@ -17,11 +17,15 @@ for (const host of ['legacy', 'modern']) {
       await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
       for (const route of ['Invite', 'Settings']) {
         await page.locator(`.tabs-viewmenubar a[href*="WatchTogether${route}V17"]`).click();
-        await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+        // Rooms can retain aria-busy=false while the target route reloads permissions.
+        const panel = page.locator(route === 'Invite' ? '#wtAdminSection' : '#wtSettingsSection');
+        await expect(panel).toBeVisible();
+        const visibleSelects = panel.locator('.selectContainer select:visible');
+        await expect(visibleSelects).toHaveCount(route === 'Invite' ? 3 : 1);
         await page.locator('.selectLabelText').evaluateAll(nodes => nodes.forEach(node => {
           node.textContent = '用于验证标签换行后箭头仍然与下拉框垂直居中的较长说明 '.repeat(3);
         }));
-        const positions = await page.locator('.selectContainer select:visible').evaluateAll(selects => selects.map(select => {
+        const positions = await visibleSelects.evaluateAll(selects => selects.map(select => {
           const arrow = select.parentElement.querySelector('.selectArrow');
           const box = select.getBoundingClientRect();
           const icon = arrow.getBoundingClientRect();
