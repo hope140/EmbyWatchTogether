@@ -8,13 +8,11 @@
 
 ## 当前测试版
 
-- [v1.7.2.6 测试版说明](v1.7.2.6.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.6) · [发布核验记录](../maintenance/v1.7.2.6-beta-publication.md)：创建表单显示明确成功与失败结果，列表刷新失败保留创建成功事实。
-
-## 待发布测试版
-
-- [v1.7.2.7 候选说明](v1.7.2.7.md)：主控换集等待、短暂远控异常后的跟随和停止后大进度差的确认恢复。发布和下载状态以实际 Release 为准。
+- [v1.7.2.7 测试版说明](v1.7.2.7.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.7) · [发布核验记录](../maintenance/v1.7.2.7-beta-publication.md)：主控换集暂停等待、短暂远控异常后的跟随和停止后大进度差的确认恢复。
 
 ## 历史发布
+
+- [v1.7.2.6 测试版说明](v1.7.2.6.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.6) · [发布核验记录](../maintenance/v1.7.2.6-beta-publication.md)：创建表单显示明确成功与失败结果，列表刷新失败保留创建成功事实。
 
 - [v1.7.2.5 测试版说明](v1.7.2.5.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.5) · [发布核验记录](../maintenance/v1.7.2.5-beta-publication.md)：停止同步、提示发送和更新安装的边界保护，以及诊断提示与打包修正；真实服务器升级和双端播放验收尚待执行。
 
