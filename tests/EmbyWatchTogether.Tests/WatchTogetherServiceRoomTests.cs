@@ -891,6 +891,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             runtime.Error = "播放已停止，等待双方重新打开同一视频";
             result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
             Assert.Equal("playback_stopped", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
+            runtime.Error = "停止后播放位置相差较大，请使用重新同步确认恢复";
+            result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            Assert.Equal("stop_resume_confirmation_required", GetString(GetRoomResponse(result, room.Id), "StatusReason"));
             manager.SetParticipantJoined(room.Id, user4, false);
             runtime.Error = "command failed";
             result = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));

@@ -16,6 +16,9 @@ namespace Emby.Plugins.WatchTogether
 
         public string ParticipantSessionId { get; set; }
 
+        public long ParticipantRunTimeTicks { get; set; }
+        public bool ControlWaitReported { get; set; }
+
     }
 
     /// <summary>
@@ -127,6 +130,11 @@ namespace Emby.Plugins.WatchTogether
         public string SyncItemId { get; set; }
 
         public MediaHandoffState Handoff { get; private set; }
+
+        internal SessionSnapshot HandoffControlRecoveryParticipant { get; set; }
+
+        // Survives generic recovery/reset. Only an explicit room resync clears it.
+        internal bool HandoffRequiresResync { get; set; }
 
         public BarrierState Barrier { get; set; }
         internal object NotificationOperation { get; set; } = new object();
@@ -314,6 +322,7 @@ namespace Emby.Plugins.WatchTogether
             SyncItemId = null;
             BarrierRetryAtUtc = null;
             Handoff = null;
+            HandoffControlRecoveryParticipant = null;
             ClearPrimaryItemTransitionCandidate();
             ParticipantResyncRequestedUserId = null;
             ClearTransientSessionRecovery();
@@ -381,6 +390,7 @@ namespace Emby.Plugins.WatchTogether
             }
             BarrierRetryAtUtc = null;
             Handoff = null;
+            HandoffControlRecoveryParticipant = null;
             if (!preservePrimaryItemTransitionCandidate)
             {
                 ClearPrimaryItemTransitionCandidate();
@@ -401,6 +411,7 @@ namespace Emby.Plugins.WatchTogether
             string participantSessionId)
         {
             var previous = Handoff;
+            HandoffControlRecoveryParticipant = null;
             long generation = (previous?.Generation ?? 0) + 1;
             Handoff = new MediaHandoffState
             {
@@ -431,6 +442,7 @@ namespace Emby.Plugins.WatchTogether
         internal void ClearMediaHandoff()
         {
             Handoff = null;
+            HandoffControlRecoveryParticipant = null;
         }
 
         internal void BeginPrimaryItemTransitionCandidate(
@@ -438,7 +450,8 @@ namespace Emby.Plugins.WatchTogether
             string primaryUserId,
             string sourceItemId,
             string participantUserId,
-            string participantSessionId)
+            string participantSessionId,
+            long participantRunTimeTicks)
         {
             PrimaryItemTransitionCandidate = new PrimaryItemTransitionCandidate
             {
@@ -447,6 +460,7 @@ namespace Emby.Plugins.WatchTogether
                 SourceItemId = sourceItemId,
                 ParticipantUserId = participantUserId,
                 ParticipantSessionId = participantSessionId,
+                ParticipantRunTimeTicks = participantRunTimeTicks,
             };
         }
 

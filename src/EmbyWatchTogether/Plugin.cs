@@ -171,7 +171,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Change the page key together with the controller key so
                     // Emby Web refreshes the embedded HTML cache as well.
-                    Name = "WatchTogetherRoomsV18",
+                    Name = "WatchTogetherRoomsV19",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
@@ -181,13 +181,13 @@ namespace Emby.Plugins.WatchTogether
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherInviteV18",
+                    Name = "WatchTogetherInviteV19",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherSettingsV18",
+                    Name = "WatchTogetherSettingsV19",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
@@ -198,7 +198,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Use a new controller name so Emby Web does not reuse a
                     // cached copy of the previous embedded module.
-                    Name = "WatchTogetherNativeV18.js",
+                    Name = "WatchTogetherNativeV19.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };

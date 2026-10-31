@@ -125,6 +125,15 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("snapshot_ignored", "older_activity", "snapshot_ignored", "older_activity")]
         [InlineData(" SNAPSHOT_IGNORED ", " OLDER_ACTIVITY ", "snapshot_ignored", "older_activity")]
         [InlineData("snapshot_ignored private-token", "older_activity private-token", "observed", "observed")]
+        [InlineData("primary_transition_candidate", "entered", "primary_transition_candidate", "entered")]
+        [InlineData("primary_transition_waiting", "pending", "primary_transition_waiting", "pending")]
+        [InlineData("primary_transition_expired", "expired", "primary_transition_expired", "expired")]
+        [InlineData("primary_transition_invalidated", "source_resumed", "primary_transition_invalidated", "source_resumed")]
+        [InlineData("stop_resume_confirmation_required", "pending", "stop_resume_confirmation_required", "pending")]
+        [InlineData("handoff_primary_pause_requested", "pending", "handoff_primary_pause_requested", "pending")]
+        [InlineData("handoff_primary_paused", "acknowledged", "handoff_primary_paused", "success")]
+        [InlineData("handoff_primary_hold_interrupted", "changed", "handoff_primary_hold_interrupted", "changed")]
+        [InlineData("primary_transition_expired private-token", "expired private-token", "observed", "observed")]
         public void ExportPreservesSafeIgnoredSnapshotCodesOnly(
             string type, string result, string expectedType, string expectedResult)
         {

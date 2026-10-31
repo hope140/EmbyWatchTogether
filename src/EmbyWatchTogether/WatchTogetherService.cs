@@ -977,6 +977,7 @@ namespace Emby.Plugins.WatchTogether
             if (runtime.State == RoomState.Handoff) return "media_handoff";
             if (runtime.State == RoomState.Recovering) return "transient_recovery";
             var error = runtime.Error;
+            if (string.Equals(error, "停止后播放位置相差较大，请使用重新同步确认恢复", StringComparison.Ordinal)) return "stop_resume_confirmation_required";
             if (string.Equals(error, "两位参与者打开了不同视频，暂不发送同步指令", StringComparison.Ordinal)) return "different_video";
             if (string.Equals(error, "播放已停止，等待双方重新打开同一视频", StringComparison.Ordinal)) return "playback_stopped";
             if (error != null && error.StartsWith("media handoff ", StringComparison.Ordinal)) return "handoff_failed";

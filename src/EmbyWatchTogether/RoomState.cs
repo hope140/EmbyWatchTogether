@@ -121,8 +121,28 @@ namespace Emby.Plugins.WatchTogether
 
         public bool IsParticipantResync { get; set; }
 
+        internal HandoffPrimaryHoldState PrimaryHold { get; set; }
+
         public ISet<string> SupersededTargetItemIds { get; } =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal sealed class HandoffPrimaryHoldState
+    {
+        public bool PrimaryPaused { get; set; }
+        public DateTimeOffset ObservedAtUtc { get; set; }
+        public long InitialPositionTicks { get; set; }
+        public string PrimaryMediaSourceId { get; set; }
+        public long PrimaryRunTimeTicks { get; set; }
+        public DateTimeOffset? PauseIssuedAtUtc { get; set; }
+        public int PauseAttempts { get; set; }
+        public bool Acknowledged { get; set; }
+        public long PausedPositionTicks { get; set; }
+        public string ParticipantSessionId { get; set; }
+        public DateTimeOffset? ParticipantObservedAtUtc { get; set; }
+        public long ParticipantInitialPositionTicks { get; set; }
+        public string ParticipantMediaSourceId { get; set; }
+        public long ParticipantRunTimeTicks { get; set; }
     }
 
     /// <summary>
