@@ -4,8 +4,8 @@ using MediaBrowser.Controller.Session;
 namespace Emby.Plugins.WatchTogether
 {
     /// <summary>
-    /// Immutable view of one Emby session used by room coordination. Field set
-    /// mirrors the Python reference snapshot (watch_together_coordinator.py).
+    /// Frozen scalar observations of one Emby session used by room coordination.
+    /// A received Stop can revoke a snapshot's playback without changing its scalars.
     /// </summary>
     public sealed class SessionSnapshot
     {
@@ -55,7 +55,11 @@ namespace Emby.Plugins.WatchTogether
 
         public double PlaybackRate { get; }
 
-        public bool Stopped { get; }
+        private bool _stopped;
+        // Scalar observations remain frozen. A received Stop may revoke their use.
+        internal PlaybackTermination Termination { get; set; }
+        internal bool PlaybackTerminated => Termination?.IsStopped ?? false;
+        public bool Stopped { get => _stopped || PlaybackTerminated; private set => _stopped = value; }
 
         public bool SupportsRemoteControl { get; }
 
@@ -68,6 +72,9 @@ namespace Emby.Plugins.WatchTogether
         public double PositionSeconds => PositionTicks / (double)TicksPerSecond;
 
         public static SessionSnapshot FromSessionInfo(SessionInfo session, string userId = null)
+            => FromSessionInfo(session, userId, null);
+
+        internal static SessionSnapshot FromSessionInfo(SessionInfo session, string userId, StoppedPlaybackFilter filter)
         {
             if (session == null)
             {
@@ -75,7 +82,9 @@ namespace Emby.Plugins.WatchTogether
             }
 
             var playState = session.PlayState;
+            var termination = filter?.Bind(session, playState);
             var item = session.NowPlayingItem;
+            if (!ReferenceEquals(playState, session.PlayState)) return null;
 
             string itemId = string.Empty;
             long? runTimeTicks = null;
@@ -95,8 +104,9 @@ namespace Emby.Plugins.WatchTogether
             string mediaSourceId = playState?.MediaSourceId ?? string.Empty;
 
             var capabilities = CapabilityProbe.Probe(session);
+            if (!ReferenceEquals(playState, session.PlayState)) return null;
 
-            return new SessionSnapshot(
+            var snapshot = new SessionSnapshot(
                 session.Id,
                 userId ?? session.UserId,
                 itemId,
@@ -109,6 +119,8 @@ namespace Emby.Plugins.WatchTogether
                 session.SupportsRemoteControl,
                 capabilities,
                 session.LastActivityDate);
+            snapshot.Termination = termination;
+            return snapshot;
         }
     }
 }
