@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Dto;
@@ -77,6 +79,15 @@ namespace Emby.Plugins.WatchTogether.Tests
                 new PlaybackStopEventArgs { Session=s, PlaySession=p, PlaySessionId=p.Id });
             internal void Start(SessionInfo s, PlaySessionInfo p) => Manager.Raise(m=>m.PlaybackStart+=null,
                 new PlaybackProgressEventArgs { Session=s, PlaySession=p, PlaySessionId=p.Id });
+            internal void Progress(SessionInfo s, PlaySessionInfo p) => Manager.Raise(m=>m.PlaybackProgress+=null,
+                new PlaybackProgressEventArgs { Session=s, PlaySession=p, PlaySessionId=p.Id });
+            internal void ServerStop(SessionInfo s, PlaySessionInfo p)
+            {
+                // Emby 4.10 replaces the state before queuing PlaybackStopped.
+                p.NowPlayingItem = null;
+                p.PlayState = new PlayerStateInfo();
+                Stop(s,p);
+            }
             public void Dispose() { Engine.Dispose(); Bridge.Dispose(); }
         }
 
@@ -91,6 +102,125 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.True(f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1").Stopped);
             f.Polls(0,8);
             Assert.DoesNotContain(f.Issuer.Calls,c=>c.command=="Seek" || c.command=="Unpause");
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void ServerStateReplacement_RevokesCapturedSnapshotsWithoutRevivingThemOnStart(bool explicitStart)
+        {
+            using var f=new Fixture();var p=f.A.GetPlaySessionInfo("p1");
+            if(explicitStart) f.Start(f.A,p); else f.Progress(f.A,p);
+            var captured=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            f.ServerStop(f.A,p);f.A.RemovePlaySession(p);
+            Assert.True(captured.Stopped);
+            var reopened=f.Play(f.A,"p1",600);
+            f.Progress(f.A,reopened); // Missing Start must not clear a stopped ID.
+            var late=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            Assert.True(late.Stopped);
+            f.Start(f.A,reopened);
+            Assert.True(captured.Stopped);Assert.True(late.Stopped);
+            Assert.False(f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1").Stopped);
+        }
+
+        [Fact]
+        public void ServerStateReplacement_DelayedOldStopRevokesOnlyItsOwnSnapshots()
+        {
+            using var f=new Fixture();var old=f.A.GetPlaySessionInfo("p1");f.Start(f.A,old);
+            var captured=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            f.A.RemovePlaySession(old);
+            var next=f.Play(f.A,"p1",500);f.Start(f.A,next);
+            var current=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            f.Progress(f.A,old); // Queued old callback must not replace the new owner.
+            f.ServerStop(f.A,old);
+            Assert.True(captured.Stopped);Assert.False(current.Stopped);
+            Assert.False(f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1").Stopped);
+        }
+
+        [Fact]
+        public void ServerStateReplacement_RevokesEveryObservedStateOfThePlayback()
+        {
+            using var f=new Fixture();var p=f.A.GetPlaySessionInfo("p1");f.Progress(f.A,p);
+            var first=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            p.PlayState=new PlayerStateInfo();f.Play(f.A,"p1",500);
+            // Bind must adopt this replacement even before its Progress callback.
+            var second=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            f.Start(f.A,p); // Duplicate live Start must retain all captured markers.
+            f.ServerStop(f.A,p);
+            Assert.True(first.Stopped);Assert.True(second.Stopped);
+        }
+
+        [Fact]
+        public void ServerStateReplacement_StopBetweenRestoreCommandsCancelsSecondUnpause()
+        {
+            using var f=new Fixture();f.Start(f.A,f.A.GetPlaySessionInfo("p1"));
+            f.Play(f.A,"p1",600,paused:false);f.Play(f.B,"p2",300,paused:false);f.Polls(0,2);
+            f.Play(f.A,"p1",600);f.Play(f.B,"p2",300);f.Polls(2,2);
+            f.Issuer.OnIssue=command=> { if(command=="Unpause") f.ServerStop(f.A,f.A.GetPlaySessionInfo("p1")); };
+            f.Play(f.B,"p2",600);f.Polls(4,6);
+            Assert.Single(f.Issuer.Calls,c=>c.command=="Unpause");
+        }
+
+        [Theory]
+        [InlineData("Seek")]
+        [InlineData("Unpause")]
+        [InlineData("Pause")]
+        [InlineData("PlayItem")]
+        public void ServerStateReplacement_OldTargetCannotSendAfterStopAndSameIdStart(string command)
+        {
+            using var f=new Fixture();var p=f.A.GetPlaySessionInfo("p1");f.Start(f.A,p);
+            var snapshot=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            int sends=0;
+            f.Manager.Setup(m=>m.SendPlaystateCommand(It.IsAny<string>(),It.IsAny<string>(),It.IsAny<PlaystateRequest>(),It.IsAny<CancellationToken>()))
+                .Callback(()=>Interlocked.Increment(ref sends)).Returns(Task.CompletedTask);
+            f.Manager.Setup(m=>m.SendPlayCommand(It.IsAny<string>(),It.IsAny<string>(),It.IsAny<PlayRequest>(),It.IsAny<CancellationToken>()))
+                .Callback(()=>Interlocked.Increment(ref sends)).Returns(Task.CompletedTask);
+            var issuer=new SessionBridgeCommandIssuer(f.Bridge);
+            bool Issue(SessionSnapshot target,out string error) => command=="PlayItem"
+                ? issuer.TryIssuePlayItem("room","u1","u1",target,"43",f.Now,out error)
+                : issuer.TryIssue("room","u1","u1",target,command,600L*10000000,f.Now,out error);
+            f.ServerStop(f.A,p);f.Play(f.A,"p1",500);
+            p.NowPlayingItem=new BaseItemDto{Id="42",RunTimeTicks=1500L*10000000};f.Start(f.A,p);
+            Assert.False(Issue(snapshot,out var oldError));Assert.Equal("session_offline",oldError);
+            Assert.Equal(0,Volatile.Read(ref sends));
+            Assert.True(Issue(f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1"),out var nextError),nextError);
+            Assert.Equal(1,Volatile.Read(ref sends));
+        }
+
+        [Fact]
+        public void ServerStateReplacement_FirstProgressAdoptsPreviouslyCapturedMarker()
+        {
+            using var f=new Fixture();
+            var captured=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            var p=f.A.GetPlaySessionInfo("p1");f.Progress(f.A,p);
+            f.ServerStop(f.A,p);
+            Assert.True(captured.Stopped);
+        }
+
+        [Fact]
+        public void ServerStateReplacement_ConcurrentCapturesRemainStoppedAcrossSameObjectStart()
+        {
+            using var f=new Fixture();var p=f.A.GetPlaySessionInfo("p1");f.Start(f.A,p);
+            var captured=new SessionSnapshot[32];
+            Parallel.For(0,captured.Length,i=>captured[i]=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1"));
+            f.ServerStop(f.A,p);
+            f.Play(f.A,"p1",600);p.NowPlayingItem=new BaseItemDto{Id="42",RunTimeTicks=1500L*10000000};f.Start(f.A,p);
+            var next=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            Assert.False(next.Stopped);Assert.All(captured,s=>Assert.True(s.Stopped));
+            f.ServerStop(f.A,p);
+            Assert.True(next.Stopped);Assert.All(captured,s=>Assert.True(s.Stopped));
+        }
+
+        [Fact]
+        public void ServerStateReplacement_WithoutPriorIdentityDoesNotGuessCapturedOwnership()
+        {
+            using var f=new Fixture();
+            var captured=f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            var p=f.A.GetPlaySessionInfo("p1");f.ServerStop(f.A,p);f.A.RemovePlaySession(p);
+            // No public SDK identity links this old state to the Stop after replacement.
+            Assert.False(captured.Stopped);
+            f.Play(f.A,"p1",1499);
+            Assert.True(f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1").Stopped);
         }
 
         [Fact]
