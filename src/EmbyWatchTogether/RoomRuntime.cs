@@ -17,6 +17,7 @@ namespace Emby.Plugins.WatchTogether
         public string ParticipantSessionId { get; set; }
 
         public long ParticipantRunTimeTicks { get; set; }
+        internal PlaybackTermination ParticipantTermination { get; set; }
         public bool ControlWaitReported { get; set; }
 
     }

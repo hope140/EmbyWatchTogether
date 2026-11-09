@@ -13,6 +13,9 @@ namespace Emby.Plugins.WatchTogether
     internal sealed class PlaybackTermination
     {
         private int _stopped;
+        private int _started;
+        internal bool HasStarted => Volatile.Read(ref _started) != 0;
+        internal void Start() => Interlocked.Exchange(ref _started, 1);
         internal bool IsStopped => Volatile.Read(ref _stopped) != 0;
         internal void Stop() => Interlocked.Exchange(ref _stopped, 1);
     }
@@ -23,6 +26,7 @@ namespace Emby.Plugins.WatchTogether
         {
             internal readonly HashSet<PlaybackTermination> Markers = new HashSet<PlaybackTermination>();
             internal bool Stopped;
+            internal bool Started;
             internal void Stop()
             {
                 Stopped = true;
@@ -93,6 +97,7 @@ namespace Emby.Plugins.WatchTogether
             var samples = state.Playbacks.GetValue(playback, _ => new PlaybackSamples());
             var marker = state.Samples.GetValue(sample, _ => new PlaybackTermination());
             samples.Markers.Add(marker);
+            if (samples.Started) marker.Start();
             if (samples.Stopped) marker.Stop();
         }
 
@@ -112,6 +117,7 @@ namespace Emby.Plugins.WatchTogether
                     state.Playbacks.Remove(playback);
                 if (state.Samples.TryGetValue(playback.PlayState, out var marker) && marker.IsStopped)
                     state.Samples.Remove(playback.PlayState);
+                state.Playbacks.GetValue(playback, _ => new PlaybackSamples()).Started = true;
                 Observe(state, playback);
                 state.Starts[id] = new WeakReference<PlaySessionInfo>(playback);
                 state.Observed[id] = new WeakReference<PlaySessionInfo>(playback);
@@ -149,6 +155,7 @@ namespace Emby.Plugins.WatchTogether
                     {
                         var samples = state.Playbacks.GetValue(playback, _ => new PlaybackSamples());
                         samples.Markers.Add(marker);
+                        if (samples.Started) marker.Start();
                         if (samples.Stopped) marker.Stop();
                         break;
                     }
