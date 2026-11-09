@@ -37,7 +37,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             internal readonly SyncEngine Engine;
             internal readonly List<string> Errors = new();
             internal readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
-            internal Fixture()
+            internal Fixture(bool useBridgeIssuer = false)
             {
                 A = Session("a", "u1"); B = Session("b", "u2");
                 Manager.Setup(m => m.Sessions).Returns(new[] { A, B });
@@ -54,7 +54,9 @@ namespace Emby.Plugins.WatchTogether.Tests
                 logger.Setup(l=>l.ErrorException(It.IsAny<string>(),It.IsAny<Exception>(),It.IsAny<object[]>()))
                     .Callback<string,Exception,object[]>((message,error,args)=>Errors.Add(error.ToString()));
                 var logs=new Mock<ILogManager>();logs.Setup(l=>l.GetLogger(It.IsAny<string>())).Returns(logger.Object);
-                Engine = new SyncEngine(Rooms, Provider, Issuer, () => "server", notifyOnSyncActions:false,logManager:logs.Object);
+                Manager.Setup(m=>m.SendPlayCommand(It.IsAny<string>(),It.IsAny<string>(),It.IsAny<PlayRequest>(),It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+                Manager.Setup(m=>m.SendPlaystateCommand(It.IsAny<string>(),It.IsAny<string>(),It.IsAny<PlaystateRequest>(),It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+                Engine = new SyncEngine(Rooms, Provider, useBridgeIssuer ? new SessionBridgeCommandIssuer(Bridge) : Issuer, () => "server", notifyOnSyncActions:false,logManager:logs.Object);
             }
             internal void Poll(DateTimeOffset now) { Engine.PollOnce(now); Assert.True(Errors.Count==0,string.Join("\n",Errors)); }
             internal void Polls(int first, int count)
@@ -90,6 +92,90 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Stop(s,p);
             }
             public void Dispose() { Engine.Dispose(); Bridge.Dispose(); }
+        }
+
+        [Theory]
+        [InlineData(true, false, 2.635)]
+        [InlineData(true, true, 2.635)]
+        [InlineData(true, false, 3.3)]
+        [InlineData(true, true, 3.3)]
+        [InlineData(false, false, 2.635)]
+        [InlineData(false, true, 2.635)]
+        [InlineData(false, false, 3.3)]
+        [InlineData(false, true, 3.3)]
+        [InlineData(true, false, 0.3)]
+        [InlineData(true, true, 0.3)]
+        [InlineData(false, false, 0.3)]
+        [InlineData(false, true, 0.3)]
+        [InlineData(true, true, 0.0)]
+        [InlineData(false, false, 0.0)]
+        public void BridgeTransition_ExplicitStartSendsExactlyOnePlayItem(bool replacement, bool sameId, double delay)
+        {
+            using var f = new Fixture(useBridgeIssuer:true);
+            var old = f.A.GetPlaySessionInfo("p1");
+            f.Progress(f.A, old);
+            var captured = f.Provider.GetSessionSnapshots().Single(s=>s.UserId=="u1");
+            if (replacement) f.ServerStop(f.A,old); else f.Stop(f.A,old);
+            f.A.RemovePlaySession(old);
+            if (delay > 0) f.Poll(f.Now);
+            if (delay > 2) f.Poll(f.Now.AddSeconds(2.1));
+            var next = f.Play(f.A,sameId ? "p1" : "next",0,"43");
+            f.Start(f.A,next);
+            f.Poll(f.Now.AddSeconds(delay));
+            f.Poll(f.Now.AddSeconds(delay+0.1));
+            Assert.True(captured.Stopped);
+            f.Manager.Verify(m=>m.SendPlayCommand(It.IsAny<string>(),"b",It.Is<PlayRequest>(r=>r.ItemIds.Single()==43L),It.IsAny<CancellationToken>()),Times.Once);
+            f.Manager.Verify(m=>m.SendPlaystateCommand(It.IsAny<string>(),It.IsAny<string>(),It.Is<PlaystateRequest>(r=>r.Command==PlaystateCommand.Seek || r.Command==PlaystateCommand.Unpause),It.IsAny<CancellationToken>()),Times.Never);
+        }
+
+        [Theory]
+        [InlineData("exit")]
+        [InlineData("old_progress")]
+        [InlineData("new_progress")]
+        [InlineData("quick_progress")]
+        [InlineData("expired")]
+        [InlineData("participant_stop")]
+        [InlineData("participant_restart")]
+        [InlineData("quick_participant_restart")]
+        [InlineData("quick_participant_identity")]
+        [InlineData("participant_identity")]
+        public void BridgeTransition_RejectsUnprovenOrInvalidatedRestart(string scenario)
+        {
+            using var f = new Fixture(useBridgeIssuer:true);
+            var old = f.A.GetPlaySessionInfo("p1"); f.Progress(f.A,old);
+            f.ServerStop(f.A,old); f.A.RemovePlaySession(old);
+            if (!scenario.StartsWith("quick_")) { f.Poll(f.Now); f.Poll(f.Now.AddSeconds(2.1)); }
+            if (scenario=="participant_stop") f.Stop(f.B,f.B.GetPlaySessionInfo("p2"));
+            if (scenario.EndsWith("participant_restart"))
+            {
+                var participant=f.B.GetPlaySessionInfo("p2");
+                f.Stop(f.B,participant); f.Start(f.B,participant);
+            }
+            if (scenario.EndsWith("participant_identity")) f.B.Id="replacement";
+            if (scenario!="exit")
+            {
+                var next=f.Play(f.A,scenario=="old_progress" ? "p1" : "next",0,"43");
+                if (scenario.EndsWith("progress")) f.Progress(f.A,next); else f.Start(f.A,next);
+            }
+            var delay=scenario=="expired" ? 10.1 : scenario.StartsWith("quick_") ? 0.3 : 3.3;
+            f.Poll(f.Now.AddSeconds(delay)); f.Poll(f.Now.AddSeconds(delay+0.1));
+            f.Manager.Verify(m=>m.SendPlayCommand(It.IsAny<string>(),It.IsAny<string>(),It.IsAny<PlayRequest>(),It.IsAny<CancellationToken>()),Times.Never);
+            f.Manager.Verify(m=>m.SendPlaystateCommand(It.IsAny<string>(),It.IsAny<string>(),It.Is<PlaystateRequest>(r=>r.Command==PlaystateCommand.Seek || r.Command==PlaystateCommand.Unpause),It.IsAny<CancellationToken>()),Times.Never);
+        }
+
+        [Fact]
+        public void BridgeTransition_NormalPauseResumeAndSeekStillReachServer()
+        {
+            using var f = new Fixture(useBridgeIssuer:true);
+            f.Play(f.A,"p1",300,paused:false); f.Polls(0,3);
+            f.Manager.Verify(m=>m.SendPlaystateCommand(It.IsAny<string>(),"b",It.Is<PlaystateRequest>(r=>r.Command==PlaystateCommand.Unpause),It.IsAny<CancellationToken>()),Times.AtLeastOnce);
+            f.Play(f.B,"p2",300,paused:false); f.Polls(3,2);
+            f.Play(f.A,"p1",300,paused:true); f.Polls(5,3);
+            f.Manager.Verify(m=>m.SendPlaystateCommand(It.IsAny<string>(),"b",It.Is<PlaystateRequest>(r=>r.Command==PlaystateCommand.Pause),It.IsAny<CancellationToken>()),Times.AtLeastOnce);
+            f.Play(f.B,"p2",300,paused:true); f.Polls(8,3);
+            f.Play(f.A,"p1",600,paused:true); f.Polls(11,4);
+            f.Manager.Verify(m=>m.SendPlaystateCommand(It.IsAny<string>(),"b",It.Is<PlaystateRequest>(r=>r.Command==PlaystateCommand.Seek && r.SeekPositionTicks==600L*10000000),It.IsAny<CancellationToken>()),Times.AtLeastOnce);
+            f.Manager.Verify(m=>m.SendPlayCommand(It.IsAny<string>(),It.IsAny<string>(),It.IsAny<PlayRequest>(),It.IsAny<CancellationToken>()),Times.Never);
         }
 
         [Fact]

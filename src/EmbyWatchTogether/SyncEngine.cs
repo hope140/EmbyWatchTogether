@@ -1116,9 +1116,27 @@ namespace Emby.Plugins.WatchTogether
                 current == null || !current.Online || !current.SupportsRemoteControl ||
                 string.IsNullOrEmpty(current.ItemId) ||
                 !runtime.Previous.TryGetValue(room.PrimaryUserId, out var previous) ||
-                previous == null || !previous.Online || string.IsNullOrEmpty(previous.ItemId))
+                previous == null || !previous.WasOnlineWhenObserved || string.IsNullOrEmpty(previous.ItemId) ||
+                (previous.PlaybackTerminated && !current.HasExplicitPlaybackStart))
             {
                 return false;
+            }
+
+            if (previous.PlaybackTerminated)
+            {
+                // A Stop/Start can finish between polls. The historical primary
+                // observation is evidence, but the follower must still be the
+                // original live playback, just as in the delayed candidate path.
+                string participantId = room.JoinedParticipantUserIds.FirstOrDefault(
+                    id => !string.Equals(id, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase));
+                if (string.IsNullOrEmpty(participantId) ||
+                    !runtime.Previous.TryGetValue(participantId, out var previousParticipant) ||
+                    previousParticipant == null || !previousParticipant.Online ||
+                    !snapshots.TryGetValue(participantId, out var participant) ||
+                    !string.Equals(previousParticipant.ItemId, previous.ItemId, StringComparison.OrdinalIgnoreCase) ||
+                    !CanRetainPrimaryTransitionParticipant(participant, participantId,
+                        previousParticipant.SessionId, previousParticipant.ItemId, previousParticipant.RunTimeTicks))
+                    return false;
             }
 
             return string.Equals(current.UserId, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase) &&
@@ -1225,7 +1243,8 @@ namespace Emby.Plugins.WatchTogether
                 return false;
             }
 
-            if (!snapshots.TryGetValue(candidate.ParticipantUserId, out var participant) ||
+            if (candidate.ParticipantTermination?.IsStopped == true ||
+                !snapshots.TryGetValue(candidate.ParticipantUserId, out var participant) ||
                 !CanRetainPrimaryTransitionParticipant(participant, candidate.ParticipantUserId,
                     candidate.ParticipantSessionId, candidate.SourceItemId, candidate.ParticipantRunTimeTicks))
             {
@@ -1242,7 +1261,7 @@ namespace Emby.Plugins.WatchTogether
                 primary == null || !primary.Online || primary.Stopped ||
                 !string.Equals(primary.UserId, candidate.PrimaryUserId, StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrEmpty(primary.SessionId) ||
-                string.IsNullOrEmpty(primary.ItemId))
+                string.IsNullOrEmpty(primary.ItemId) || !primary.HasExplicitPlaybackStart)
             {
                 // Watching must still pass through the two-second stop debounce.
                 // After confirmation, avoid generic Waiting resets/error changes.
@@ -2285,7 +2304,7 @@ namespace Emby.Plugins.WatchTogether
                 stoppedUsers == null || !stoppedUsers.Contains(room.PrimaryUserId) ||
                 snapshots == null ||
                 !runtime.Previous.TryGetValue(room.PrimaryUserId, out var previousPrimary) ||
-                previousPrimary == null || !previousPrimary.Online ||
+                previousPrimary == null || !previousPrimary.WasOnlineWhenObserved ||
                 string.IsNullOrEmpty(previousPrimary.SessionId) ||
                 string.IsNullOrEmpty(previousPrimary.ItemId))
             {
@@ -2315,6 +2334,9 @@ namespace Emby.Plugins.WatchTogether
                 participantUserId,
                 previousParticipant.SessionId,
                 previousParticipant.RunTimeTicks);
+            // The candidate belongs to this participant playback, not a later
+            // Stop/Start that happens to reuse the same public IDs.
+            runtime.PrimaryItemTransitionCandidate.ParticipantTermination = currentParticipant.Termination;
             runtime.RecordDiagnosticEvent("primary_transition_candidate", null, null, "entered", null, null, now);
             if (!currentParticipant.SupportsRemoteControl)
                 RecordPrimaryTransitionControlWait(runtime, runtime.PrimaryItemTransitionCandidate, now);

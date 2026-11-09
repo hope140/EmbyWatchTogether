@@ -57,6 +57,8 @@
 - 补充验证：`StoppedPlaybackTests` 直接使用 SDK 的播放删除/重建对象及实际 Bridge → Provider → SyncEngine，覆盖 Stop 后同 ID 迟到进度、明确 Start、重复 Start、不同 ID/会话、缺失身份和发送途中撤销。测试需遵循目标分支的 Barrier 推进时序：beta 在条件满足时同轮推进，Stop 注入必须早于 Restore 发送；负例必须配合实际发送的正例，避免空跑。Stop 之前的异常跳变仍可能被同步；这些测试不是初始 EOF 根因证明或真实双客户端验收。同 ID 且无法鉴别的 Start/Stop 乱序边界见 architecture。
 - 服务端契约回归：Emby 4.10 Stop 在事件前替换 `PlayState`；只直接 Raise Stop 的夹具漏掉了已捕获旧快照未撤销的问题。按真实顺序清媒体、替换状态再 Raise Stop，旧实现会在命令间 Stop 后发出两条 Unpause。过滤器须按播放对象保留本生命周期的全部快照标记，并区分同 ID 的新对象。Start 的测试也应恢复 `NowPlayingItem`，SDK GetOrAdd 对已有对象仅更新播放状态，不等于完整 SessionManager Start。测试包含先采样后首次 Progress、状态多次替换、同对象新 Start 后再次 Stop、旧对象迟到 Progress/Stop、目标排队后 Stop/Start 与并发采样；来源排队窗口、首次身份观察前的旧快照以及不可辨别的同对象乱序仍是明确边界，不能把这些隔离断言写成真实宿主验收。
 
+- 历史与命令资格分离：1.7.2.9 的共享撤销标记也会使 `Previous.Online` 变为 false，不能再用它判断“停止前曾播放哪个 Item”。换集识别使用采样时冻结的在线事实；当前命令仍使用可撤销的 Online/Stopped。桥接路径停止后的新 Item 必须有明确 Start，单独的新/旧 ID Progress 不构成重开证据；迟到候选同时绑定参与者原播放撤销标记，同 ID Stop/Start 也使候选失效。快速路径在 Stop/Start 跨轮询时同样核对原参与者。`BridgeTransition_*` 通过真实 Bridge、SDK SessionInfo、SyncEngine、CommandIssuer 到模拟 ISessionManager 发送边界，覆盖状态替换、2.635/3.3 秒、快速换集及禁止发送边界；这仍不是 NAS 双端播放验收。
+
 ## 7. Seek 失败必须冻结原目标并有界重试
 
 - 现象：Seek 无确认后从方保持暂停而主方继续前进；若重试目标持续追逐主方位置，或未确认 Seek 被 Pause/Unpause 覆盖，双方会在快进、暂停和重新同步之间反复分叉。
