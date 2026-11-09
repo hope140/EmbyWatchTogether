@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.Threading;
+using System.Threading.Tasks;
 using MediaBrowser.Model.Logging;
 
 namespace Emby.Plugins.WatchTogether
@@ -22,6 +23,16 @@ namespace Emby.Plugins.WatchTogether
         private readonly SessionBridge _bridge;
         private readonly BoundedSessionDispatch _dispatch;
         private readonly ILogger _logger;
+
+        private sealed class PlaybackTerminatedException : Exception { }
+
+        private static Task DispatchPlayback(SessionSnapshot snapshot, Func<Task> send)
+        {
+            // Execute runs on a worker after admission. A Stop (even followed by
+            // a new Start) must not authorize work queued with an old snapshot.
+            if (snapshot.PlaybackTerminated) throw new PlaybackTerminatedException();
+            return send();
+        }
 
         public SessionBridgeCommandIssuer(SessionBridge bridge, ILogManager logManager = null)
             : this(bridge, logManager, ExternalCallTimeout)
@@ -119,17 +130,17 @@ namespace Emby.Plugins.WatchTogether
                 {
                     case RemoteCommands.Pause:
                         _dispatch.Execute("playback:" + snapshot.SessionId,
-                            token => _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, token),
+                            token => DispatchPlayback(snapshot, () => _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, token)),
                             cancellationToken);
                         break;
                     case RemoteCommands.Unpause:
                         _dispatch.Execute("playback:" + snapshot.SessionId,
-                            token => _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, token),
+                            token => DispatchPlayback(snapshot, () => _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, token)),
                             cancellationToken);
                         break;
                     case RemoteCommands.Seek:
                         _dispatch.Execute("playback:" + snapshot.SessionId,
-                            token => _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, token),
+                            token => DispatchPlayback(snapshot, () => _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, token)),
                             cancellationToken);
                         break;
                     default:
@@ -139,6 +150,11 @@ namespace Emby.Plugins.WatchTogether
 
                 error = null;
                 return true;
+            }
+            catch (PlaybackTerminatedException)
+            {
+                error = "session_offline";
+                return false;
             }
             catch (OperationCanceledException exception)
             {
@@ -234,7 +250,7 @@ namespace Emby.Plugins.WatchTogether
                     dispatchTimer = Stopwatch.StartNew();
                 }
                 _dispatch.Execute("playback:" + snapshot.SessionId,
-                    token => _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, token),
+                    token => DispatchPlayback(snapshot, () => _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, token)),
                     cancellationToken);
                 if (_logger != null)
                 {
@@ -244,6 +260,11 @@ namespace Emby.Plugins.WatchTogether
                 }
                 error = null;
                 return true;
+            }
+            catch (PlaybackTerminatedException)
+            {
+                error = "session_offline";
+                return false;
             }
             catch (OperationCanceledException exception)
             {
