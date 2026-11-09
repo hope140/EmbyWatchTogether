@@ -53,7 +53,11 @@ S124 已随 v1.7.0.1 发布，使用 V16 页面/控制器缓存键，去除 Dash
 
 主用户在 `Watching` 中从 Item A 切换到 Item B 时，`SyncEngine` 先记录主用户 Item 变化并进入独立的 `Handoff` runtime。该 runtime 绑定目标 Item、主用户 Session identity、参与者 Session identity 和 generation。参与者尚未位于 B 时，通过 `IPlayItemIssuer` 发起一次有界的 `PlayItem(B)`，随后只接受当前参与者用户、当前 Session 和 `SessionSnapshot.ItemId == B` 的确认；目标变化会使旧 generation 失效。参与者已经位于 B 时跳过 PlayItem，直接进入 `Barrier`，由 Barrier 重新暂停、定位和恢复播放意图。PlayItem 请求本身的成功不等于播放器完成打开，确认超时或有限重试失败会清理 Handoff 并回到安全的 `Waiting`。
 
-`PlaybackStopped` 只唤醒轮询。主用户停止 A 后，现有 2 秒停止 debounce 同时作为有限的媒体切换观察窗口；窗口内选中 B 时识别为 Handoff，不执行普通停止副作用。窗口结束仍无新 Item 时继续原有 Stop 行为，但从首次缺失开始保留最多 10 秒的仅内存、身份绑定候选，停止确认后若主用户以可信会话打开 B 且参与者仍以原可信会话停留在 A，仍可恢复到同一 Handoff；候选过期、参与者换 Item/会话、能力不可信或房间成员改变时清除。参与者自行切换 Item 不触发主用户跟随；只有显式 Participant Resync 请求才会让非 Primary 参与者通过同一 Handoff/Barrier 流程回到主用户当前 Item。运行时快照、Pending 命令、Handoff、恢复窗口和 Barrier 阶段不写入 `rooms.json`；房间文件采用候选文件替换并保留备份，损坏时报告错误而不静默覆盖。
+`SessionBridge` 在转发 `PlaybackStopped`、唤醒轮询前，按实际 `SessionInfo` 对象和有效 `PlaySessionId` 记录停止，令该播放的迟到进度快照保持 stopped。Emby 删除播放对象后，旧 ID 的进度可能重建对象，因此过滤同时保留 ID 记录和可撤销的快照标记。明确且能解析为当前播放对象的 Start 可以重新使用 ID；重复的有效 Start 不丢弃仍存活的快照标记。发送 Seek、Unpause 或 Handoff Play 前复查本轮已选快照的停止标记；已越过发送检查的在途命令无法撤回。身份缺失或冲突时不猜测整台设备/同一 Item 已停止。
+
+过滤不判断片尾，不等待后续 progress 确认普通 Seek，也不修改远控资格。其记录仅存内存、随实际服务器会话对象回收；停止 ID 与 Start/Progress 索引的字符串键可能随该会话播放次数增长，采样扫描历史停止 ID，不能将弱引用误认为有界缓存。同 ID、同播放对象重用且事件乱序，或新播放没有明确 Start 时，协议无法可靠区分新旧代次：前者仍可能误同步/误过滤，后者保持已停止状态；不同 ID 或新的服务器会话对象不会继承旧标记。
+
+停止后的暂停、通知仍走原有 2 秒 debounce，它同时作为有限的媒体切换观察窗口；窗口内选中 B 时识别为 Handoff，不执行普通停止副作用。窗口结束仍无新 Item 时继续原有 Stop 行为，但从首次缺失开始保留最多 10 秒的仅内存、身份绑定候选，停止确认后若主用户以可信会话打开 B 且参与者仍以原可信会话停留在 A，仍可恢复到同一 Handoff；候选过期、参与者换 Item/会话、能力不可信或房间成员改变时清除。参与者自行切换 Item 不触发主用户跟随；只有显式 Participant Resync 请求才会让非 Primary 参与者通过同一 Handoff/Barrier 流程回到主用户当前 Item。运行时快照、Pending 命令、Handoff、恢复窗口和 Barrier 阶段不写入 `rooms.json`；房间文件采用候选文件替换并保留备份，损坏时报告错误而不静默覆盖。
 
 Phase E 在现有 `Watching` 逻辑旁增加独立的 `Recovering` runtime。仅非 Primary 参与者从选中快照中短暂消失时最多等待 10 秒；缺失会话按原 User、原 SessionId 和原 ItemId 恢复时重新执行一次现有 Barrier。Primary 缺失、停止、Session 或 Item 变化会先退出 Recovery，再由既有停止 debounce 或晚到换集 Handoff 处理；参与者替换 SessionId 或其他不受控的 Item 变化会回到 `Waiting`，不自动换绑设备。双方 actively playing 且无 Pending/Handoff/Barrier/Recovering 时记录 `Participant.PositionTicks - Primary.PositionTicks` 的 signed drift；绝对 drift 至少 3 秒并持续 5 秒才触发一次 Barrier，自动纠偏之间冷却 120 秒，不执行连续追帧式 Seek。
 
