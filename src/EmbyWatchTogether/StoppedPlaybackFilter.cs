@@ -19,14 +19,27 @@ namespace Emby.Plugins.WatchTogether
 
     internal sealed class StoppedPlaybackFilter
     {
+        private sealed class PlaybackSamples
+        {
+            internal readonly HashSet<PlaybackTermination> Markers = new HashSet<PlaybackTermination>();
+            internal bool Stopped;
+            internal void Stop()
+            {
+                Stopped = true;
+                foreach (var marker in Markers) marker.Stop();
+            }
+        }
+
         private sealed class SessionStops
         {
             internal readonly object Gate = new object();
             internal readonly HashSet<string> Ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            internal readonly Dictionary<string, WeakReference<PlayerStateInfo>> Observed =
-                new Dictionary<string, WeakReference<PlayerStateInfo>>(StringComparer.OrdinalIgnoreCase);
-            internal readonly Dictionary<string, WeakReference<PlayerStateInfo>> Starts =
-                new Dictionary<string, WeakReference<PlayerStateInfo>>(StringComparer.OrdinalIgnoreCase);
+            internal readonly Dictionary<string, WeakReference<PlaySessionInfo>> Observed =
+                new Dictionary<string, WeakReference<PlaySessionInfo>>(StringComparer.OrdinalIgnoreCase);
+            internal readonly Dictionary<string, WeakReference<PlaySessionInfo>> Starts =
+                new Dictionary<string, WeakReference<PlaySessionInfo>>(StringComparer.OrdinalIgnoreCase);
+            internal readonly ConditionalWeakTable<PlaySessionInfo, PlaybackSamples> Playbacks =
+                new ConditionalWeakTable<PlaySessionInfo, PlaybackSamples>();
             internal readonly ConditionalWeakTable<PlayerStateInfo, PlaybackTermination> Samples =
                 new ConditionalWeakTable<PlayerStateInfo, PlaybackTermination>();
         }
@@ -52,17 +65,35 @@ namespace Emby.Plugins.WatchTogether
             lock (state.Gate)
             {
                 var playback = e.PlaySession ?? e.Session.GetPlaySessionInfo(id);
-                var sample = playback?.PlayState;
-                if (sample == null && state.Observed.TryGetValue(id, out var observed)) observed.TryGetTarget(out sample);
-                if (sample != null) state.Samples.GetValue(sample, _ => new PlaybackTermination()).Stop();
+                if (playback == null && state.Observed.TryGetValue(id, out var observed)) observed.TryGetTarget(out playback);
+                if (playback != null)
+                {
+                    // Emby clears/replaces PlayState before raising Stop. Revoke
+                    // every captured state belonging to this playback, not just
+                    // the empty replacement exposed by the Stop event.
+                    Observe(state, playback);
+                    state.Playbacks.GetValue(playback, _ => new PlaybackSamples()).Stop();
+                }
                 // A distinguishable delayed Stop must not poison a newer explicit Start,
                 // even when that client reuses its PlaySessionId.
-                if (sample != null && state.Starts.TryGetValue(id, out var started) &&
-                    started.TryGetTarget(out var current) && !ReferenceEquals(current, sample) &&
-                    ReferenceEquals(e.Session.GetPlaySessionInfo(id)?.PlayState, current)) return;
+                if (playback != null && state.Starts.TryGetValue(id, out var started) &&
+                    started.TryGetTarget(out var current) && !ReferenceEquals(current, playback) &&
+                    ReferenceEquals(e.Session.GetPlaySessionInfo(id), current)) return;
                 state.Ids.Add(id);
                 state.Observed.Remove(id);
             }
+        }
+
+        // Called only under Gate. Adopt an existing sample marker as well: a poll
+        // can capture it before the first Start/Progress callback gives us its ID.
+        private static void Observe(SessionStops state, PlaySessionInfo playback)
+        {
+            var sample = playback?.PlayState;
+            if (sample == null) return;
+            var samples = state.Playbacks.GetValue(playback, _ => new PlaybackSamples());
+            var marker = state.Samples.GetValue(sample, _ => new PlaybackTermination());
+            samples.Markers.Add(marker);
+            if (samples.Stopped) marker.Stop();
         }
 
         internal void Started(PlaybackProgressEventArgs e)
@@ -77,10 +108,13 @@ namespace Emby.Plugins.WatchTogether
                 // An explicit server Start is the only way to reuse a terminated ID.
                 // Keep previously captured markers terminal; only new snapshots rebind.
                 state.Ids.Remove(id);
+                if (state.Playbacks.TryGetValue(playback, out var samples) && samples.Stopped)
+                    state.Playbacks.Remove(playback);
                 if (state.Samples.TryGetValue(playback.PlayState, out var marker) && marker.IsStopped)
                     state.Samples.Remove(playback.PlayState);
-                state.Starts[id] = new WeakReference<PlayerStateInfo>(playback.PlayState);
-                state.Observed[id] = new WeakReference<PlayerStateInfo>(playback.PlayState);
+                Observe(state, playback);
+                state.Starts[id] = new WeakReference<PlaySessionInfo>(playback);
+                state.Observed[id] = new WeakReference<PlaySessionInfo>(playback);
             }
         }
 
@@ -93,7 +127,9 @@ namespace Emby.Plugins.WatchTogether
             var state = _sessions.GetValue(e.Session, _ => new SessionStops());
             lock (state.Gate)
             {
-                if (!state.Ids.Contains(id)) state.Observed[id] = new WeakReference<PlayerStateInfo>(playback.PlayState);
+                if (!ReferenceEquals(e.Session.GetPlaySessionInfo(id), playback)) return;
+                Observe(state, playback);
+                if (!state.Ids.Contains(id)) state.Observed[id] = new WeakReference<PlaySessionInfo>(playback);
             }
         }
 
@@ -104,6 +140,19 @@ namespace Emby.Plugins.WatchTogether
             lock (state.Gate)
             {
                 var marker = state.Samples.GetValue(sample, _ => new PlaybackTermination());
+                foreach (var pair in state.Observed)
+                {
+                    // Resolve the current owner; a queued event can still retain
+                    // a removed object with the same ID as a new playback.
+                    var playback = session.GetPlaySessionInfo(pair.Key);
+                    if (ReferenceEquals(playback?.PlayState, sample))
+                    {
+                        var samples = state.Playbacks.GetValue(playback, _ => new PlaybackSamples());
+                        samples.Markers.Add(marker);
+                        if (samples.Stopped) marker.Stop();
+                        break;
+                    }
+                }
                 // Emby may recreate PlaySessionInfo for late progress after removing it
                 // on Stop. Object identity alone would miss that new object with old ID.
                 foreach (var id in state.Ids)
