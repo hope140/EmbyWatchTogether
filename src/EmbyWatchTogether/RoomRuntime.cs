@@ -27,6 +27,8 @@ namespace Emby.Plugins.WatchTogether
     /// </summary>
     public sealed class RoomRuntime
     {
+        // Last selected inputs for dispatch-time Stop revocation, under the room gate.
+        internal IReadOnlyDictionary<string, SessionSnapshot> CommandSnapshots { get; set; }
         public RoomState State { get; set; } = RoomState.Waiting;
 
         /// <summary>

@@ -354,6 +354,7 @@ namespace Emby.Plugins.WatchTogether
                             results.Add(Result(room, runtime, RoomEligibility.IsPairEligible(snapshots)));
                             continue;
                         }
+                        runtime.CommandSnapshots = snapshots;
                         runtime.RecordDiagnosticSnapshots(snapshots, now);
                         var eligibility = RoomEligibility.Evaluate(snapshots);
                         bool eligible = eligibility.IsEligible;
@@ -1964,7 +1965,7 @@ namespace Emby.Plugins.WatchTogether
             handoff.NextRetryAtUtc = null;
             handoff.RetryCount++;
             HandoffTrace.Attempt(_logger, room.Id, handoff, participantSnapshot, now);
-            var accepted = TryIssuePlayItem(room, participantSnapshot, handoff.TargetItemId, now, out var failure);
+            var accepted = TryIssuePlayItem(runtime, room, participantSnapshot, handoff.TargetItemId, now, out var failure);
             HandoffTrace.IssueResult(
                 _logger, room.Id, handoff, participantSnapshot, accepted, failure, now);
             if (accepted)
@@ -3240,6 +3241,7 @@ namespace Emby.Plugins.WatchTogether
         }
 
         private bool TryIssuePlayItem(
+            RoomRuntime runtime,
             Room room,
             SessionSnapshot snapshot,
             string itemId,
@@ -3248,6 +3250,11 @@ namespace Emby.Plugins.WatchTogether
         {
             ThrowIfStopping();
             error = null;
+            if (HasTerminatedCommandSource(runtime))
+            {
+                error = "playback_terminated";
+                return false;
+            }
             if (room == null || snapshot == null || !snapshot.Online ||
                 string.IsNullOrEmpty(itemId) ||
                 !string.Equals(snapshot.UserId, room.JoinedParticipantUserIds.FirstOrDefault(
@@ -3487,6 +3494,9 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
+        private static bool HasTerminatedCommandSource(RoomRuntime runtime) =>
+            runtime.CommandSnapshots?.Values.Any(snapshot => snapshot?.PlaybackTerminated == true) == true;
+
         private bool Issue(
             RoomRuntime runtime,
             Room room,
@@ -3511,6 +3521,12 @@ namespace Emby.Plugins.WatchTogether
         {
             ThrowIfStopping();
             failure = null;
+            if ((command == RemoteCommands.Seek || command == RemoteCommands.Unpause) &&
+                HasTerminatedCommandSource(runtime))
+            {
+                failure = "playback_terminated";
+                return false;
+            }
             if (runtime.Pending.TryGetValue(userId, out var existing))
             {
                 if (!HasSameIdentity(existing.SessionId, existing.ItemId, snapshot))

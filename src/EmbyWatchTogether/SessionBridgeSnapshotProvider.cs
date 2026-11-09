@@ -15,7 +15,7 @@ namespace Emby.Plugins.WatchTogether
         public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
         {
             return _bridge.GetSessions()
-                .Select(s => SessionSnapshot.FromSessionInfo(s))
+                .Select(s => _bridge.Snapshot(s))
                 .Where(s => s != null)
                 .ToList();
         }

@@ -19,6 +19,10 @@ namespace Emby.Plugins.WatchTogether
     {
         private readonly ISessionManager _sessionManager;
         private bool _disposed;
+        private readonly StoppedPlaybackFilter _stoppedPlaybacks = new StoppedPlaybackFilter();
+
+        internal SessionSnapshot Snapshot(SessionInfo session) =>
+            SessionSnapshot.FromSessionInfo(session, null, _stoppedPlaybacks);
 
         public SessionBridge(ISessionManager sessionManager)
         {
@@ -186,11 +190,23 @@ namespace Emby.Plugins.WatchTogether
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
-        private void OnPlaybackStart(object sender, PlaybackProgressEventArgs e) => PlaybackStart?.Invoke(sender, e);
+        private void OnPlaybackStart(object sender, PlaybackProgressEventArgs e)
+        {
+            _stoppedPlaybacks.Started(e);
+            PlaybackStart?.Invoke(sender, e);
+        }
 
-        private void OnPlaybackProgress(object sender, PlaybackProgressEventArgs e) => PlaybackProgress?.Invoke(sender, e);
+        private void OnPlaybackProgress(object sender, PlaybackProgressEventArgs e)
+        {
+            _stoppedPlaybacks.Progress(e);
+            PlaybackProgress?.Invoke(sender, e);
+        }
 
-        private void OnPlaybackStopped(object sender, PlaybackStopEventArgs e) => PlaybackStopped?.Invoke(sender, e);
+        private void OnPlaybackStopped(object sender, PlaybackStopEventArgs e)
+        {
+            _stoppedPlaybacks.Stopped(e);
+            PlaybackStopped?.Invoke(sender, e);
+        }
 
         private void OnSessionStarted(object sender, SessionEventArgs e) => SessionStarted?.Invoke(sender, e);
 
