@@ -205,9 +205,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             f.Play(f.A,"p1",600,paused:false);f.Play(f.B,"p2",300,paused:false);
             f.Polls(0,2);
             f.Play(f.A,"p1",600);f.Play(f.B,"p2",300);f.Polls(2,2);
-            f.Play(f.B,"p2",600);f.Polls(4,1);
             f.Issuer.OnIssue=command=> { if(command=="Unpause") f.Stop(f.A,f.A.GetPlaySessionInfo("p1")); };
-            f.Polls(5,1);
+            f.Play(f.B,"p2",600);f.Polls(4,2);
             Assert.Single(f.Issuer.Calls,c=>c.command=="Unpause");
         }
 
