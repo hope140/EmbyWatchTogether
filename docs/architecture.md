@@ -61,6 +61,8 @@ Barrier 在当前快照已满足条件且没有待确认命令时，同轮继续
 
 主用户在 `Watching` 中从 Item A 切换到 Item B 时，`SyncEngine` 先记录主用户 Item 变化并进入独立的 `Handoff` runtime。该 runtime 绑定目标 Item、主用户 Session identity、参与者 Session identity 和 generation。参与者尚未位于 B 时，通过 `IPlayItemIssuer` 发起一次有界的 `PlayItem(B)`，随后只接受当前参与者用户、当前 Session 和 `SessionSnapshot.ItemId == B` 的确认；目标变化会使旧 generation 失效。参与者已经位于 B 时跳过 PlayItem，直接进入 `Barrier`，由 Barrier 重新暂停、定位和恢复播放意图。PlayItem 请求本身的成功不等于播放器完成打开，确认超时或有限重试失败会清理 Handoff 并回到安全的 `Waiting`。
 
+Handoff 的候选保留、被控能力检查和主控等待暂停使用与内置发送器一致的播放命令兼容判断，并保留 effective 远控证据。Theater 的 GeneralCommands 列表不必显式包含 Pause、Unpause、Seek；命令列表不是媒体控制权限本身，实际发送仍要求当前 raw 远控标记，身份、播放代次、时长、倍速及截止时间条件不变。主控启动时 runtime 为零仍进入原有观察分支，不因能力判断而提前失败。
+
 自动 Handoff 需要等待参与者加载时，主用户在同一目标/会话/媒体、完整有效能力与时长下至少观察 1 秒且位置推进后请求暂停，避免只看 Item 就立刻暂停加载。参与者先正常收到 PlayItem，并独立等待至少 1 秒有效目标观察；playing 必须有位置推进，已暂停不另发 Pause。主用户暂停需后续快照 ACK，最多两次，期限仍为 Handoff 原 10 秒；完成后向 Barrier 传递原暂停意图，已有或请求前自行暂停保持暂停。主用户主动继续/明显 Seek、身份/媒体/权限变化或失败不恢复旧意图，失败标记阻止所有自动命令，只有获接受的显式 resync 清除。该标记跨通用 reset 保留但不持久化；见 [ADR-002](adr/002-media-handoff.md)。服务器观察不能证明首帧已显示。
 
 `SessionBridge` 在转发 `PlaybackStopped`、唤醒轮询前，按实际 `SessionInfo` 对象和有效 `PlaySessionId` 记录停止，令该播放的迟到进度快照保持 stopped。Emby 删除播放对象后，旧 ID 的进度可能重建对象，因此过滤同时保留 ID 记录和可撤销的快照标记。明确且能解析为当前播放对象的 Start 可以重新使用 ID；重复的有效 Start 不丢弃仍存活的快照标记。发送 Seek、Unpause 或 Handoff Play 前复查本轮已选快照的停止标记；已越过发送检查的在途命令无法撤回。身份缺失或冲突时不猜测整台设备/同一 Item 已停止。

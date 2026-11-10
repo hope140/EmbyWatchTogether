@@ -38,9 +38,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             internal readonly SyncEngine Engine;
             internal readonly List<string> Errors = new();
             internal readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
-            internal Fixture(bool useBridgeIssuer = false)
+            internal Fixture(bool useBridgeIssuer = false, bool theaterCapabilities = false)
             {
-                A = Session("a", "u1"); B = Session("b", "u2");
+                A = Session("a", "u1", theaterCapabilities); B = Session("b", "u2", theaterCapabilities);
                 Manager.Setup(m => m.Sessions).Returns(new[] { A, B });
                 Bridge = new SessionBridge(Manager.Object);
                 Provider = new SessionBridgeSnapshotProvider(Bridge);
@@ -62,13 +62,13 @@ namespace Emby.Plugins.WatchTogether.Tests
             internal void Poll(DateTimeOffset now) { Engine.PollOnce(now); Assert.True(Errors.Count==0,string.Join("\n",Errors)); }
             internal void Polls(int first, int count)
             { for(var i=first;i<first+count;i++) Poll(Now.AddMilliseconds(i*100)); }
-            private SessionInfo Session(string id, string user)
+            private SessionInfo Session(string id, string user, bool theaterCapabilities)
             {
                 var controller = new Mock<ISessionController>();
                 controller.SetupGet(c => c.SupportsMediaControl).Returns(true);
                 return new SessionInfo(Manager.Object, Mock.Of<ILogger>()) {
                     Id=id, UserId=user, LastActivityDate=Now.UtcDateTime,
-                    Capabilities=new ClientCapabilities { SupportsMediaControl=true, SupportedCommands=new[]{"Pause","Unpause","Seek"} },
+                    Capabilities=new ClientCapabilities { SupportsMediaControl=true, SupportedCommands=theaterCapabilities ? TheaterCommands : new[]{"Pause","Unpause","Seek"} },
                     SessionControllers=new[]{controller.Object}
                 };
             }
@@ -93,6 +93,197 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Stop(s,p);
             }
             public void Dispose() { Engine.Dispose(); Bridge.Dispose(); }
+        }
+
+        // Actual Theater capability shape: general commands do not enumerate Playstate commands.
+        private static readonly string[] TheaterCommands = {
+            "MoveUp", "MoveDown", "MoveLeft", "MoveRight", "PageUp", "PageDown",
+            "PreviousLetter", "NextLetter", "ToggleOsd", "ToggleContextMenu", "Select", "Back",
+            "SendKey", "SendString", "GoHome", "GoToSettings", "VolumeUp", "VolumeDown", "Mute",
+            "Unmute", "ToggleMute", "SetVolume", "SetAudioStreamIndex", "SetSubtitleStreamIndex",
+            "RefreshMediaSource", "DisplayContent", "GoToSearch", "DisplayMessage", "SetRepeatMode",
+            "SetSubtitleOffset", "SetPlaybackRate", "ChannelUp", "ChannelDown", "PlayMediaSource", "PlayTrailers"
+        };
+
+        [Theory]
+        [InlineData("late_register", 3.736)]
+        [InlineData("late_register", 4.587)]
+        [InlineData("late_register", 5.339)]
+        [InlineData("early_register", 3.736)]
+        [InlineData("early_register", 4.587)]
+        [InlineData("early_register", 5.339)]
+        [InlineData("queued_stop", 3.736)]
+        [InlineData("queued_stop", 4.587)]
+        [InlineData("queued_stop", 5.339)]
+        public void TheaterCapabilities_LateHandoffReachesWatching(string scenario, double delay)
+        {
+            using var replay = new TheaterReplay();
+            replay.Begin(scenario, delay);
+            Assert.Single(replay.Sent, c => c.command == "PlayItem");
+            for (int i = 1; i <= 24 && replay.Runtime.State != RoomState.Watching; i++)
+                replay.Step(delay + i * .25);
+            Assert.Equal(RoomState.Watching, replay.Runtime.State);
+            Assert.All(replay.F.Provider.GetSessionSnapshots(), s => {
+                Assert.Equal("43", s.ItemId); Assert.False(s.IsPaused);
+            });
+            Assert.Single(replay.Sent, c => c.command == "PlayItem" && c.session == "b" && c.item == "43");
+            Assert.DoesNotContain(replay.Sent, c => c.command == "Seek");
+            Assert.DoesNotContain(replay.Sent, c => c.command == "Seek" && c.item != "43");
+            Assert.Single(replay.Sent, c => c.command == "Pause" && c.session == "a");
+            Assert.Equal(2, replay.Sent.Count(c => c.command == "Pause" && c.session == "b"));
+            Assert.Equal(2, replay.Sent.Count(c => c.command == "Unpause"));
+            Assert.Equal(6, replay.Sent.Count);
+        }
+
+        [Fact]
+        public void TheaterCapabilities_OffsetPeerSeeksOnceAndRestores()
+        {
+            using var replay = new TheaterReplay(peerStartPosition: 20);
+            replay.Begin("late_register", 4.587);
+            for (int i = 1; i <= 24 && replay.Runtime.State != RoomState.Watching; i++)
+                replay.Step(4.587 + i * .25);
+            Assert.Equal(RoomState.Watching, replay.Runtime.State);
+            Assert.Single(replay.Sent, c => c.command == "PlayItem");
+            Assert.Single(replay.Sent, c => c.command == "Seek" && c.session == "b" && c.item == "43");
+            Assert.Equal(7, replay.Sent.Count);
+            var pair = replay.F.Provider.GetSessionSnapshots();
+            Assert.All(pair, s => { Assert.Equal("43", s.ItemId); Assert.False(s.IsPaused); });
+            Assert.InRange(Math.Abs(pair[0].PositionTicks - pair[1].PositionTicks), 0, 10000000L);
+        }
+
+        [Theory]
+        [InlineData("participant_no_control")]
+        [InlineData("primary_no_control")]
+        [InlineData("participant_raw_denied")]
+        [InlineData("primary_raw_denied")]
+        [InlineData("membership")]
+        [InlineData("participant_identity")]
+        [InlineData("participant_stop_restart")]
+        [InlineData("no_start")]
+        [InlineData("old_item")]
+        [InlineData("expired")]
+        public void TheaterCapabilities_LateHandoffPreservesSafetyGates(string restriction)
+        {
+            using var replay = new TheaterReplay();
+            var delay = restriction == "expired" ? 10.0 : 4.587;
+            replay.Begin("early_register", delay, restriction);
+            for (int i = 1; i <= 16; i++) replay.Step(delay + i * .25);
+            Assert.DoesNotContain(replay.Sent, c => c.command == "PlayItem");
+            Assert.DoesNotContain(replay.Sent, c => c.command == "Seek" || c.command == "Unpause");
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void TheaterCapabilities_ControlLossDuringHandoffNeverRestores(bool primary)
+        {
+            using var replay = new TheaterReplay();
+            replay.Begin("late_register", 4.587);
+            Assert.Single(replay.Sent, c => c.command == "PlayItem");
+            replay.DenyControl(primary ? replay.F.A : replay.F.B, cachedEvidence: false);
+            var count = replay.Sent.Count;
+            for (int i = 1; i <= 20; i++) replay.Step(4.587 + i * .25);
+            Assert.Equal(count, replay.Sent.Count);
+            Assert.Equal(RoomState.Waiting, replay.Runtime.State);
+        }
+
+        private sealed class TheaterReplay : IDisposable
+        {
+            internal readonly Fixture F = new Fixture(useBridgeIssuer: true, theaterCapabilities: true);
+            internal RoomRuntime Runtime => F.Rooms.GetRuntime(F.Room.Id);
+            internal readonly List<(string session, string command, string item, long? position)> Sent = new();
+            private readonly Queue<(string session, string command, string item, long? position)> _pending = new();
+            private double _last;
+            private readonly double _peerStartPosition;
+            internal TheaterReplay(double peerStartPosition = 0)
+            {
+                _peerStartPosition = peerStartPosition;
+                Assert.Equal(35, TheaterCommands.Length);
+                F.Manager.Setup(m => m.SendPlaystateCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                    .Callback<string, string, PlaystateRequest, CancellationToken>((_, session, command, token) => {
+                        var target = session == "a" ? F.A : F.B;
+                        var item = target.NowPlayingItem?.Id;
+                        var sent = (session, command.Command.ToString(), item, command.SeekPositionTicks);
+                        Sent.Add(sent); _pending.Enqueue(sent);
+                    }).Returns(Task.CompletedTask);
+                F.Manager.Setup(m => m.SendPlayCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                    .Callback<string, string, PlayRequest, CancellationToken>((_, session, command, token) => {
+                        var sent = (session, "PlayItem", command.ItemIds.Single().ToString(), (long?)null);
+                        Sent.Add(sent); _pending.Enqueue(sent);
+                    }).Returns(Task.CompletedTask);
+                foreach (var session in new[] { F.A, F.B }) {
+                    var playback = F.Play(session, session == F.A ? "p1" : "p2", 526.793, "42", false);
+                    F.Start(session, playback);
+                }
+                Runtime.Previous.Clear();
+                foreach (var snapshot in F.Provider.GetSessionSnapshots()) Runtime.Previous[snapshot.UserId] = snapshot;
+                Runtime.PreviousAtUtc = F.Now.AddMilliseconds(-250);
+            }
+            internal void DenyControl(SessionInfo session, bool cachedEvidence)
+            {
+                session.SessionControllers = Array.Empty<ISessionController>();
+                session.Capabilities = new ClientCapabilities { SupportsMediaControl = false,
+                    SupportedCommands = cachedEvidence ? TheaterCommands : Array.Empty<string>() };
+                Assert.False(SessionSnapshot.FromSessionInfo(session).SupportsRemoteControl);
+            }
+            internal void Begin(string scenario, double delay, string restriction = null)
+            {
+                if (restriction?.EndsWith("no_control") == true || restriction?.EndsWith("raw_denied") == true)
+                    DenyControl(restriction.StartsWith("primary") ? F.A : F.B, restriction.EndsWith("raw_denied"));
+                if (restriction == "membership") Assert.True(F.Rooms.LeaveParticipant(F.Room.Id, "u2"));
+                var old = F.A.GetPlaySessionInfo("p1");
+                if (scenario == "queued_stop") {
+                    old.NowPlayingItem = null; old.PlayState = new PlayerStateInfo();
+                    F.A.RemovePlaySession(old); F.Stop(F.A, old);
+                } else { F.ServerStop(F.A, old); F.A.RemovePlaySession(old); }
+                Step(0);
+                for (int n = 1; n < Math.Ceiling(delay * 10); n++) {
+                    if (scenario != "late_register" && n == 1) F.Play(F.A, "next", 0, "", false);
+                    Step(n / 10.0);
+                }
+                if (restriction == "participant_identity") F.B.Id = "replacement";
+                if (restriction == "participant_stop_restart") {
+                    var peer = F.B.GetPlaySessionInfo("p2"); var item = peer.NowPlayingItem;
+                    F.ServerStop(F.B, peer); peer.NowPlayingItem = item; F.Start(F.B, peer);
+                }
+                var nextItem = restriction == "old_item" ? "42" : "43";
+                var next = F.Play(F.A, "next", 0, nextItem, false);
+                next.NowPlayingItem = new BaseItemDto { Id = nextItem, RunTimeTicks = 1500L * 10000000 };
+                if (restriction == "no_start") F.Progress(F.A, next); else F.Start(F.A, next);
+                Step(delay);
+            }
+            internal void Step(double elapsed)
+            {
+                while (_pending.Count > 0) {
+                    var command = _pending.Dequeue(); var session = command.session == "a" ? F.A : F.B;
+                    var current = new[] { "p1", "p2", "next", "peer-next" }.Select(session.GetPlaySessionInfo)
+                        .SingleOrDefault(p => p?.NowPlayingItem != null && !string.IsNullOrEmpty(p.NowPlayingItem.Id));
+                    if (current == null) continue;
+                    if (command.command == "PlayItem") {
+                        F.ServerStop(session, current); session.RemovePlaySession(current);
+                        var next = F.Play(session, "peer-next", _peerStartPosition, command.item, false); F.Start(session, next);
+                    } else {
+                        var state = current.PlayState;
+                        var updated = F.Play(session, current.Id,
+                            command.command == "Seek" ? command.position.Value / 10000000.0 : state.PositionTicks.GetValueOrDefault() / 10000000.0,
+                            current.NowPlayingItem.Id,
+                            command.command == "Pause" || command.command != "Unpause" && state.IsPaused);
+                        F.Progress(session, updated);
+                    }
+                }
+                foreach (var session in new[] { F.A, F.B }) {
+                    var current = new[] { "p1", "p2", "next", "peer-next" }.Select(session.GetPlaySessionInfo)
+                        .SingleOrDefault(p => p?.NowPlayingItem != null && !string.IsNullOrEmpty(p.NowPlayingItem.Id));
+                    if (current == null || current.PlayState.IsPaused) continue;
+                    var advanced = F.Play(session, current.Id,
+                        current.PlayState.PositionTicks.GetValueOrDefault() / 10000000.0 + elapsed - _last,
+                        current.NowPlayingItem.Id, false);
+                    F.Progress(session, advanced);
+                }
+                _last = elapsed;
+                F.Poll(F.Now.AddSeconds(elapsed));
+            }
+            public void Dispose() => F.Dispose();
         }
 
         [Theory]

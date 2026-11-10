@@ -5064,7 +5064,6 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("session")]
         [InlineData("item")]
         [InlineData("capability")]
-        [InlineData("partial-capability")]
         [InlineData("runtime")]
         [InlineData("runtime-change")]
         [InlineData("rate")]
@@ -5088,8 +5087,6 @@ namespace Emby.Plugins.WatchTogether.Tests
             if (change == "session") participant = Snapshot("s2-new", "u2", false, 50 * SessionSnapshot.TicksPerSecond);
             if (change == "item") participant = Snapshot("s2", "u2", false, 0, itemId: "item-c");
             if (change == "capability") participant = Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond, supportsRemoteControl: false);
-            if (change == "partial-capability") participant = Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond,
-                supportsRemoteControl: false, capabilities: new SessionCapabilityReport(true, new[] { RemoteCommands.Pause }));
             if (change == "runtime") participant = new SessionSnapshot("s2", "u2", "i1", "m1", 0, 0, false, 1, false, false, participant.Capabilities);
             if (change == "runtime-change") participant = new SessionSnapshot("s2", "u2", "i1", "m1", 0, 200 * SessionSnapshot.TicksPerSecond, false, 1, false, false, participant.Capabilities);
             if (change == "rate") participant = Snapshot("s2", "u2", false, 50 * SessionSnapshot.TicksPerSecond, playbackRate: 1.5,
@@ -5110,6 +5107,38 @@ namespace Emby.Plugins.WatchTogether.Tests
             _clock.Advance(1);
             engine.PollOnce(_clock.Now);
             Assert.Empty(issuer.PlayItems);
+        }
+
+        [Theory]
+        [InlineData("Pause")]
+        [InlineData("DisplayMessage")]
+        [InlineData("MoveUp")]
+        [InlineData("")]
+        public void MediaHandoff_OmittedPlaystateCommandsStillRequireRawPermission(string advertised)
+        {
+            var room = CreateRoom();
+            var issuer = new HandoffIssuer();
+            using var engine = CreateHandoffEngine(issuer);
+            EnterWatchingWithIssuer(engine, room, issuer);
+            var capabilities = new SessionCapabilityReport(true,
+                advertised.Length == 0 ? Array.Empty<string>() : new[] { advertised });
+            SessionSnapshot Peer(bool raw) => Snapshot("s2", "u2", false,
+                50 * SessionSnapshot.TicksPerSecond, supportsRemoteControl: raw, capabilities: capabilities);
+            _clock.Advance(1);
+            SetCandidates(Peer(false));
+            engine.PollOnce(_clock.Now);
+            Assert.NotNull(GetRecoveryProperty(_rooms.GetRuntime(room.Id), "PrimaryItemTransitionCandidate"));
+            _clock.Advance(3.3);
+            SetCandidates(Snapshot("s1-new", "u1", false, 0, itemId: "item-b"), Peer(false));
+            for (int i = 0; i < 3; i++) {
+                engine.PollOnce(_clock.Now); _clock.Advance(.1);
+                Assert.Empty(issuer.Commands); Assert.Empty(issuer.PlayItems);
+            }
+            Assert.NotNull(GetRecoveryProperty(_rooms.GetRuntime(room.Id), "PrimaryItemTransitionCandidate"));
+            SetCandidates(Snapshot("s1-new", "u1", false, 0, itemId: "item-b"), Peer(true));
+            engine.PollOnce(_clock.Now);
+            Assert.Single(issuer.PlayItems);
+            Assert.Equal(("u2", "item-b", "s2", "i1"), issuer.PlayItems[0]);
         }
 
         [Fact]

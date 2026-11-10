@@ -52,6 +52,23 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Single(f.Issuer.Plays);
         }
 
+        [Fact]
+        public void MissingStartupRuntime_WaitsInsteadOfFailingHold()
+        {
+            using var f = new Replay();
+            f.Switch();
+            f.Provider.Items["u1"] = f.Make("u1", "next", false, 0, runtime: 0);
+            for (int i = 0; i < 4; i++) f.Tick();
+            Assert.Equal(RoomState.Handoff, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays);
+            Assert.Empty(f.Issuer.Commands);
+            f.Provider.Items["u1"] = f.Make("u1", "next", false, 0);
+            f.Tick();
+            f.AdvancePrimary();
+            Assert.Equal(RoomState.Handoff, f.Runtime.State);
+            Assert.Single(f.Issuer.Commands, c => c.user == "u1" && c.command == RemoteCommands.Pause);
+        }
+
         [Theory]
         [InlineData(true)]
         [InlineData(false)]

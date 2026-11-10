@@ -1320,10 +1320,21 @@ namespace Emby.Plugins.WatchTogether
             runtime.RecordDiagnosticEvent("primary_transition_waiting", null, null, "pending", null, null, now);
         }
 
+        private static bool HasCompatiblePlaybackCommands(SessionCapabilityReport capabilities)
+        {
+            // Theater advertises GeneralCommands, not Pause/Unpause/Seek. Use the
+            // dispatcher's playback support rule, retaining the effective-control
+            // evidence gate. Callers still enforce raw control before any send.
+            return capabilities?.SupportsRemoteControl == true &&
+                SessionBridgeCommandIssuer.IsCommandSupported(capabilities, RemoteCommands.Pause) &&
+                SessionBridgeCommandIssuer.IsCommandSupported(capabilities, RemoteCommands.Unpause) &&
+                SessionBridgeCommandIssuer.IsCommandSupported(capabilities, RemoteCommands.Seek);
+        }
+
         private static bool HasEffectivePlaybackControl(SessionSnapshot snapshot)
         {
             return snapshot != null && snapshot.Online && !snapshot.Stopped &&
-                snapshot.Capabilities?.CanControlPlayback == true &&
+                HasCompatiblePlaybackCommands(snapshot.Capabilities) &&
                 snapshot.RunTimeTicks > 0 &&
                 Math.Abs(snapshot.PlaybackRate - 1.0) <= SyncConstants.PlaybackRateTolerance;
         }
@@ -1874,7 +1885,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             if (handoff.PrimaryHold != null &&
-                (participantSnapshot.Capabilities?.CanControlPlayback != true ||
+                (!HasCompatiblePlaybackCommands(participantSnapshot.Capabilities) ||
                  !(Math.Abs(participantSnapshot.PlaybackRate - 1.0) <= SyncConstants.PlaybackRateTolerance)))
             {
                 FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
@@ -2022,7 +2033,7 @@ namespace Emby.Plugins.WatchTogether
                 FailMediaHandoff(runtime, room, MediaHandoffInvalidError, now);
                 return false;
             }
-            if (primary.Capabilities?.CanControlPlayback != true ||
+            if (!HasCompatiblePlaybackCommands(primary.Capabilities) ||
                 !primary.SupportsRemoteControl || !primary.Online || primary.Stopped ||
                 !(Math.Abs(primary.PlaybackRate - 1.0) <= SyncConstants.PlaybackRateTolerance))
             {
