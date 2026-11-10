@@ -10,11 +10,12 @@ namespace Emby.Plugins.WatchTogether
     internal sealed class SyncNotificationDispatcher
     {
         private readonly object _gate = new object();
-        private readonly Queue<(Action<CancellationToken> send, double queuedAt)> _queue =
-            new Queue<(Action<CancellationToken>, double)>();
+        private readonly Queue<(Action<CancellationToken> send, double queuedAt, double readyAt)> _queue =
+            new Queue<(Action<CancellationToken>, double, double)>();
         private readonly CancellationTokenSource _stop = new CancellationTokenSource();
         private readonly CancellationToken _token;
         private readonly Func<double> _elapsedSeconds;
+        private Timer _wake;
         private bool _draining;
         private bool _stopped;
         private bool _cancelCompleted;
@@ -29,30 +30,45 @@ namespace Emby.Plugins.WatchTogether
 
         internal Task WhenIdle { get { lock (_gate) { return _idle.Task; } } }
 
-        internal bool TryEnqueueFresh(Action<CancellationToken, Func<bool>> send)
+        internal bool TryEnqueueFresh(Action<CancellationToken, Func<bool>> send, double delaySeconds = 0)
         {
             double queuedAt = _elapsedSeconds();
-            return TryEnqueue(token => send(token, () => _elapsedSeconds() - queuedAt <= 10));
+            return Enqueue(token => send(token, () => _elapsedSeconds() - queuedAt <= 10),
+                queuedAt, delaySeconds);
         }
 
-        internal bool TryEnqueue(Action<CancellationToken> send)
+        internal bool TryEnqueue(Action<CancellationToken> send) => Enqueue(send, _elapsedSeconds(), 0);
+
+        private bool Enqueue(Action<CancellationToken> send, double queuedAt, double delaySeconds)
+        {
+            // Only advisory text can be delayed, never playback or a room gate.
+            if (double.IsNaN(delaySeconds) || delaySeconds < 0 || delaySeconds > .5)
+                throw new ArgumentOutOfRangeException(nameof(delaySeconds));
+            lock (_gate)
+            {
+                if (_stopped || _queue.Count >= 64) return false;
+                _queue.Enqueue((send, queuedAt, queuedAt + delaySeconds));
+                if (_idle.Task.IsCompleted)
+                    _idle = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                StartDrain();
+                return true;
+            }
+        }
+
+        // Called only under _gate. There is at most one worker and one wake timer.
+        private void StartDrain()
+        {
+            if (_draining || _stopped) return;
+            _wake?.Change(Timeout.Infinite, Timeout.Infinite);
+            _draining = true;
+            Task.Run((Action)Drain);
+        }
+
+        private void Wake(object unused)
         {
             lock (_gate)
             {
-                if (_stopped || _queue.Count >= 64)
-                {
-                    return false;
-                }
-
-                _queue.Enqueue((send, _elapsedSeconds()));
-                if (!_draining)
-                {
-                    _draining = true;
-                    _idle = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    Task.Run((Action)Drain);
-                }
-
-                return true;
+                if (!_stopped && _queue.Count > 0) StartDrain();
             }
         }
 
@@ -63,6 +79,9 @@ namespace Emby.Plugins.WatchTogether
                 if (_stopped) return;
                 _stopped = true;
                 _queue.Clear();
+                _wake?.Dispose();
+                _wake = null;
+                if (!_draining) _idle.TrySetResult(true);
             }
 
             // Cancellation callbacks belong to the transport. Even an uncooperative
@@ -86,22 +105,38 @@ namespace Emby.Plugins.WatchTogether
         {
             while (true)
             {
-                Action<CancellationToken> send;
+                Action<CancellationToken> send = null;
                 lock (_gate)
                 {
-                    if (_stopped || _queue.Count == 0)
+                    double now = _elapsedSeconds();
+                    double nextReady = double.PositiveInfinity;
+                    // Rotate deferred entries rather than blocking ready messages behind them.
+                    int count = _queue.Count;
+                    for (int i = 0; !_stopped && i < count; i++)
+                    {
+                        var next = _queue.Dequeue();
+                        if (now - next.queuedAt > 10) continue;
+                        if (next.readyAt <= now)
+                        {
+                            send = next.send;
+                            break;
+                        }
+                        nextReady = Math.Min(nextReady, next.readyAt);
+                        _queue.Enqueue(next);
+                    }
+                    if (send == null)
                     {
                         _draining = false;
-                        _idle.TrySetResult(true);
+                        if (_stopped || _queue.Count == 0) _idle.TrySetResult(true);
+                        else
+                        {
+                            if (_wake == null) _wake = new Timer(Wake, null, Timeout.Infinite, Timeout.Infinite);
+                            _wake.Change(Math.Max(1, (int)Math.Ceiling((nextReady - now) * 1000)), Timeout.Infinite);
+                        }
                         DisposeStoppedSource();
                         return;
                     }
-
-                    var next = _queue.Dequeue();
-                    if (_elapsedSeconds() - next.queuedAt > 10) continue;
-                    send = next.send;
                 }
-
                 try { send(_token); }
                 catch { /* One failed message must not strand the drain. */ }
             }

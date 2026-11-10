@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -38,7 +39,9 @@ namespace Emby.Plugins.WatchTogether.Tests
             internal readonly SyncEngine Engine;
             internal readonly List<string> Errors = new();
             internal readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
-            internal Fixture(bool useBridgeIssuer = false, bool theaterCapabilities = false)
+            internal readonly ConcurrentQueue<string> Messages = new();
+            internal DateTimeOffset NotificationNow;
+            internal Fixture(bool useBridgeIssuer = false, bool theaterCapabilities = false, bool notifications = false)
             {
                 A = Session("a", "u1", theaterCapabilities); B = Session("b", "u2", theaterCapabilities);
                 Manager.Setup(m => m.Sessions).Returns(new[] { A, B });
@@ -57,9 +60,18 @@ namespace Emby.Plugins.WatchTogether.Tests
                 var logs=new Mock<ILogManager>();logs.Setup(l=>l.GetLogger(It.IsAny<string>())).Returns(logger.Object);
                 Manager.Setup(m=>m.SendPlayCommand(It.IsAny<string>(),It.IsAny<string>(),It.IsAny<PlayRequest>(),It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
                 Manager.Setup(m=>m.SendPlaystateCommand(It.IsAny<string>(),It.IsAny<string>(),It.IsAny<PlaystateRequest>(),It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-                Engine = new SyncEngine(Rooms, Provider, useBridgeIssuer ? new SessionBridgeCommandIssuer(Bridge) : Issuer, () => "server", notifyOnSyncActions:false,logManager:logs.Object);
+                Manager.Setup(m => m.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()))
+                    .Callback<string, string, MessageCommand, CancellationToken>((_, session, message, token) => Messages.Enqueue(message.Text))
+                    .Returns(Task.CompletedTask);
+                ICommandIssuer issuer = useBridgeIssuer ? new SessionBridgeCommandIssuer(Bridge) : Issuer;
+                NotificationNow = Now;
+                Engine = new SyncEngine(Rooms, Provider, issuer, () => "server",
+                    clock: notifications ? () => NotificationNow : null, notifyOnSyncActions: notifications,
+                    messageIssuer: notifications ? issuer as IMessageIssuer : null, logManager: logs.Object);
             }
-            internal void Poll(DateTimeOffset now) { Engine.PollOnce(now); Assert.True(Errors.Count==0,string.Join("\n",Errors)); }
+            internal Task NoticesIdle => ((Task)typeof(SyncEngine).GetProperty("NotificationsIdle", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(Engine)).WaitAsync(TimeSpan.FromSeconds(5));
+            internal void Poll(DateTimeOffset now) { NotificationNow = now; Engine.PollOnce(now); Assert.True(Errors.Count==0,string.Join("\n",Errors)); }
             internal void Polls(int first, int count)
             { for(var i=first;i<first+count;i++) Poll(Now.AddMilliseconds(i*100)); }
             private SessionInfo Session(string id, string user, bool theaterCapabilities)
@@ -187,16 +199,54 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Waiting, replay.Runtime.State);
         }
 
+        [Theory]
+        [InlineData("late_register", .5)]
+        [InlineData("late_register", 2.012)]
+        [InlineData("late_register", 4.587)]
+        [InlineData("early_register", 2.012)]
+        [InlineData("queued_stop", 2.012)]
+        public async Task TheaterNotifications_RealStopStartSnapshotsKeepCommandTraceAndOnlyCurrentCompletion(string scenario, double delay)
+        {
+            (string session, string command, string item, long? position)[] expected = null;
+            foreach (bool notifications in new[] { false, true })
+            {
+                using var replay = new TheaterReplay(notifications: notifications);
+                // Hold delivery while replaying the event sequence; this is queue staleness
+                // coverage, not a claim about how long a client actually displayed anything.
+                using ((IDisposable)typeof(RoomManager).GetMethod("TryEnterRoom", BindingFlags.NonPublic | BindingFlags.Instance)
+                    .Invoke(replay.F.Rooms, new object[] { replay.F.Room.Id }))
+                {
+                    replay.Begin(scenario, delay);
+                    for (int i = 1; i <= 24 && replay.Runtime.State != RoomState.Watching; i++)
+                        replay.Step(delay + i * .25);
+                    Assert.Equal(RoomState.Watching, replay.Runtime.State);
+                }
+                await replay.F.NoticesIdle;
+                if (!notifications) expected = replay.Sent.ToArray();
+                else
+                {
+                    Assert.Equal(expected, replay.Sent.ToArray());
+                    Assert.Equal(2, replay.F.Messages.Count);
+                    Assert.All(replay.F.Messages, message => Assert.Equal("已跟随切换，同步完成", message));
+                }
+                Assert.Single(replay.Sent, c => c.command == "PlayItem");
+                Assert.Equal(2, replay.Sent.Count(c => c.command == "Unpause"));
+                Assert.DoesNotContain(replay.Sent, c => c.command == "Seek");
+                Assert.Equal(delay < 2 ? 5 : 6, replay.Sent.Count);
+            }
+        }
+
         private sealed class TheaterReplay : IDisposable
         {
-            internal readonly Fixture F = new Fixture(useBridgeIssuer: true, theaterCapabilities: true);
+            internal readonly Fixture F;
             internal RoomRuntime Runtime => F.Rooms.GetRuntime(F.Room.Id);
             internal readonly List<(string session, string command, string item, long? position)> Sent = new();
             private readonly Queue<(string session, string command, string item, long? position)> _pending = new();
             private double _last;
             private readonly double _peerStartPosition;
-            internal TheaterReplay(double peerStartPosition = 0)
+            internal TheaterReplay(double peerStartPosition = 0, bool notifications = false)
             {
+                F = new Fixture(useBridgeIssuer: true, theaterCapabilities: true, notifications: notifications);
                 _peerStartPosition = peerStartPosition;
                 Assert.Equal(35, TheaterCommands.Length);
                 F.Manager.Setup(m => m.SendPlaystateCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))

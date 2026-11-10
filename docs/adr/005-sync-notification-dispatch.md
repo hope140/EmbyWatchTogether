@@ -37,3 +37,12 @@
 ## 2026-10-29 notification policy refinement
 
 Routine pause/seek/resume stage notices are omitted in favor of one completion per participant. Completion and retry notices bind an in-memory alignment operation token and room state; retry also binds its barrier stage and is attempted once per operation. Reset/new Barrier retires the old token. Existing identity, expiry and cancellation checks remain. Already dispatched network work still cannot be recalled. Snapshot freshness protection only handles strictly older LastActivity in stable eligible Watching without Pending; it is not an event sequence or a general replay detector.
+
+## 2026-11-10：停止提示短合并与发送时语义复核
+
+- 停止后的真实 Pause 仍按原 2 秒观察窗执行。仅停止文字增加 0.5 秒合并窗，提示改为“对方已停止播放，同步已暂停”，不在可能自动跟随的过渡期要求用户重新打开视频。合并窗不是送达期限；原有排队、传输等待和丢弃规则仍适用。
+- 延迟与立即消息共用 64 条等待容量和原 10 秒单调寿命。每引擎最多一个发送 worker 和一个单次唤醒 Timer；尚未到期的条目让出 worker，不阻塞后续 ready 消息或房间 gate。Stop 释放 Timer、清空等待消息，保留原在途取消规则。
+- 停止提示使用独立的内存通知代次，在停止确认的 reset 退休 alignment 代次后仍保留真实停止提醒；重复 stopped poll 不重复提醒。发送时重新检查该代次、Waiting/停止原因、原停止成员仍缺失；进入 Handoff、Barrier 或一般 reset 退休旧停止提示。通知字段不参与播放决策。
+- 不同视频提示绑定通知操作和 Waiting 状态，发送时复核原两端 Session/Item 仍成立且仍不同。Handoff 开始退休旧通知操作，避免旧完成提示发给仍留在旧 Item 的一端。
+- 完成提示仍只从有效 Watching 入口发出，发送时复核当前两端身份及可同步条件。FromMediaHandoff 使用“已跟随切换，同步完成”；不新增换集开始或阶段提示，不把 PlayItem 传输返回当作成功。原已暂停时仍保持暂停，不改变播放恢复意图、超时或错误指引。
+- `HandoffNotificationTests` 使用直接构造的快照和真实 SessionBridge/SDK 发送器验证临界时序、通知开关、正常停止/不同视频、超时、代次和命令序列；`StoppedPlaybackTests.TheaterNotifications_*` 进一步覆盖真实 SDK 的 Stop/Start/Progress、SessionBridgeSnapshotProvider 和 Theater 能力清单。`SyncNotificationDispatcherTests.DeferredEntries_*` 覆盖边界、容量、唤醒和寿命。这些是自动化模拟传输证据，不证明客户端实际展示或用户已看到消息；已进入底层的发送不能撤回。

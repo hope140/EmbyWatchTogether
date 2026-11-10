@@ -28,7 +28,7 @@ namespace Emby.Plugins.WatchTogether
         private const string StoppedPositionConfirmationError = "停止后播放位置相差较大，请使用重新同步确认恢复";
         private const string HandoffHoldRequiresResyncError = "media handoff hold requires explicit resync";
         private const string StoppedPlaybackMessageHeader = "一起观看";
-        private const string StoppedPlaybackMessageText = "对方已停止播放，请重新打开视频";
+        private const string StoppedPlaybackMessageText = "对方已停止播放，同步已暂停";
         private const string AutomaticResyncMessageHeader = "一起观看";
         private const string AutomaticResyncMessageText = "正在自动重新同步，请稍候";
         private const string BarrierSeekRetryBudgetError = "barrier seek retry budget exhausted";
@@ -449,6 +449,7 @@ namespace Emby.Plugins.WatchTogether
                             bool stopAlreadyHandled = IsStoppedPlaybackWaitingError(runtime.Error);
                             if (!stopAlreadyHandled)
                             {
+                                runtime.StopNotificationOperation = new object();
                                 // Confirmed Stop terminates the old playback sequence.
                                 // Its pending Unpause/Seek must not suppress the peer Pause.
                                 runtime.Pending.Clear();
@@ -556,7 +557,11 @@ namespace Emby.Plugins.WatchTogether
                                 snapshots,
                                 "双方打开了不同视频，已暂停同步；请打开同一视频",
                                 now,
-                                includeAll: true);
+                                includeAll: true,
+                                operation: runtime.NotificationOperation,
+                                expectedState: RoomState.Waiting,
+                                isCurrent: (current, selected) => NotificationPairMatches(snapshots, selected) &&
+                                    selected.Values.Select(value => value.ItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2);
                         }
                         else if (sameItem)
                         {
@@ -2184,6 +2189,8 @@ namespace Emby.Plugins.WatchTogether
                 };
             }
             runtime.State = RoomState.Handoff;
+            runtime.NotificationOperation = new object();
+            runtime.StopNotificationOperation = null;
             runtime.Error = null;
             runtime.Barrier = null;
             runtime.Pending.Clear();
@@ -2385,6 +2392,8 @@ namespace Emby.Plugins.WatchTogether
                 return;
             }
 
+            var stopOperation = runtime.StopNotificationOperation;
+            var missingUsers = stoppedUsers?.ToArray() ?? Array.Empty<string>();
             foreach (var pair in snapshots)
             {
                 var snapshot = pair.Value;
@@ -2399,13 +2408,15 @@ namespace Emby.Plugins.WatchTogether
                     // Display messages are advisory: a client that rejects the
                     // capability or fails to receive the message must not alter
                     // the stop transition or its existing pause behavior.
-                    QueueNotification(
-                        room,
-                        pair.Key,
-                        snapshot,
-                        StoppedPlaybackMessageHeader,
-                        StoppedPlaybackMessageText,
-                        stopNotice: true);
+                    QueueNotificationCore(room, pair.Key, snapshot,
+                        StoppedPlaybackMessageHeader, StoppedPlaybackMessageText,
+                        true, null, null, delaySeconds: .5,
+                        isCurrent: (current, selected) =>
+                            ReferenceEquals(current.StopNotificationOperation, stopOperation) &&
+                            current.State == RoomState.Waiting && IsStoppedPlaybackWaitingError(current.Error) &&
+                            missingUsers.Length > 0 && missingUsers.All(user =>
+                                room.JoinedParticipantUserIds.Contains(user, StringComparer.OrdinalIgnoreCase) &&
+                                !selected.ContainsKey(user)));
                 }
                 catch
                 {
@@ -2458,7 +2469,8 @@ namespace Emby.Plugins.WatchTogether
             bool includeAll,
             string excludeUserId = null,
             object operation = null,
-            RoomState? expectedState = null)
+            RoomState? expectedState = null,
+            Func<RoomRuntime, IReadOnlyDictionary<string, SessionSnapshot>, bool> isCurrent = null)
         {
             if (!_notifyOnSyncActions || _messageIssuer == null || room == null || snapshots == null)
             {
@@ -2481,13 +2493,25 @@ namespace Emby.Plugins.WatchTogether
                 try
                 {
                     QueueNotificationCore(room, userId, snapshot, "一起观看", text,
-                        false, operation, expectedState);
+                        false, operation, expectedState, isCurrent: isCurrent);
                 }
                 catch
                 {
                     // Advisory notification failures must not affect state.
                 }
             }
+        }
+
+        private static bool NotificationPairMatches(
+            IReadOnlyDictionary<string, SessionSnapshot> expected,
+            IReadOnlyDictionary<string, SessionSnapshot> current)
+        {
+            return expected.Count == 2 && current.Count == 2 && expected.All(pair =>
+                pair.Value != null && pair.Value.Online && !pair.Value.Stopped &&
+                current.TryGetValue(pair.Key, out var value) &&
+                value != null && value.Online && !value.Stopped &&
+                string.Equals(value.UserId, pair.Key, StringComparison.OrdinalIgnoreCase) &&
+                HasSameIdentity(pair.Value.SessionId, pair.Value.ItemId, value));
         }
 
         private static void UpdateAckLatency(RoomRuntime runtime, string userId, double latencySeconds)
@@ -3433,7 +3457,8 @@ namespace Emby.Plugins.WatchTogether
 
         private void QueueNotificationCore(Room room, string userId, SessionSnapshot original,
             string header, string text, bool stopNotice, object operation, RoomState? expectedState,
-            BarrierStage? expectedStage = null)
+            BarrierStage? expectedStage = null, double delaySeconds = 0,
+            Func<RoomRuntime, IReadOnlyDictionary<string, SessionSnapshot>, bool> isCurrent = null)
         {
             // All captured identities are immutable; selection is repeated for
             // each message, after queueing, rather than reusing poll authority.
@@ -3468,6 +3493,7 @@ namespace Emby.Plugins.WatchTogether
                         candidates, room.JoinedParticipantUserIds, now,
                         SessionSelector.StaleSessionTimeoutSeconds, runtime.Previous,
                         runtime.State == RoomState.Watching || runtime.State == RoomState.Handoff).Selected;
+                    if (isCurrent != null && !isCurrent(runtime, selected)) return;
                     if (!selected.TryGetValue(userId, out target) || target == null || !target.Online ||
                         !string.Equals(target.UserId, userId, StringComparison.OrdinalIgnoreCase) ||
                         !HasSameIdentity(sessionId, itemId, target) ||
@@ -3478,7 +3504,7 @@ namespace Emby.Plugins.WatchTogether
                 if (!isFresh() || token.IsCancellationRequested || _stopRequested) return;
                 TryIssueMessage(room.Id, adminUserId, userId, target, header, text,
                     NotificationTimeoutMs, now, token, out _);
-            });
+            }, delaySeconds);
         }
 
         private bool TryIssueMessage(
@@ -3919,6 +3945,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.State = RoomState.Barrier;
             runtime.Error = null;
             runtime.NotificationOperation = new object();
+            runtime.StopNotificationOperation = null;
             runtime.RetryNotificationSent = false;
             runtime.Barrier = new BarrierState
             {
@@ -4440,11 +4467,13 @@ namespace Emby.Plugins.WatchTogether
             NotifyParticipants(
                 room,
                 snapshots,
-                "同步已完成，可以继续观看",
+                barrier.FromMediaHandoff ? "已跟随切换，同步完成" : "同步已完成，可以继续观看",
                 now,
                 includeAll: true,
                 operation: runtime.NotificationOperation,
-                expectedState: RoomState.Watching);
+                expectedState: RoomState.Watching,
+                isCurrent: (current, selected) => NotificationPairMatches(snapshots, selected) &&
+                    RoomEligibility.IsPairEligible(selected));
             _logger?.Info(
                 $"Room {room.Id}: entered Watching, members={string.Join(",", snapshots.Keys)}, " +
                 $"primaryPaused={barrier.PrimaryPaused}");

@@ -296,6 +296,9 @@
 ## 40. Operation-bound notices and provably stale control snapshots
 
 - Routine seek/pause/resume stages do not each need a toast. Report one completed alignment per participant; bound retry attempts by the alignment operation and discard queued notices after operation or stage changes. Already dispatched transport cannot be recalled.
+- 停止和不同视频文字也要在发送前复核原因，不能仅验证接收端 Session/Item；另一端已恢复或换片而接收端尚未改变时，旧提醒仍可能通过身份检查。停止文字的 0.5 秒合并只属于通知调度，不延迟真实 Pause，不延长 2 秒停止判定或 10 秒换集候选窗。
+- 停止确认中的 reset 会退休 alignment 通知 token，不能直接用它绑定该次延迟停止提醒。独立停止通知代次跨重复 stopped poll 保留，在真实新停止时换代，Handoff/Barrier/一般 reset 退休；发送时仍检查停止方缺失。完成提示复核当前双端条件，并仅在 FromMediaHandoff 明确提示跟随完成。没有新增阶段 toast。
+- `HandoffNotificationTests` 及 `StoppedPlaybackTests.TheaterNotifications_*` 覆盖停止确认后 12 毫秒到达新 Start、迟到换片、陈旧双端状态、连续换片、暂停意图和通知开关，核对通知开启/关闭的播放命令序列一致；`SyncNotificationDispatcherTests` 覆盖单 Timer、ready 消息不受延迟项阻塞、64 条共享容量、0.5 秒及 10 秒边界和 Stop 清理。直接快照夹具、Bridge/SDK 事件链和真实客户端显示是不同证据层。
 - LastActivityDateUtc is not a playback sequence. Only reject strictly older activity in an eligible, complete, identity-stable Watching pair with no Pending. Never let this guard hide missing/stopped users, identity changes, eligibility loss or Pending deadlines. Equal/new timestamps keep real user controls, including the unavoidable fresh-timestamp replay ambiguity.
 - SyncToastTests and SyncToastReplayTests cover normal seek, pause-drag-resume, repeated polls, delayed confirmation, operation/stage retirement, older/equal/new timestamps and identity/capability negative cases. These fixtures are not evidence of the user's real network/client cause.
 - 诊断事件代码要同时进入服务端脱敏白名单与浏览器标签映射。`snapshot_ignored` / `older_activity` 在两层均保留后，才能显示及导出忽略旧快照的准确原因；未知或混入额外文本的值仍按原规则清洗。`SyncDiagnosticsTests.ExportPreservesSafeIgnoredSnapshotCodesOnly` 与浏览器诊断导出用例验证这条链路；页面/控制器/路由缓存键同步递增为 V17。

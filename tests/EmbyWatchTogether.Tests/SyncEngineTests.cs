@@ -6368,7 +6368,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var message = Assert.Single(_messageIssuer.Issued);
             Assert.Equal("u2", message.userId);
             Assert.Equal("一起观看", message.header);
-            Assert.Equal("对方已停止播放，请重新打开视频", message.text);
+            Assert.Equal("对方已停止播放，同步已暂停", message.text);
             Assert.Equal(3000, message.timeoutMs);
         }
 

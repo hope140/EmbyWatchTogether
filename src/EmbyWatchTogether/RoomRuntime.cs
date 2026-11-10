@@ -142,6 +142,8 @@ namespace Emby.Plugins.WatchTogether
         public BarrierState Barrier { get; set; }
         internal object NotificationOperation { get; set; } = new object();
         internal bool RetryNotificationSent { get; set; }
+        // A confirmed stop resets alignment; its separate notice survives that reset and later polls.
+        internal object StopNotificationOperation { get; set; }
 
         public DateTimeOffset? BarrierRetryAtUtc { get; set; }
 
@@ -370,6 +372,7 @@ namespace Emby.Plugins.WatchTogether
         private void ResetToWaitingCore(bool preservePrimaryItemTransitionCandidate)
         {
             NotificationOperation = new object();
+            if (!preservePrimaryItemTransitionCandidate) StopNotificationOperation = null;
             RetryNotificationSent = false;
             bool preserveStopIdentity = MissingSessionSinceUtc.HasValue;
             bool preserveAutoRepairHistory = Barrier?.FromAutomaticDriftRepair == true;

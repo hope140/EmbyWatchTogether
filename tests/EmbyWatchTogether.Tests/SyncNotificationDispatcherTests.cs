@@ -104,6 +104,94 @@ namespace Emby.Plugins.WatchTogether.Tests
             finally { release.Set(); }
         }
 
+        [Fact]
+        public async Task DeferredEntries_DoNotBlockReadyWork_AndUseExactMonotonicBoundary()
+        {
+            double monotonic = 0;
+            using var queue = new QueueProbe(() => Volatile.Read(ref monotonic));
+            int calls = 0;
+            Assert.True(queue.EnqueueFresh((_, fresh) => { Assert.True(fresh()); Interlocked.Increment(ref calls); }, .5));
+            await queue.DrainReady();
+            Assert.Equal(0, calls);
+            Assert.False(queue.Idle.IsCompleted);
+            Volatile.Write(ref monotonic, .499);
+            await queue.DrainReady();
+            Assert.Equal(0, calls);
+            Volatile.Write(ref monotonic, .5);
+            await queue.DrainReady();
+            await queue.Idle.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, calls);
+        }
+
+        [Fact]
+        public async Task DeferredEntries_ShareCapacity_AndTimerWakesWithoutNewEnqueue()
+        {
+            using var queue = new QueueProbe();
+            using var release = new ManualResetEventSlim();
+            var entered = Signal();
+            int calls = 0;
+            queue.Enqueue(_ => { entered.TrySetResult(true); release.Wait(); });
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                for (int i = 0; i < 64; i++)
+                    Assert.True(queue.EnqueueFresh((_, fresh) => { if (fresh()) Interlocked.Increment(ref calls); }, .5));
+                Assert.False(queue.EnqueueFresh((_, fresh) => Interlocked.Add(ref calls, 1000), .5));
+                release.Set();
+                await queue.Idle.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(64, calls);
+            }
+            finally { release.Set(); }
+        }
+
+        [Theory]
+        [InlineData(10, 1)]
+        [InlineData(10.001, 0)]
+        public async Task DeferredEntries_ExpiryIncludesTheDelay(double elapsed, int expected)
+        {
+            double monotonic = 0;
+            using var queue = new QueueProbe(() => Volatile.Read(ref monotonic));
+            int calls = 0;
+            queue.EnqueueFresh((_, fresh) => { if (fresh()) Interlocked.Increment(ref calls); }, .5);
+            await queue.DrainReady();
+            Volatile.Write(ref monotonic, elapsed);
+            await queue.DrainReady();
+            await queue.Idle.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(expected, calls);
+        }
+
+        [Fact]
+        public async Task Stop_ClearsDeferredEntriesAndCompletesIdleWithoutWaitingForTimer()
+        {
+            double monotonic = 0;
+            using var queue = new QueueProbe(() => Volatile.Read(ref monotonic));
+            int calls = 0;
+            queue.EnqueueFresh((_, fresh) => Interlocked.Increment(ref calls), .5);
+            await queue.DrainReady();
+            queue.Stop();
+            await queue.Idle.WaitAsync(TimeSpan.FromSeconds(5));
+            Volatile.Write(ref monotonic, 1);
+            Assert.False(queue.EnqueueFresh((_, fresh) => Interlocked.Increment(ref calls), .5));
+            Assert.Equal(0, calls);
+        }
+
+        [Fact]
+        public async Task DeferredEntries_ReuseOneTimer_AndStopDisposesIt()
+        {
+            double monotonic = 0;
+            using var queue = new QueueProbe(() => Volatile.Read(ref monotonic));
+            queue.EnqueueFresh((_, fresh) => { }, .5);
+            var first = queue.WaitForDeferredTimer();
+            Volatile.Write(ref monotonic, .2);
+            await queue.DrainReady();
+            var second = queue.WaitForDeferredTimer();
+            Assert.Same(first, second);
+            queue.Stop();
+            await queue.Idle.WaitAsync(TimeSpan.FromSeconds(5));
+            // The current Timer API reports a disposed timer by returning false.
+            Assert.False(first.Change(1, Timeout.Infinite));
+        }
+
         private static TaskCompletionSource<bool> Signal() =>
             new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -120,6 +208,29 @@ namespace Emby.Plugins.WatchTogether.Tests
             internal bool Enqueue(Action<CancellationToken> send) =>
                 (bool)_type.GetMethod("TryEnqueue", BindingFlags.Instance | BindingFlags.NonPublic)
                     .Invoke(_queue, new object[] { send });
+            internal bool EnqueueFresh(Action<CancellationToken, Func<bool>> send, double delay) =>
+                (bool)_type.GetMethod("TryEnqueueFresh", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(_queue, new object[] { send, delay });
+            internal Task DrainReady()
+            {
+                var signal = Signal();
+                Assert.True(Enqueue(_ => signal.TrySetResult(true)));
+                return signal.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            internal Timer WaitForDeferredTimer()
+            {
+                var gate = _type.GetField("_gate", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_queue);
+                Timer timer = null;
+                Assert.True(SpinWait.SpinUntil(() =>
+                {
+                    lock (gate)
+                    {
+                        timer = (Timer)_type.GetField("_wake", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_queue);
+                        return timer != null && !(bool)_type.GetField("_draining", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_queue);
+                    }
+                }, TimeSpan.FromSeconds(5)), "Deferred worker did not yield to its timer");
+                return timer;
+            }
             internal Task Idle => (Task)_type.GetProperty("WhenIdle", BindingFlags.Instance | BindingFlags.NonPublic)
                 .GetValue(_queue);
             internal void Stop() => _type.GetMethod("Stop", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(_queue, null);
