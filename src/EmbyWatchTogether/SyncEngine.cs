@@ -3307,7 +3307,12 @@ namespace Emby.Plugins.WatchTogether
                 try
                 {
                     ThrowIfStopping();
-                    bool accepted = issuer.TryIssuePlayItem(
+                    // Capture under the room gate; retain this playback generation's markers.
+                    var commandSources = runtime.CommandSnapshots?.Values.ToArray();
+                    bool accepted = issuer is ISourceBoundPlayItemIssuer sourceBound
+                        ? sourceBound.TryIssuePlayItem(room.Id, room.AdminUserId, snapshot.UserId,
+                            snapshot, itemId, now, timeout.Token, commandSources, out error)
+                        : issuer.TryIssuePlayItem(
                         room.Id,
                         room.AdminUserId,
                         snapshot.UserId,
@@ -3348,7 +3353,8 @@ namespace Emby.Plugins.WatchTogether
             string command,
             long? positionTicks,
             DateTimeOffset now,
-            out string error)
+            out string error,
+            SessionSnapshot[] commandSources = null)
         {
             ThrowIfStopping();
             if (snapshot == null || !snapshot.Online || !snapshot.SupportsRemoteControl)
@@ -3395,6 +3401,7 @@ namespace Emby.Plugins.WatchTogether
                     positionTicks,
                     now,
                     timeout.Token,
+                    commandSources,
                     out error);
                 ThrowIfStopping();
                 return accepted;
@@ -3581,7 +3588,10 @@ namespace Emby.Plugins.WatchTogether
                 command,
                 positionTicks,
                 now,
-                out var error);
+                out var error,
+                command == RemoteCommands.Seek || command == RemoteCommands.Unpause
+                    ? runtime.CommandSnapshots?.Values.ToArray()
+                    : null);
             ThrowIfStopping();
 
             if (!ok)

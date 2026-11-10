@@ -17,7 +17,8 @@ namespace Emby.Plugins.WatchTogether
         IMessageIssuer,
         ICancellableCommandIssuer,
         ICancellableMessageIssuer,
-        IPlayItemIssuer
+        IPlayItemIssuer,
+        ISourceBoundPlayItemIssuer
     {
         private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(5);
         private readonly SessionBridge _bridge;
@@ -26,11 +27,14 @@ namespace Emby.Plugins.WatchTogether
 
         private sealed class PlaybackTerminatedException : Exception { }
 
-        private static Task DispatchPlayback(SessionSnapshot snapshot, Func<Task> send)
+        private static Task DispatchPlayback(SessionSnapshot snapshot, SessionSnapshot[] commandSources, Func<Task> send)
         {
             // Execute runs on a worker after admission. A Stop (even followed by
             // a new Start) must not authorize work queued with an old snapshot.
             if (snapshot.PlaybackTerminated) throw new PlaybackTerminatedException();
+            if (commandSources != null)
+                foreach (var source in commandSources)
+                    if (source?.PlaybackTerminated == true) throw new PlaybackTerminatedException();
             return send();
         }
 
@@ -74,6 +78,7 @@ namespace Emby.Plugins.WatchTogether
                     positionTicks,
                     now,
                     timeout.Token,
+                    null,
                     out error);
             }
         }
@@ -87,6 +92,7 @@ namespace Emby.Plugins.WatchTogether
             long? positionTicks,
             DateTimeOffset now,
             CancellationToken cancellationToken,
+            SessionSnapshot[] commandSources,
             out string error)
         {
             return TryIssueWithCancellation(
@@ -98,6 +104,7 @@ namespace Emby.Plugins.WatchTogether
                 positionTicks,
                 now,
                 cancellationToken,
+                commandSources,
                 out error);
         }
 
@@ -110,6 +117,7 @@ namespace Emby.Plugins.WatchTogether
             long? positionTicks,
             DateTimeOffset now,
             CancellationToken cancellationToken,
+            SessionSnapshot[] commandSources,
             out string error)
         {
             if (snapshot == null || !snapshot.Online)
@@ -130,17 +138,17 @@ namespace Emby.Plugins.WatchTogether
                 {
                     case RemoteCommands.Pause:
                         _dispatch.Execute("playback:" + snapshot.SessionId,
-                            token => DispatchPlayback(snapshot, () => _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, token)),
+                            token => DispatchPlayback(snapshot, null, () => _bridge.SendPauseAsync(controllingUserId, snapshot.SessionId, token)),
                             cancellationToken);
                         break;
                     case RemoteCommands.Unpause:
                         _dispatch.Execute("playback:" + snapshot.SessionId,
-                            token => DispatchPlayback(snapshot, () => _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, token)),
+                            token => DispatchPlayback(snapshot, commandSources, () => _bridge.SendUnpauseAsync(controllingUserId, snapshot.SessionId, token)),
                             cancellationToken);
                         break;
                     case RemoteCommands.Seek:
                         _dispatch.Execute("playback:" + snapshot.SessionId,
-                            token => DispatchPlayback(snapshot, () => _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, token)),
+                            token => DispatchPlayback(snapshot, commandSources, () => _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, token)),
                             cancellationToken);
                         break;
                     default:
@@ -213,6 +221,14 @@ namespace Emby.Plugins.WatchTogether
             CancellationToken cancellationToken,
             out string error)
         {
+            return ((ISourceBoundPlayItemIssuer)this).TryIssuePlayItem(roomId, controllingUserId,
+                userId, snapshot, itemId, now, cancellationToken, null, out error);
+        }
+
+        bool ISourceBoundPlayItemIssuer.TryIssuePlayItem(string roomId, string controllingUserId,
+            string userId, SessionSnapshot snapshot, string itemId, DateTimeOffset now,
+            CancellationToken cancellationToken, SessionSnapshot[] commandSources, out string error)
+        {
             if (string.IsNullOrWhiteSpace(controllingUserId) ||
                 string.IsNullOrWhiteSpace(userId) ||
                 string.IsNullOrWhiteSpace(itemId) ||
@@ -250,7 +266,7 @@ namespace Emby.Plugins.WatchTogether
                     dispatchTimer = Stopwatch.StartNew();
                 }
                 _dispatch.Execute("playback:" + snapshot.SessionId,
-                    token => DispatchPlayback(snapshot, () => _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, token)),
+                    token => DispatchPlayback(snapshot, commandSources, () => _bridge.SendPlayItemAsync(controllingUserId, snapshot.SessionId, itemId, token)),
                     cancellationToken);
                 if (_logger != null)
                 {

@@ -14,6 +14,7 @@ using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
 {
+    [Collection(TransportTimingCollection.Name)]
     public class StoppedPlaybackTests
     {
         private sealed class Issuer : ICommandIssuer
@@ -92,6 +93,139 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Stop(s,p);
             }
             public void Dispose() { Engine.Dispose(); Bridge.Dispose(); }
+        }
+
+        [Theory]
+        [InlineData("Seek", false, false)]
+        [InlineData("Seek", false, true)]
+        [InlineData("Seek", true, false)]
+        [InlineData("Seek", true, true)]
+        [InlineData("Unpause", false, false)]
+        [InlineData("Unpause", false, true)]
+        [InlineData("Unpause", true, false)]
+        [InlineData("Unpause", true, true)]
+        [InlineData("PlayItem", false, false)]
+        [InlineData("PlayItem", false, true)]
+        [InlineData("PlayItem", true, false)]
+        [InlineData("PlayItem", true, true)]
+        [InlineData("Pause", false, false)]
+        [InlineData("Pause", false, true)]
+        [InlineData("Pause", true, false)]
+        [InlineData("Pause", true, true)]
+        public void SourceBoundDispatch_StopBoundary(string command, bool targetStop, bool afterEntry)
+        {
+            using var f = new Fixture();
+            f.Progress(f.A, f.A.GetPlaySessionInfo("p1"));
+            f.Progress(f.B, f.B.GetPlaySessionInfo("p2"));
+            var sources = f.Provider.GetSessionSnapshots().ToArray();
+            var target = sources.Single(s => s.UserId == "u2");
+            var session = targetStop ? f.B : f.A;
+            var playback = session.GetPlaySessionInfo(targetStop ? "p2" : "p1");
+            int sends = 0;
+            void EnterTransport()
+            {
+                sends++;
+                if (afterEntry) f.ServerStop(session, playback);
+            }
+            f.Manager.Setup(m => m.SendPlaystateCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                .Callback(EnterTransport).Returns(Task.CompletedTask);
+            f.Manager.Setup(m => m.SendPlayCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                .Callback(EnterTransport).Returns(Task.CompletedTask);
+            if (!afterEntry) f.ServerStop(session, playback);
+            var issuer = new SessionBridgeCommandIssuer(f.Bridge);
+            var method = typeof(SessionBridgeCommandIssuer).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance)
+                .Single(m => m.Name.EndsWith(command == "PlayItem" ? "ISourceBoundPlayItemIssuer.TryIssuePlayItem" : "ICancellableCommandIssuer.TryIssue"));
+            object[] arguments = command == "PlayItem"
+                ? new object[] { "room", "u1", "u2", target, "43", f.Now, CancellationToken.None, sources, null }
+                : new object[] { "room", "u1", "u2", target, command, (long?)6000000000, f.Now, CancellationToken.None, sources, null };
+            var accepted = (bool)method.Invoke(issuer, arguments);
+            var expected = afterEntry || (!targetStop && command == "Pause");
+            Assert.Equal(expected, accepted);
+            Assert.Equal(expected ? 1 : 0, sends);
+            playback.NowPlayingItem = new BaseItemDto { Id = "42", RunTimeTicks = 1500L * 10000000 };
+            f.Start(session, playback);
+            var fresh = f.Provider.GetSessionSnapshots().ToArray();
+            arguments[3] = fresh.Single(s => s.UserId == "u2");
+            arguments[arguments.Length - 2] = fresh;
+            Assert.True((bool)method.Invoke(issuer, arguments));
+            Assert.Equal(expected ? 2 : 1, sends);
+        }
+
+        [Theory]
+        [InlineData("Seek", false, false)]
+        [InlineData("Seek", false, true)]
+        [InlineData("Seek", true, false)]
+        [InlineData("Seek", true, true)]
+        [InlineData("Unpause", false, false)]
+        [InlineData("Unpause", false, true)]
+        [InlineData("Unpause", true, false)]
+        [InlineData("Unpause", true, true)]
+        [InlineData("PlayItem", false, false)]
+        [InlineData("PlayItem", false, true)]
+        [InlineData("PlayItem", true, false)]
+        [InlineData("PlayItem", true, true)]
+        [InlineData("Seek", null, false)]
+        [InlineData("Unpause", null, false)]
+        [InlineData("PlayItem", null, false)]
+        public void QueuedSourceStop_PreventsTransport(string command, bool? targetStop, bool restart)
+        {
+            using var f = new Fixture(useBridgeIssuer: true);
+            var old = f.A.GetPlaySessionInfo("p1"); f.Progress(f.A, old);
+            f.Progress(f.B, f.B.GetPlaySessionInfo("p2"));
+            f.Play(f.A, "p1", command == "Seek" ? 600 : 300, "42", command == "Seek");
+            if (command == "PlayItem")
+            {
+                f.A.RemovePlaySession(old);
+                old = f.Play(f.A, "next", 0, "43"); f.Start(f.A, old);
+            }
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            var issuer = typeof(SyncEngine).GetField("_issuer", flags).GetValue(f.Engine);
+            var dispatch = typeof(SessionBridgeCommandIssuer).GetField("_dispatch", flags).GetValue(issuer);
+            var gate = dispatch.GetType().GetField("_lock", flags).GetValue(dispatch);
+            Exception fault = null;
+            var thread = new Thread(() => { try { f.Poll(f.Now); } catch (Exception e) { fault = e; } }) { IsBackground = true };
+            lock (gate)
+            {
+                thread.Start();
+                Assert.True(SpinWait.SpinUntil(() => (thread.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, 2000));
+                if (targetStop.HasValue)
+                {
+                    var stoppedSession = targetStop.Value ? f.B : f.A;
+                    var stoppedPlayback = targetStop.Value ? f.B.GetPlaySessionInfo("p2") : old;
+                    var item = stoppedPlayback.NowPlayingItem;
+                    f.ServerStop(stoppedSession, stoppedPlayback);
+                    if (restart)
+                    {
+                        stoppedPlayback.NowPlayingItem = item;
+                        f.Start(stoppedSession, stoppedPlayback);
+                    }
+                }
+            }
+            Assert.True(thread.Join(6000)); Assert.Null(fault);
+            if (!targetStop.HasValue)
+            {
+                var sent = Assert.Single(f.Manager.Invocations, i =>
+                    i.Method.Name == "SendPlayCommand" || i.Method.Name == "SendPlaystateCommand");
+                Assert.Equal("b", sent.Arguments[1]);
+                if (command == "PlayItem")
+                {
+                    Assert.Equal("SendPlayCommand", sent.Method.Name);
+                    Assert.Equal(43L, Assert.Single(((PlayRequest)sent.Arguments[2]).ItemIds));
+                }
+                else
+                {
+                    Assert.Equal("SendPlaystateCommand", sent.Method.Name);
+                    var request = (PlaystateRequest)sent.Arguments[2];
+                    Assert.Equal(command == "Seek" ? PlaystateCommand.Seek : PlaystateCommand.Unpause, request.Command);
+                    if (command == "Seek") Assert.Equal(600L * 10000000, request.SeekPositionTicks);
+                }
+                return;
+            }
+            f.Manager.Verify(m => m.SendPlaystateCommand(It.IsAny<string>(), "b",
+                It.Is<PlaystateRequest>(r => r.Command == PlaystateCommand.Seek || r.Command == PlaystateCommand.Unpause),
+                It.IsAny<CancellationToken>()), Times.Never);
+            f.Manager.Verify(m => m.SendPlayCommand(It.IsAny<string>(), "b", It.IsAny<PlayRequest>(),
+                It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [Theory]

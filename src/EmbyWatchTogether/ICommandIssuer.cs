@@ -41,7 +41,18 @@ namespace Emby.Plugins.WatchTogether
             long? positionTicks,
             DateTimeOffset now,
             CancellationToken cancellationToken,
+            SessionSnapshot[] commandSources,
             out string error);
+    }
+
+    /// <summary>
+    /// Internal live-engine path retaining the selected source playback markers.
+    /// </summary>
+    internal interface ISourceBoundPlayItemIssuer
+    {
+        bool TryIssuePlayItem(string roomId, string controllingUserId, string userId,
+            SessionSnapshot snapshot, string itemId, DateTimeOffset now,
+            CancellationToken cancellationToken, SessionSnapshot[] commandSources, out string error);
     }
 
     /// <summary>
