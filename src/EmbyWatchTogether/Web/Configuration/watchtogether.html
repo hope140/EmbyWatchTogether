@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherNativeV19.js"
+     data-controller="__plugin/WatchTogetherNativeV20.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -329,7 +329,7 @@
                     <input is="emby-checkbox" id="wtNotifyOnSyncActions" type="checkbox" />
                     <span>同步操作时向播放端发送文字提示</span>
                 </label>
-                <div class="fieldDescription">覆盖暂停、继续、进度调整、重新同步、加入、退出、视频不一致和同步完成提示；播放端提示约 3 秒自动消失。</div>
+                <div class="fieldDescription">覆盖管理员暂停/继续、重新同步、加入/退出、视频不一致和同步完成提示；普通暂停、继续与进度调整不逐步弹窗。停止提示由上方独立开关控制，管理员主动发送消息不受此开关限制。提示样式和显示时长由播放端决定，不保证显示标题或约 3 秒消失。</div>
                 <h3 class="wt-subHeading wt-updateSetting">更新通道</h3>
                 <div class="selectContainer wt-fieldWide wt-updateSetting wt-selectField">
                     <select is="emby-select" id="wtUpdateChannel" label="更新通道">

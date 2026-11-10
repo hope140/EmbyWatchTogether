@@ -784,7 +784,7 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var message in messages)
             {
-                TrySendDisplayMessage(plugin, message);
+                TrySendDisplayMessage(plugin, message, requireSyncNotifications: true);
             }
         }
 
@@ -828,11 +828,12 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var message in messages)
             {
-                TrySendDisplayMessage(plugin, message);
+                TrySendDisplayMessage(plugin, message, requireSyncNotifications: true);
             }
         }
 
-        private static DisplayMessageResult TrySendDisplayMessage(Plugin plugin, DisplayMessageTarget message)
+        private static DisplayMessageResult TrySendDisplayMessage(Plugin plugin, DisplayMessageTarget message,
+            bool requireSyncNotifications = false)
         {
             try
             {
@@ -842,6 +843,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     if (access == null || !ReferenceEquals(access.Room, message.Room) ||
                         !ReferenceEquals(plugin.Rooms, rooms) || plugin.Bridge == null ||
+                        (requireSyncNotifications && !IsSyncNotificationsEnabled(plugin)) ||
                         !access.Room.IsJoined(message.UserId) ||
                         !IsSameServer(message.ServerId, plugin.ResolveServerId()))
                     {
@@ -864,6 +866,9 @@ namespace Emby.Plugins.WatchTogether
                 // A preceding send can block while membership or session identity
                 // changes. Revalidate each unsent target, but keep transport outside
                 // the gate so it cannot prevent those lifecycle transitions.
+                // Explicit administrator messages remain independent of automatic notices.
+                if (requireSyncNotifications && !IsSyncNotificationsEnabled(plugin))
+                    return DisplayMessageResult.Skipped;
                 var messageIssuer = plugin.Issuer as IMessageIssuer;
                 if (messageIssuer != null)
                 {

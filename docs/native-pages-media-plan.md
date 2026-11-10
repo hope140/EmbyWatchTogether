@@ -28,7 +28,7 @@ S124 后续本地部署页面键为 V16，用户于 2026-10-19 确认最终普�
 4. 元数据失败显示“媒体信息暂不可用”；状态失败、房间移除、Waiting/Handoff/Recovering、账号或服务器变化、pause 清除当前片名并使在途目标失效。State 读取与元数据读取分别 single-flight，慢媒体不得阻塞后续 State。
 5. State 的显示新鲜度窗口为 10 秒，超过窗口或请求本身耗时超过窗口后不继续展示旧片名；下一次可靠响应恢复显示。它是 UI 数据新鲜度约束，不改变后端恢复时限。
 6. 片名使用 textContent，不含播放箭头或进度控件；电影显示 Name，剧集优先 SeriesName 并显示有效季集，季号 0 可显示特别篇。V10 背景仅取当前授权媒体 DTO 的背景标签，经宿主 SDK 和同源检查生成地址；媒体名、图片标识与 URL 不进入诊断导出、日志或持久浏览器缓存。
-7. 当前开发页面缓存键为 `WatchTogetherRoomsV19`、`WatchTogetherInviteV19`、`WatchTogetherSettingsV19`，共用 `WatchTogetherNativeV19.js`；S122 首次发布时为 V12。原生 mainTabsManager 对同 owner 不重建标签列表，必须在权限判定后注册；只清理仍由本页持有的标签元素。
+7. 当前开发页面缓存键为 `WatchTogetherRoomsV20`、`WatchTogetherInviteV20`、`WatchTogetherSettingsV20`，共用 `WatchTogetherNativeV20.js`；S122 首次发布时为 V12。原生 mainTabsManager 对同 owner 不重建标签列表，必须在权限判定后注册；只清理仍由本页持有的标签元素。
 8. 头像只接受当前房间两名不同成员及受限 Participants 摘要共同包含的用户 ID；宿主 getUserImageUrl 返回地址复用同源检查，不额外获取用户资料。头像可在等待状态显示，失败回退首字；代次、身份、view、成员和 URL 校验阻止旧回调回显。
 
 ## 验证与部署记录

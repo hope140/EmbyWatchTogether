@@ -1306,6 +1306,11 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("unchanged", "message")]
         [InlineData("member_left", "pause")]
         [InlineData("member_left", "resync")]
+        [InlineData("notifications_disabled", "pause")]
+        [InlineData("notifications_disabled", "resume")]
+        [InlineData("notifications_disabled", "resync")]
+        [InlineData("notifications_disabled", "message")]
+        [InlineData("notifications_disabled_initial", "message")]
         public async Task Message_BlockingIssuerDoesNotHoldRoomGate_AndRevalidatesLaterTargets(
             string change, string action)
         {
@@ -1326,6 +1331,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             using var bridge = new SessionBridge(sessionManager.Object);
             var issuer = new BlockingMessageIssuer();
             var plugin = NewPlugin(manager, bridge, issuer, "server-1");
+            if (change == "notifications_disabled_initial")
+                SetPluginConfiguration(plugin, new PluginConfiguration { NotifyOnSyncActions = false });
             var service = NewService(primaryUserId, administrator: true);
             SetRuntimePlugin(service, plugin);
 
@@ -1343,6 +1350,9 @@ namespace Emby.Plugins.WatchTogether.Tests
                     {
                         switch (change)
                         {
+                            case "notifications_disabled":
+                                SetPluginConfiguration(plugin, new PluginConfiguration { NotifyOnSyncActions = false });
+                                break;
                             case "member_left":
                                 Assert.True(manager.SetParticipantJoined(room.Id, otherUserId, false));
                                 break;
@@ -1378,7 +1388,8 @@ namespace Emby.Plugins.WatchTogether.Tests
                 issuer.Release.Set();
             }
             var response = await messageTask.WaitAsync(TimeSpan.FromSeconds(2));
-            var expectedSent = change == "unchanged" ? 2 : 1;
+            var expectedSent = change == "unchanged" ||
+                action == "message" && change.StartsWith("notifications_disabled", StringComparison.Ordinal) ? 2 : 1;
             Assert.Equal(expectedSent, issuer.TargetSessions.Count);
             Assert.Equal("session-primary", issuer.TargetSessions[0]);
             if (expectedSent == 2) Assert.Equal("session-other", issuer.TargetSessions[1]);

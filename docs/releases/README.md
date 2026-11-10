@@ -8,9 +8,14 @@
 
 ## 当前测试版
 
-- [v1.7.2.7 测试版说明](v1.7.2.7.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.7) · [发布核验记录](../maintenance/v1.7.2.7-beta-publication.md)：主控换集暂停等待、短暂远控异常后的跟随和停止后大进度差的确认恢复。
+- [v1.7.2.12 测试版说明](v1.7.2.12.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.12)：换集提示合并、失效复核与通知开关的逐条生效边界；实际客户端提示展示仍待验证。
 
 ## 历史发布
+
+- [v1.7.2.11 测试版说明](v1.7.2.11.md)：停止来源的排队命令撤销与 Theater 换集能力兼容。
+- [v1.7.2.10 测试版说明](v1.7.2.10.md)：停止后晚到换集历史与控制资格分离。
+- [v1.7.2.9 测试版说明](v1.7.2.9.md)、[v1.7.2.8 测试版说明](v1.7.2.8.md)：停止播放代次与旧快照保护。
+- [v1.7.2.7 测试版说明](v1.7.2.7.md) · [发布核验记录](../maintenance/v1.7.2.7-beta-publication.md)：换集暂停等待与停止后恢复确认。
 
 - [v1.7.2.6 测试版说明](v1.7.2.6.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.6) · [发布核验记录](../maintenance/v1.7.2.6-beta-publication.md)：创建表单显示明确成功与失败结果，列表刷新失败保留创建成功事实。
 
