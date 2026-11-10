@@ -215,11 +215,103 @@ namespace Emby.Plugins.WatchTogether.Tests
             await f.Idle;
             Assert.Equal(RoomState.Waiting, f.Runtime.State);
             Assert.StartsWith("media handoff ", f.Runtime.Error);
-            Assert.Empty(f.Messages);
+            Assert.Equal(2, f.Messages.Count);
+            Assert.All(f.Messages, message => Assert.Contains("手动重新同步", message.text));
             Assert.Equal(new[] { "s2:Play:43" }, f.Commands.ToArray());
             f.Set("u2", "43", true, 0); f.Tick();
             Assert.Equal(RoomState.Waiting, f.Runtime.State);
             Assert.Equal(new[] { "s2:Play:43" }, f.Commands.ToArray());
+        }
+
+        [Fact]
+        public async Task PrimaryHold_NoticeRequiresPauseAckAndIsSentOnlyOnce()
+        {
+            using var f = new Replay(); f.EnterWatching();
+            f.Set("u1", "43", false, 0); f.Tick();
+            f.Set("u1", "43", false, 1.2); f.Tick(1.1);
+            await f.Idle;
+            Assert.Empty(f.Messages); // Accepted transport is not a paused snapshot ACK.
+            f.Tick(); await f.Idle;
+            var message = Assert.Single(f.Messages);
+            Assert.Equal("s1", message.session);
+            Assert.Equal("正在等待另一端载入，准备好后会自动继续", message.text);
+            for (int i = 0; i < 4; i++) f.Tick();
+            await f.Idle; Assert.Single(f.Messages);
+            Assert.Equal(new[] { "s2:Play:43", "s1:Pause" }, f.Commands.ToArray());
+        }
+
+        [Theory]
+        [InlineData("resume")]
+        [InlineData("item")]
+        [InlineData("setting")]
+        [InlineData("stop")]
+        [InlineData("expired")]
+        [InlineData("peer-stop")]
+        [InlineData("peer-session")]
+        [InlineData("primary-capability")]
+        public async Task QueuedHoldNotice_RechecksCurrentPauseOperationAndSettings(string change)
+        {
+            using var f = new Replay(); f.EnterWatching();
+            f.Set("u1", "43", false, 0); f.Tick();
+            f.Set("u1", "43", false, 1.2); f.Tick(1.1);
+            using (f.HoldRoomGate())
+            {
+                f.Tick(); // Queue the ACK notice, but prevent delivery.
+                if (change == "resume") f.Set("u1", "43", false, 1.2);
+                if (change == "item") f.Set("u1", "44", true, 1.2);
+                if (change == "setting") f.Engine.UpdateOptions(new SyncEngineOptions(1, true, true, false));
+                if (change == "stop") f.Set("u1", "43", true, 1.2, stopped: true);
+                if (change == "expired") f.Tick(10);
+                if (change == "peer-stop") f.Set("u2", "42", false, 40, stopped: true);
+                if (change == "peer-session") f.Set("u2", "42", false, 40, session: "replacement");
+                if (change == "primary-capability") f.Set("u1", "43", true, 1.2, capability: false);
+            }
+            await f.Idle;
+            Assert.DoesNotContain(f.Messages, message => message.text.Contains("准备好后"));
+            Assert.DoesNotContain(f.Messages, message => message.text.Contains("同步完成"));
+        }
+
+        [Fact]
+        public async Task OriginalPausedIntent_DoesNotPromiseAutomaticResume()
+        {
+            using var f = new Replay(); f.EnterWatching();
+            f.Set("u1", "43", true, 0); f.Tick(); f.Tick(1.1);
+            await f.Idle;
+            Assert.Empty(f.Messages);
+            Assert.Equal(new[] { "s2:Play:43" }, f.Commands.ToArray());
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task NaturalRecovery_NotificationsNeverAddPlaybackControls(bool notifications)
+        {
+            using var f = new Replay(notifications); f.EnterWatching();
+            f.BeginResumeObservation(); await f.Idle;
+            f.Set("u1", "43", false, 3.4); f.Set("u2", "43", false, 3.4); f.Tick(1.1);
+            Assert.Equal(RoomState.Watching, f.Runtime.State);
+            await f.Idle;
+            Assert.Equal(new[] { "s2:Play:43", "s1:Pause" }, f.Commands.ToArray());
+            if (notifications) Assert.Equal(2, f.Messages.Count(message => message.text == "已跟随切换，同步完成"));
+            else Assert.Empty(f.Messages);
+        }
+
+        [Theory]
+        [InlineData("pause")]
+        [InlineData("media")]
+        [InlineData("capability")]
+        public async Task NaturalRecovery_QueuedSuccessRechecksCurrentPlayingAlignment(string change)
+        {
+            using var f = new Replay(); f.EnterWatching();
+            f.BeginResumeObservation(); await f.Idle; f.Messages.Clear();
+            using (f.HoldRoomGate())
+            {
+                f.Set("u1", "43", false, 3.4); f.Set("u2", "43", false, 3.4); f.Tick(1.1);
+                Assert.Equal(RoomState.Watching, f.Runtime.State);
+                f.Set("u2", "43", change == "pause", 3.4,
+                    media: change == "media" ? "replacement" : "source", capability: change != "capability");
+            }
+            await f.Idle; Assert.Empty(f.Messages);
         }
 
         [Fact]
@@ -366,13 +458,14 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Engine = new SyncEngine(Rooms, this, issuer, () => "server", () => Now,
                     messageIssuer: issuer, notifyOtherOnPlaybackStop: notifications, notifyOnSyncActions: notifications);
             }
-            internal void Set(string user, string item, bool paused, double position, bool stopped = false)
+            internal void Set(string user, string item, bool paused, double position, bool stopped = false,
+                string media = "source", bool capability = true, string session = null)
             {
                 lock (_snapshotsGate)
-                    _snapshots[user] = new SessionSnapshot(user == "u1" ? "s1" : "s2", user, item, "source",
+                    _snapshots[user] = new SessionSnapshot(session ?? (user == "u1" ? "s1" : "s2"), user, item, media,
                         (long)(position * SessionSnapshot.TicksPerSecond), 100 * SessionSnapshot.TicksPerSecond,
                         paused, 1, stopped, true,
-                        new SessionCapabilityReport(true, new[] { "Pause", "Unpause", "Seek", "DisplayMessage" }), Now);
+                        new SessionCapabilityReport(capability, new[] { "Pause", "Unpause", "Seek", "DisplayMessage" }), Now);
             }
             public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
             { lock (_snapshotsGate) return _snapshots.Values.ToArray(); }
@@ -385,6 +478,15 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Idle.GetAwaiter().GetResult(); Commands.Clear(); Messages.Clear();
             }
             internal void RemovePrimary() { lock (_snapshotsGate) _snapshots.Remove("u1"); }
+            internal void BeginResumeObservation()
+            {
+                Set("u1", "43", false, 0); Tick();
+                Set("u1", "43", false, 1.2); Tick(1.1); Tick();
+                Set("u2", "43", false, 1.2); Tick();
+                Set("u1", "43", false, 1.3); Set("u2", "43", false, 1.3); Tick();
+                Set("u1", "43", false, 2.3); Set("u2", "43", false, 2.3); Tick(1.1);
+                Assert.Equal(RoomState.Handoff, Runtime.State);
+            }
             internal void ConfirmPrimaryStop()
             {
                 RemovePrimary();

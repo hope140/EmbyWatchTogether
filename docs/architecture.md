@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，beta 版本及发布状态以 [GitHub Releases](https://github.com/hope140/EmbyWatchTogether/releases) 为准。本文描述 1.7.2.12 测试线；用户已确认 1.7.2.11 的换集跟随成功，但这不等于全部双端场景或本次提示显示已验收。各版本事实和边界见[发布日志索引](releases/README.md)。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，beta 版本及发布状态以 [GitHub Releases](https://github.com/hope140/EmbyWatchTogether/releases) 为准。本文描述 1.7.2.13 测试线；用户已确认 1.7.2.11 的换集跟随成功，但这不等于全部双端场景或本次提示显示已验收。各版本事实和边界见[发布日志索引](releases/README.md)。
 
 ## 运行时边界
 
@@ -27,7 +27,7 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 - `SessionSelector` 为参与者选择有效会话并绑定 session identity，初始绑定优先选择原始远控标志满足 `RoomEligibility` 的会话；只有已进入 `Watching` 的绑定身份才允许使用短时远控恢复，避免旧会话确认新设备命令。
 - `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息目标和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份，消息网络发送在退出 gate 后通过 5 秒有界 issuer 执行；`RoomStore` 只持久化房间元数据。房间保留 `CreatorUserId` 和 `IsSelfService`，旧 JSON 缺失字段时回退到旧管理员创建语义。
 - `RoomInvitationManager` 保存运行时邀请码的校验值、创建者、名称和有效期，不保存明文邀请码或独立持久化文件。接受操作在其串行边界内调用 `RoomManager` 原子创建完整双人房间，创建成功后清除该创建者的全部待接受邀请；重启会丢弃未接受邀请。
-- `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching`、`Recovering`、`Unavailable`。`Handoff` 只负责让参与者打开主用户当前 Item，确认后再转入由 `Barrier` 负责的时间轴对齐；`Recovering` 只等待非 Primary 参与者原 User、原 SessionId 和原 ItemId 的短暂恢复，Primary 缺失继续走停止 debounce 和晚到换集候选。
+- `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching`、`Recovering`、`Unavailable`。`Handoff` 让参与者打开主用户当前 Item，通常确认后再转入由 `Barrier` 负责的时间轴对齐；主用户恢复播放后仅观察自然对齐，满足完整条件时无控制地进入 `Watching`；`Recovering` 只等待非 Primary 参与者原 User、原 SessionId 和原 ItemId 的短暂恢复，Primary 缺失继续走停止 debounce 和晚到换集候选。
 - `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后当前房间的任一参与者或管理员可按房间权限结束房间。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 在当前房间 gate 内重新校验房间、成员和服务器身份，返回只读、有界、脱敏的同步诊断 DTO。诊断事件环、当前选中快照、Pending、Handoff、Barrier、Recovery 和 drift telemetry 仅驻留 `RoomRuntime` 内存，房间删除或运行时重建时丢弃，不写入 `rooms.json`；导出使用 `userA`/`userB` 别名、短 hash 和稳定错误分类，不包含用户名、GUID、Token、路径或异常文本。
 
@@ -63,7 +63,7 @@ Barrier 在当前快照已满足条件且没有待确认命令时，同轮继续
 
 Handoff 的候选保留、被控能力检查和主控等待暂停使用与内置发送器一致的播放命令兼容判断，并保留 effective 远控证据。Theater 的 GeneralCommands 列表不必显式包含 Pause、Unpause、Seek；命令列表不是媒体控制权限本身，实际发送仍要求当前 raw 远控标记，身份、播放代次、时长、倍速及截止时间条件不变。主控启动时 runtime 为零仍进入原有观察分支，不因能力判断而提前失败。
 
-自动 Handoff 需要等待参与者加载时，主用户在同一目标/会话/媒体、完整有效能力与时长下至少观察 1 秒且位置推进后请求暂停，避免只看 Item 就立刻暂停加载。参与者先正常收到 PlayItem，并独立等待至少 1 秒有效目标观察；playing 必须有位置推进，已暂停不另发 Pause。主用户暂停需后续快照 ACK，最多两次，期限仍为 Handoff 原 10 秒；完成后向 Barrier 传递原暂停意图，已有或请求前自行暂停保持暂停。主用户主动继续/明显 Seek、身份/媒体/权限变化或失败不恢复旧意图，失败标记阻止所有自动命令，只有获接受的显式 resync 清除。该标记跨通用 reset 保留但不持久化；见 [ADR-002](adr/002-media-handoff.md)。服务器观察不能证明首帧已显示。
+自动 Handoff 需要等待参与者加载时，主用户在同一目标/会话/媒体、完整有效能力与时长下至少观察 1 秒且位置推进后请求暂停，避免只看 Item 就立刻暂停加载。参与者先正常收到 PlayItem，并独立等待至少 1 秒有效目标观察；playing 必须有位置推进，已暂停不另发 Pause。主用户暂停需后续快照 ACK，最多两次，期限仍为 Handoff 原 10 秒；完成后向 Barrier 传递原暂停意图，已有或请求前自行暂停保持暂停。真实暂停 ACK 后，向主用户排队发送等待载入提示，发送时复核当前双端状态；原先已暂停不承诺自动继续。ACK 后观察到主用户恢复播放时不推断来源，退休旧恢复意图，只在原 10 秒内观察，不再 Pause、Seek、Unpause 或重试 PlayItem。参与者仍需满足原 1 秒起播确认；同一会话/目标/媒体、有效权限、正常倍速、双方播放且进度差不超过 2 秒后，再观察至少 1 秒持续推进，才无额外控制地进入 Watching。再次暂停、明显 Seek、身份/媒体/权限变化、快照失败、超时或过大进度差进入要求手动重新同步的 Waiting，并排队发送失败提示。失败标记阻止所有自动命令，只有获接受的显式 resync 清除。该标记跨通用 reset 保留但不持久化；见 [ADR-002](adr/002-media-handoff.md)。服务器观察不能证明首帧已显示。
 
 `SessionBridge` 在转发 `PlaybackStopped`、唤醒轮询前，按实际 `SessionInfo` 对象和有效 `PlaySessionId` 记录停止，令该播放的迟到进度快照保持 stopped。Emby 删除播放对象后，旧 ID 的进度可能重建对象，因此过滤同时保留 ID 记录和可撤销的快照标记。明确且能解析为当前播放对象的 Start 可以重新使用 ID；重复的有效 Start 不丢弃仍存活的快照标记。发送 Seek、Unpause 或 Handoff Play 前复查本轮已选快照的停止标记；已越过发送检查的在途命令无法撤回。身份缺失或冲突时不猜测整台设备/同一 Item 已停止。
 

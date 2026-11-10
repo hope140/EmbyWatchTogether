@@ -111,7 +111,6 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Theory]
-        [InlineData("resume")]
         [InlineData("seek")]
         [InlineData("session")]
         [InlineData("session-and-item")]
@@ -201,6 +200,183 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Single(f.Issuer.Commands);
         }
 
+        [Theory]
+        [InlineData(0)]
+        [InlineData(2)]
+        public void ResumeAfterHold_NaturalAlignmentRequiresStableProgressWithoutControls(double gap)
+        {
+            using var f = new Replay();
+            f.BeginResumed(gap);
+            Assert.Equal(RoomState.Handoff, f.Runtime.State);
+            f.AdvancePair(.999, gap);
+            Assert.Equal(RoomState.Handoff, f.Runtime.State);
+            f.AdvancePair(.001, gap);
+            Assert.Equal(RoomState.Watching, f.Runtime.State);
+            Assert.Equal(new[] { ("u1", RemoteCommands.Pause) }, f.Issuer.Commands);
+            Assert.Single(f.Issuer.Plays);
+            Assert.Empty(f.Runtime.Pending);
+        }
+
+        [Fact]
+        public void ResumeWhilePeerStillLoading_DoesNotRetryOldPlayItemOrPause()
+        {
+            using var f = new Replay();
+            f.Switch(); var start = f.Now;
+            f.AdvancePrimary(); f.Tick();
+            f.Provider.Items["u1"] = f.Make("u1", "next", false, 1.3); f.Tick();
+            for (int i = 0; i < 20; i++)
+            {
+                f.Provider.Items["u1"] = f.Make("u1", "next", false, 1.3 + i * .25);
+                f.Tick();
+            }
+            Assert.Equal(RoomState.Handoff, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays); Assert.Single(f.Issuer.Commands);
+            f.Now = start.AddSeconds(10); f.Tick(0);
+            Assert.Equal(RoomState.Waiting, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays); Assert.Single(f.Issuer.Commands);
+        }
+
+        [Fact]
+        public void ResumedPrimaryChangesTarget_StartsFreshGenerationWithoutOldRestore()
+        {
+            using var f = new Replay(); f.BeginResumed();
+            var previous = f.Runtime.Handoff;
+            f.Provider.Items["u1"] = f.Make("u1", "third", false, 0); f.Tick();
+            Assert.Equal(RoomState.Handoff, f.Runtime.State);
+            Assert.NotSame(previous, f.Runtime.Handoff);
+            Assert.Equal("third", f.Runtime.Handoff.TargetItemId);
+            Assert.Equal(new[] { "next", "third" }, f.Issuer.Plays);
+            Assert.Single(f.Issuer.Commands);
+            // A late old-target observation never completes the fresh operation.
+            f.PeerAtTarget(3.3); f.Tick();
+            Assert.Equal(RoomState.Handoff, f.Runtime.State);
+            Assert.DoesNotContain(f.Issuer.Commands, command => command.command == RemoteCommands.Unpause);
+        }
+
+        [Theory]
+        [InlineData("pause")]
+        [InlineData("seek")]
+        [InlineData("peer-seek")]
+        [InlineData("gap")]
+        [InlineData("session")]
+        [InlineData("peer-session")]
+        [InlineData("media")]
+        [InlineData("peer-media")]
+        [InlineData("peer-item")]
+        [InlineData("runtime")]
+        [InlineData("permission")]
+        [InlineData("raw-control")]
+        [InlineData("rate")]
+        [InlineData("peer-missing")]
+        [InlineData("primary-missing")]
+        [InlineData("older-snapshot")]
+        public void ResumedHold_InvalidObservationFailsClosedWithoutOldIntent(string change)
+        {
+            using var f = new Replay(); f.BeginResumed();
+            var original = f.Provider.Items["u1"];
+            if (change == "peer-missing") f.Provider.Items.Remove("u2");
+            else if (change == "primary-missing") f.Provider.Items.Remove("u1");
+            else if (change.StartsWith("peer-"))
+                f.Provider.Items["u2"] = f.Make("u2", change == "peer-item" ? "old" : "next", false,
+                    change == "peer-seek" ? 30 : original.PositionSeconds,
+                    session: change == "peer-session" ? "replacement" : "s2",
+                    media: change == "peer-media" ? "replacement" : "media");
+            else
+                f.Provider.Items["u1"] = f.Make("u1", "next", change == "pause",
+                    change == "seek" ? 30 : original.PositionSeconds + (change == "gap" ? 2.01 : 0),
+                    session: change == "session" ? "replacement" : "s1",
+                    media: change == "media" ? "replacement" : "media", runtime: change == "runtime" ? 0 : 100,
+                    capability: change != "permission", raw: change != "raw-control", rate: change == "rate" ? 1.5 : 1,
+                    activity: change == "older-snapshot" ? original.LastActivityDateUtc.AddSeconds(-1) : null);
+            f.Tick();
+            Assert.Equal(RoomState.Waiting, f.Runtime.State);
+            f.Provider.Items["u1"] = f.Make("u1", "next", false, 4);
+            f.Provider.Items["u2"] = f.Make("u2", "next", false, 4);
+            for (int i = 0; i < 10; i++) f.Tick();
+            Assert.Equal(RoomState.Waiting, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays); Assert.Single(f.Issuer.Commands);
+        }
+
+        [Fact]
+        public void ResumedHold_FrozenPairCannotClaimSuccessAndDeadlineCannotBeExtended()
+        {
+            using var f = new Replay(); f.BeginResumed();
+            for (int i = 0; i < 50; i++) f.Tick();
+            Assert.Equal(RoomState.Waiting, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays); Assert.Single(f.Issuer.Commands);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void ResumedPeer_ContinuityUsesPreviousSampleNotOnlyInitialBaseline(bool olderActivity)
+        {
+            using var f = new Replay(); f.BeginResumed();
+            f.Now = f.Now.AddSeconds(.5);
+            f.Provider.Items["u1"] = f.Make("u1", "next", false, 2.8);
+            f.PeerAtTarget(4.7); f.Tick(0);
+            Assert.Equal(RoomState.Handoff, f.Runtime.State);
+            var peer = f.Provider.Items["u2"];
+            f.Now = f.Now.AddSeconds(.25);
+            f.Provider.Items["u1"] = f.Make("u1", "next", false, 3.05);
+            f.Provider.Items["u2"] = f.Make("u2", "next", false, olderActivity ? 4.7 : 2.4,
+                activity: olderActivity ? peer.LastActivityDateUtc.AddSeconds(-.1) : null);
+            f.Tick(0);
+            Assert.Equal(RoomState.Waiting, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays); Assert.Single(f.Issuer.Commands);
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void FirstResumeWithRawControlLoss_CannotLaterRestoreOldPlayingIntent(bool primaryLostControl)
+        {
+            using var f = new Replay();
+            f.Switch(); f.AdvancePrimary(); f.Tick();
+            f.Provider.Items["u1"] = f.Make("u1", "next", false, 1.3, raw: !primaryLostControl);
+            f.Provider.Items["u2"] = f.Make("u2", "next", false, 1.3, raw: primaryLostControl);
+            f.Tick();
+            Assert.Equal(RoomState.Waiting, f.Runtime.State);
+            f.Provider.Items["u1"] = f.Make("u1", "next", true, 1.3);
+            f.PeerAtTarget(1.3, true);
+            for (int i = 0; i < 10; i++) f.Tick();
+            Assert.Equal(RoomState.Waiting, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays); Assert.Single(f.Issuer.Commands);
+        }
+
+        [Theory]
+        [InlineData(.1)]
+        [InlineData(5)]
+        public void HoldSnapshotFailure_RetiresIntentAcrossShortAndProtectedOutages(double outage)
+        {
+            using var f = new Replay();
+            f.Switch(); f.AdvancePrimary(); f.Tick();
+            f.Provider.Fail = true; f.Tick(); f.Tick(outage);
+            f.Provider.Fail = false;
+            f.Provider.Items["u1"] = f.Make("u1", "next", true, 1.2);
+            f.PeerAtTarget(1.2, true);
+            for (int i = 0; i < 20; i++) f.Tick();
+            Assert.Equal(RoomState.Waiting, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays); Assert.Single(f.Issuer.Commands);
+        }
+
+        [Theory]
+        [InlineData(9.999, RoomState.Watching)]
+        [InlineData(10, RoomState.Waiting)]
+        [InlineData(10.001, RoomState.Waiting)]
+        public void ResumedHold_OriginalAbsoluteDeadlineWinsOverAlignedPair(double seconds, RoomState expected)
+        {
+            using var f = new Replay(); f.BeginResumed();
+            var started = f.Runtime.Handoff.StartedAtUtc;
+            var delta = (started.AddSeconds(seconds) - f.Now).TotalSeconds;
+            var position = f.Provider.Items["u1"].PositionSeconds + delta;
+            f.Now = started.AddSeconds(seconds);
+            f.Provider.Items["u1"] = f.Make("u1", "next", false, position);
+            f.PeerAtTarget(position); f.Tick(0);
+            Assert.Equal(expected, f.Runtime.State);
+            Assert.Single(f.Issuer.Plays); Assert.Single(f.Issuer.Commands);
+        }
+
         private sealed class Replay : IDisposable
         {
             public DateTimeOffset Now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -223,11 +399,29 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Issuer.Commands.Clear(); Issuer.Plays.Clear();
             }
             public SessionSnapshot Make(string user, string item, bool paused, double position,
-                string session = null, bool capability = true, string media = "media", int runtime = 100) =>
+                string session = null, bool capability = true, string media = "media", int runtime = 100,
+                bool raw = true, double rate = 1, DateTimeOffset? activity = null) =>
                 new SessionSnapshot(session ?? (user == "u1" ? "s1" : "s2"), user, item, media,
                     (long)(position * SessionSnapshot.TicksPerSecond), runtime * SessionSnapshot.TicksPerSecond,
-                    paused, 1, false, true, new SessionCapabilityReport(capability,
-                        new[] { "Pause", "Unpause", "Seek", "DisplayMessage" }), Now);
+                    paused, rate, false, raw, new SessionCapabilityReport(capability,
+                        new[] { "Pause", "Unpause", "Seek", "DisplayMessage" }), activity ?? Now);
+            public void BeginResumed(double gap = 0)
+            {
+                Switch(); AdvancePrimary(); Tick();
+                PeerAtTarget(1.2); Tick();
+                Provider.Items["u1"] = Make("u1", "next", false, 1.3);
+                PeerAtTarget(1.3 + gap); Tick(.1);
+                Now = Now.AddSeconds(1);
+                Provider.Items["u1"] = Make("u1", "next", false, 2.3);
+                PeerAtTarget(2.3 + gap); Tick(0);
+            }
+            public void AdvancePair(double seconds, double gap = 0)
+            {
+                var position = Provider.Items["u1"].PositionSeconds + seconds;
+                Now = Now.AddSeconds(seconds);
+                Provider.Items["u1"] = Make("u1", "next", false, position);
+                PeerAtTarget(position + gap); Tick(0);
+            }
             public void Switch(double position = 0, bool paused = false)
             { Provider.Items["u1"] = Make("u1", "next", paused, position); Tick(); }
             public void AdvancePrimary()
@@ -240,7 +434,9 @@ namespace Emby.Plugins.WatchTogether.Tests
         private sealed class Provider : ISessionSnapshotProvider
         {
             public readonly Dictionary<string, SessionSnapshot> Items = new Dictionary<string, SessionSnapshot>();
-            public IReadOnlyList<SessionSnapshot> GetSessionSnapshots() => Items.Values.ToArray();
+            public bool Fail;
+            public IReadOnlyList<SessionSnapshot> GetSessionSnapshots() => Fail
+                ? throw new InvalidOperationException("simulated provider failure") : Items.Values.ToArray();
         }
         private sealed class Recorder : ICommandIssuer, IPlayItemIssuer
         {

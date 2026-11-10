@@ -236,6 +236,95 @@ namespace Emby.Plugins.WatchTogether.Tests
             }
         }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task TheaterHoldResume_RealSdkStateReplacementAndSameIdRestartCannotReviveOldHold(bool primary)
+        {
+            using var replay = new HoldResumeReplay();
+            replay.Begin();
+            var session = primary ? replay.F.A : replay.F.B;
+            var id = primary ? "next" : "peer-next";
+            var playback = session.GetPlaySessionInfo(id);
+            // The real SDK replaces PlayState before Stop, then reuses the ID.
+            replay.F.ServerStop(session, playback);
+            var restarted = replay.F.Play(session, id, 2.3, "43", false);
+            replay.F.Start(session, restarted);
+            replay.F.Poll(replay.F.Now.AddSeconds(2.5));
+            Assert.Equal(RoomState.Waiting, replay.Runtime.State);
+            replay.SetPair(3.4, 3.3);
+            Assert.Equal(RoomState.Waiting, replay.Runtime.State);
+            Assert.Equal(new[] { "b:PlayItem", "a:Pause" }, replay.Commands);
+            await replay.F.NoticesIdle;
+            Assert.DoesNotContain(replay.F.Messages, message => message.Contains("同步完成"));
+            Assert.Contains(replay.F.Messages, message => message.Contains("手动重新同步"));
+        }
+
+        [Fact]
+        public async Task TheaterHoldResume_NaturalAlignmentRestoresWatchingAndOrdinaryControls()
+        {
+            using var replay = new HoldResumeReplay();
+            replay.Begin();
+            replay.SetPair(3.399, 3.299);
+            Assert.Equal(RoomState.Handoff, replay.Runtime.State);
+            replay.SetPair(3.4, 3.3);
+            Assert.Equal(RoomState.Watching, replay.Runtime.State);
+            Assert.Equal(new[] { "b:PlayItem", "a:Pause" }, replay.Commands);
+            await replay.F.NoticesIdle;
+            Assert.Equal(2, replay.F.Messages.Count(message => message == "已跟随切换，同步完成"));
+
+            replay.Set("u1", 3.3, true); replay.F.Poll(replay.F.Now.AddSeconds(3.5));
+            Assert.Equal("b:Pause", replay.Commands.Last());
+            replay.Set("u2", 3.3, true); replay.F.Poll(replay.F.Now.AddSeconds(3.6));
+            replay.Set("u1", 3.3, false); replay.F.Poll(replay.F.Now.AddSeconds(7.1));
+            Assert.Equal("b:Unpause", replay.Commands.Last());
+            replay.Set("u2", 3.3, false); replay.F.Poll(replay.F.Now.AddSeconds(7.2));
+            replay.Set("u1", 30, false); replay.F.Poll(replay.F.Now.AddSeconds(7.3));
+            Assert.Equal(RoomState.Barrier, replay.Runtime.State);
+            Assert.Equal("a:Pause", replay.Commands[^2]);
+            Assert.Equal("b:Pause", replay.Commands[^1]);
+        }
+
+        private sealed class HoldResumeReplay : IDisposable
+        {
+            internal readonly Fixture F = new(useBridgeIssuer: true, theaterCapabilities: true, notifications: true);
+            internal readonly List<string> Commands = new();
+            internal RoomRuntime Runtime => F.Rooms.GetRuntime(F.Room.Id);
+            internal HoldResumeReplay()
+            {
+                F.Manager.Setup(m => m.SendPlaystateCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlaystateRequest>(), It.IsAny<CancellationToken>()))
+                    .Callback<string, string, PlaystateRequest, CancellationToken>((_, session, request, token) => Commands.Add(session + ":" + request.Command))
+                    .Returns(Task.CompletedTask);
+                F.Manager.Setup(m => m.SendPlayCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlayRequest>(), It.IsAny<CancellationToken>()))
+                    .Callback<string, string, PlayRequest, CancellationToken>((_, session, request, token) => Commands.Add(session + ":PlayItem"))
+                    .Returns(Task.CompletedTask);
+                foreach (var session in new[] { F.A, F.B })
+                    F.Start(session, F.Play(session, session == F.A ? "p1" : "p2", 40, "42", false));
+                Runtime.Previous.Clear();
+                foreach (var snapshot in F.Provider.GetSessionSnapshots()) Runtime.Previous[snapshot.UserId] = snapshot;
+            }
+            internal void Begin()
+            {
+                var old = F.A.GetPlaySessionInfo("p1"); F.ServerStop(F.A, old); F.A.RemovePlaySession(old);
+                F.Start(F.A, F.Play(F.A, "next", 0, "43", false)); F.Poll(F.Now);
+                Set("u1", 1.2, false); F.Poll(F.Now.AddSeconds(1.1));
+                Set("u1", 1.2, true); F.Poll(F.Now.AddSeconds(1.2));
+                old = F.B.GetPlaySessionInfo("p2"); F.ServerStop(F.B, old); F.B.RemovePlaySession(old);
+                F.Start(F.B, F.Play(F.B, "peer-next", 1.2, "43", false)); F.Poll(F.Now.AddSeconds(1.3));
+                SetPair(1.4, 1.3); SetPair(2.4, 2.3);
+                Assert.Equal(RoomState.Handoff, Runtime.State);
+                Assert.Equal(new[] { "b:PlayItem", "a:Pause" }, Commands);
+            }
+            internal void Set(string user, double position, bool paused)
+            {
+                var session = user == "u1" ? F.A : F.B;
+                F.Progress(session, F.Play(session, user == "u1" ? "next" : "peer-next", position, "43", paused));
+            }
+            internal void SetPair(double elapsed, double position)
+            { Set("u1", position, false); Set("u2", position, false); F.Poll(F.Now.AddSeconds(elapsed)); }
+            public void Dispose() => F.Dispose();
+        }
+
         private sealed class TheaterReplay : IDisposable
         {
             internal readonly Fixture F;

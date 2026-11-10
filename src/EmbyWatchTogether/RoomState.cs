@@ -137,6 +137,17 @@ namespace Emby.Plugins.WatchTogether
         public DateTimeOffset? PauseIssuedAtUtc { get; set; }
         public int PauseAttempts { get; set; }
         public bool Acknowledged { get; set; }
+        // After a hold ACK is resumed, the operation becomes observation-only.
+        public bool ResumeObserved { get; set; }
+        public SessionSnapshot PrimaryPlayback { get; set; }
+        public SessionSnapshot LastPrimary { get; set; }
+        public DateTimeOffset LastPrimaryAtUtc { get; set; }
+        public SessionSnapshot ParticipantPlayback { get; set; }
+        public SessionSnapshot LastParticipant { get; set; }
+        public DateTimeOffset LastParticipantAtUtc { get; set; }
+        public SessionSnapshot ResumePrimary { get; set; }
+        public SessionSnapshot ResumeParticipant { get; set; }
+        public DateTimeOffset? ResumePairObservedAtUtc { get; set; }
         public long PausedPositionTicks { get; set; }
         public string ParticipantSessionId { get; set; }
         public DateTimeOffset? ParticipantObservedAtUtc { get; set; }
