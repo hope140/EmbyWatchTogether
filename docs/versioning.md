@@ -46,13 +46,15 @@ Git tag：v1.6.0.5
 
 不要为了保持版本连续而修改已经发布的版本号，也不要复用已经存在的 tag。历史版本整理只更新文档或索引，不移动、重命名或重建已有 tag。
 
-## 当前版本和后续示例
+## 版本记录和后续示例
 
-当前正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，于 2026-10-18 发布并核验为 `Latest`；对应源码提交为 `1a74ad2aab3703a438f592b62424388e8dae0032`。此前公开 stable 为 `1.5.0.0`，最近一次 prerelease 为 `1.6.0.5`；历史版本和失败的 `1.5.0.4` tag 保持原状，不能复用、移动或重建。可选 GitHub Token 仅用于 beta Releases API 查询，stable 和固定资产下载保持原路径。插件默认选择 `stable`，管理员可在插件配置页选择 `beta`，更新任务按所选通道获取并自动安装；`stable` 仍只读取 `releases/latest`。
+以下保留 2026-10-18 的版本记录；当前公开版本见[发布索引](releases/README.md)。main 与 beta 保持独立源码线，发布状态同步不代表 beta 实现已合入 main。
+
+当时正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，于 2026-10-18 发布并核验为 `Latest`；对应源码提交为 `1a74ad2aab3703a438f592b62424388e8dae0032`。此前公开 stable 为 `1.5.0.0`，最近一次 prerelease 为 `1.6.0.5`；历史版本和失败的 `1.5.0.4` tag 保持原状，不能复用、移动或重建。可选 GitHub Token 仅用于 beta Releases API 查询，stable 和固定资产下载保持原路径。插件默认选择 `stable`，管理员可在插件配置页选择 `beta`，更新任务按所选通道获取并自动安装；`stable` 仍只读取 `releases/latest`。
 
 ## 发布通道
 
-当前测试线为 `1.7.0.1`：此前 1.7.0.0 的原生分页、房间媒体和头像展示构成一组兼容的用户功能，按 MINOR 递增并将右侧归零；其测试属性由 beta/prerelease 标记决定。测试版并不固定递增第二段，小范围修正仍按影响使用 PATCH 或 REVISION。正式版与 Latest 继续保持 `1.6.1.0`。
+2026-10-19 的测试线为 `1.7.0.1`：此前 1.7.0.0 的原生分页、房间媒体和头像展示构成一组兼容的用户功能，按 MINOR 递增并将右侧归零；其测试属性由 beta/prerelease 标记决定。测试版并不固定递增第二段，小范围修正仍按影响使用 PATCH 或 REVISION。当时正式版与 Latest 保持 `1.6.1.0`；当前公开版本见[发布索引](releases/README.md)。
 
 S124 修订版 `1.7.0.1` 对既有分页及单选控件做小范围兼容修正，按 REVISION 递增；已于 2026-10-19 完成签名 prerelease 和公开下载独立核验，见[维护记录](maintenance/v1.7.0.1-beta-publication.md)。
 

@@ -4,18 +4,34 @@
 
 ## 当前正式版
 
-- [v1.6.1.0 发布说明](v1.6.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)：2026-10-18 正式发布，当前 Latest stable。
+- [v1.7.1.0 发布说明](v1.7.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)：当前 Latest stable，原生分页与媒体展示进入正式版。
 
 ## 当前测试版
 
-- [v1.7.0.1 测试版说明](v1.7.0.1.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.1)：页面初始化、分页和下拉控件兼容修正；[签名发布与核验记录](../maintenance/v1.7.0.1-beta-publication.md)。
+- [v1.7.2.13 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.13/docs/releases/v1.7.2.13.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13)：等待提示与提前继续后的自然对齐恢复；真实双端和提示显示仍待验收。
+
+`main` 与 `beta` 保持独立源码线。此索引记录公开发布状态；测试版说明链接到对应 tag，不表示 main 已包含该测试版实现。
 
 ## 历史发布
+
+- [v1.7.2.12 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.12)。
+- [v1.7.2.11 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.11)。
+- [v1.7.2.10 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.10)。
+- [v1.7.2.9 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.9)。
+- [v1.7.2.8 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.8)。
+- [v1.7.2.7 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.7)。
+- [v1.7.2.6 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.6)。
+- [v1.7.2.5 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.5)。
+- [v1.7.2.4 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4)。
+- [v1.7.2.3 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)。
+- [v1.7.2.2 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.2)。
+- [v1.7.0.1 测试版说明](v1.7.0.1.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.1)：页面初始化、分页和下拉控件兼容修正；[签名发布与核验记录](../maintenance/v1.7.0.1-beta-publication.md)。
 
 - [v1.7.0.0 测试版说明](v1.7.0.0.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.0)：原生分页、视频信息与用户头像展示。
 
 ### Stable
 
+- [v1.6.1.0](v1.6.1.0.md)
 - [v1.5.0.0](v1.5.0.0.md)
 - [v1.4.5.0](v1.4.5.0.md)
 - [v1.4.4.0](v1.4.4.0.md)
@@ -58,7 +74,7 @@
 - [v1.2.0.13](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.13)
 - [v1.2.0.9](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.9)
 
-以上 38 项为本次正式版之前的公开历史 Release，通道分类与 GitHub 元数据一致。历史说明保留当时的版本事实。
+历史说明保留当时的版本事实，不代表当前实现或验收状态。
 
 `v1.5.0.4` 只对应一次失败的 tag 尝试，没有 GitHub Release 或发布资产，不能列为成功发布。
 

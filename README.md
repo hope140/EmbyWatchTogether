@@ -2,9 +2,11 @@
 
 Watch Together 是运行在 Emby Server 内的双人同步观看插件。两位登录同一台 Emby Server 的用户可以在一个房间里一起观看同一视频，插件负责起播对齐、暂停/继续、明显的手动进度调整、主用户换集和有限的播放恢复。
 
-本文面向 Emby Server 管理员和普通使用者。当前正式版为 [v1.6.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，变化见[发布说明](docs/releases/v1.6.1.0.md)。开发者和维护者请从[开发者文档索引](docs/README.md)进入。
+本文面向 Emby Server 管理员和普通使用者。当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，变化见[发布说明](docs/releases/v1.7.1.0.md)。开发者和维护者请从[开发者文档索引](docs/README.md)进入。
 
-测试通道提供 [v1.7.0.1 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.1)，包含分页、视频信息与用户头像展示，并修正页面初始化、分页跳转和客户端下拉箭头，变化和测试重点见[测试版说明](docs/releases/v1.7.0.1.md)。测试版使用“房间 / 创建与邀请 / 设置”三个页面，完整的真实双端功能验收仍在进行。
+测试通道提供 [v1.7.2.13 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13)，变化和验证边界见[对应 tag 的测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.13/docs/releases/v1.7.2.13.md)。本版为 beta/prerelease，真实双端等待提示与提前继续后的同步恢复仍待验收。
+
+本文所在 `main` 与 `beta` 保持独立源码线。测试版入口只同步公开发布状态，不表示 `main` 已包含 v1.7.2.13 的实现；[发布索引](docs/releases/README.md)区分当前版本和历史记录。
 
 ## 功能
 
