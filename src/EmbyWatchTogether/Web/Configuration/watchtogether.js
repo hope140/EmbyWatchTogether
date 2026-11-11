@@ -57,6 +57,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         page._wtStatusTimer = null;
         page._wtUsers = [];
         page._wtRooms = null;
+        page._wtRoomsLoaded = false;
+        page._wtLastRooms = null;
+        setRoomsStatus(page, '');
         page._wtInvitations = [];
         page._wtInvitationsLoaded = false;
         page._wtInvitationCode = null;
@@ -1139,7 +1142,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 if (input) {
                     input.value = '';
                 }
-                return Promise.all([loadRooms(page, false), loadInvitations(page)]);
+                return Promise.all([loadRooms(page), loadInvitations(page)]);
             }
             return null;
         }).catch(function (error) {
@@ -1717,7 +1720,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 hint = '请选择主用户。';
                 isError = true;
             } else {
-                hint = '准备完成，可以创建房间。';
+                hint = '';
             }
         }
 
@@ -2261,6 +2264,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function renderRooms(page, rooms) {
+        // Display-only fallback: _wtRooms stays null after a failed read so
+        // stale membership data cannot validate a new form or confirmation.
+        if (page._wtRooms === null && page._wtLastRooms) rooms = page._wtLastRooms;
         var container = page.querySelector('#wtRooms');
         if (!container) {
             return;
@@ -2468,10 +2474,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var diagnosticsAction = document.createElement('div');
             diagnosticsAction.className = 'wt-diagnosticAction';
             diagnosticsAction.appendChild(createActionButton(page, room, 'diagnostics'));
-            var diagnosticHelp = document.createElement('p');
-            diagnosticHelp.className = 'fieldDescription';
-            diagnosticHelp.textContent = '查看同步状态与排查信息';
-            diagnosticsAction.appendChild(diagnosticHelp);
             controls.appendChild(diagnosticsAction);
             layout.appendChild(controls);
             card.appendChild(layout);
@@ -2500,7 +2502,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         });
     }
 
-    function loadRooms(page, announce) {
+    function setRoomsStatus(page, text) {
+        var el = page.querySelector('#wtRoomsStatus');
+        if (!el) return;
+        // Repeated polling failures must not repeatedly announce unchanged text.
+        if (el.textContent !== text) el.textContent = text;
+        el.hidden = !text;
+    }
+
+    function loadRooms(page) {
         if (!pageActionAllowed(page)) return Promise.resolve();
         if (page._wtRoomsLoading) {
             return Promise.resolve();
@@ -2511,13 +2521,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (container) {
             container.setAttribute('aria-busy', 'true');
         }
-        if (announce) {
-            setStatus(page, '正在刷新房间…');
-        }
 
         return apiGet(page, 'WatchTogether/Rooms').then(function (rooms) {
             var list = Array.isArray(rooms) ? rooms : [];
             page._wtRooms = list;
+            page._wtRoomsLoaded = true;
+            page._wtLastRooms = list;
+            setRoomsStatus(page, '');
             Object.keys(page._wtRoomStates).forEach(function (roomId) {
                 if (!list.some(function (room) { return room.RoomId === roomId; })) {
                     page._wtRoomSequences[roomId] = (page._wtRoomSequences[roomId] || 0) + 1;
@@ -2541,11 +2551,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             renderRooms(page, list);
             if (page._wtVisibleRoute === 'rooms') list.forEach(function (room) { loadRoomMedia(page, room); });
             syncForm(page);
-            if (announce) {
-                setStatus(page, list.length > 0
-                    ? '已更新 ' + list.length + ' 个房间'
-                    : page._wtIsAdmin === true ? '暂无房间，可以创建一个。' : '暂无参与的房间。');
-            }
             return list;
         }).catch(function (err) {
             (page._wtRooms || []).forEach(function (room) {
@@ -2558,10 +2563,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             });
             page._wtRooms = null;
             syncForm(page);
-            setStatus(page, '房间加载失败：' + errorMessage(err) + '。', true);
+            setRoomsStatus(page, page._wtRoomsLoaded
+                ? '房间列表刷新失败，当前列表可能不是最新。请点击“刷新”重试。'
+                : '房间列表加载失败，请点击“刷新”重试。');
             return [];
         }).then(function (result) {
             page._wtRoomsLoading = false;
+            if (container) container.setAttribute('aria-busy', 'false');
             return result;
         });
     }
@@ -2615,7 +2623,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 } else {
                     roomFeedback(page, roomId, label + '已开始，等待完成。', false, false);
                 }
-                return loadRooms(page, false);
+                return loadRooms(page);
             })
             .catch(function (err) {
                 roomFeedback(page, roomId, label + '失败：' + errorMessage(err), true, true);
@@ -2648,7 +2656,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 } else {
                     roomFeedback(page, roomId, '重新同步请求未完成，请稍后再试。', true, true);
                 }
-                return loadRooms(page, false);
+                return loadRooms(page);
             })
             .catch(function (err) {
                 roomFeedback(page, roomId, '重新同步请求失败：' + errorMessage(err), true, true);
@@ -2685,7 +2693,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 setTransientStatus(page, ending
                     ? '房间“' + roomName + '”已结束；双方成员关系已解除，媒体未删除。'
                     : '房间“' + roomName + '”已删除；只移除同步关系，媒体未删除。', false);
-                return loadRooms(page, false);
+                return loadRooms(page);
             })
             .catch(function (err) {
                 roomFeedback(page, room.RoomId, '删除失败：' + errorMessage(err), true, true);
@@ -2719,7 +2727,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     : getLeaveFeedback(result);
                 roomFeedback(page, room.RoomId, text,
                     action === 'leave' && Number(result && result.PauseFailed) > 0, false);
-                return loadRooms(page, false);
+                return loadRooms(page);
             })
             .catch(function (err) {
                 roomFeedback(page, room.RoomId, (action === 'join' ? '加入' : '暂离') + '失败：' + errorMessage(err), true, true);
@@ -2785,7 +2793,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
         setButtonBusy(createButton, true, '创建中…');
         setCreateStatus(page, '正在创建房间…', false);
-        setStatus(page, '正在创建房间…');
         apiSend(page, 'WatchTogether/Rooms', 'POST', {
             Name: name,
             ParticipantUserIds: [a, b],
@@ -2800,7 +2807,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             };
             nameInput.value = '';
             syncForm(page);
-            return loadRooms(page, true);
+            return loadRooms(page);
         }).catch(function (err) {
             setCreateStatus(page, '创建失败：' + errorMessage(err), true);
             setStatus(page, '创建失败：' + errorMessage(err), true);
@@ -2844,8 +2851,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         });
         dom.addEventListener(page.querySelector('#wtRefresh'), 'click', function () {
             if (!pageActionAllowed(page)) return;
-            clearAllRoomFeedback(page);
-            loadRooms(page, true);
+            loadRooms(page);
         });
         dom.addEventListener(page.querySelector('#wtRoomName'), 'input', function () {
             syncForm(page);
@@ -2885,7 +2891,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         loading.show();
 
         loadUsers(page).then(function () {
-            return loadRooms(page, true);
+            return loadRooms(page);
         }).then(function () {
             if (page._wtVisibleRoute === 'invite') return loadInvitations(page);
         }).then(function () {
@@ -2901,9 +2907,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         clearInterval(page._wtTimer);
         page._wtRefreshVisible = function () {
             if (!pageActionAllowed(page)) return;
-            if (page._wtVisibleRoute === 'rooms') loadRooms(page, false);
+            if (page._wtVisibleRoute === 'rooms') loadRooms(page);
             else if (page._wtVisibleRoute === 'invite') {
-                loadRooms(page, false);
+                loadRooms(page);
                 loadInvitations(page);
             }
         };

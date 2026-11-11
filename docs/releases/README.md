@@ -8,9 +8,11 @@
 
 ## 当前测试版
 
-- [v1.7.2.14 测试版说明](v1.7.2.14.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.14)：宿主通用确认框与过期操作保护；真实客户端确认流程仍待验收。
+- [v1.7.2.15 测试版说明](v1.7.2.15.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.15)：页面文案与标题整理、列表刷新失败就近反馈；真实客户端继续日常观察。
 
 ## 历史发布
+
+- [v1.7.2.14 测试版说明](v1.7.2.14.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.14)：宿主通用确认框与过期操作保护；用户已确认新版客户端弹窗可以显示，全量交互仍未验收。
 
 - [v1.7.2.13 测试版说明](v1.7.2.13.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13) · [发布状态核查](../maintenance/v1.7.2.13-beta-publication.md)：自动等待提示与提前继续后的自然对齐恢复；真实双端和提示显示仍待验收。
 

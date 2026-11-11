@@ -154,7 +154,7 @@ function page() {
     if (scenario !== 'recovering') diagnosticData = ${JSON.stringify(diagnostic('active'))};
     if (scenario === 'drift-positive') diagnosticData = ${JSON.stringify(diagnostic('drift-positive'))};
     var apiCalls = []; var accountId = scenario === 'admin-manage' ? 'admin-other' : 'user-a'; var tokenConfigured = false; var serverAddress = location.origin;
-    var stateOverride = null; var stateFailure = false; var roomsFailure = false;
+    var stateOverride = null; var stateFailure = false; var roomsFailure = params.get('rooms_failure') === 'true';
     var mediaOverrides = {}; var mediaFailure = 0; var mediaDelay = 0; var stateDelay = 0;
     var imageUrlOverride; var imageDelay = 0; var imageCalls = [];
     var avatarUrlOverride; var avatarCalls = []; var avatarStatuses = {};
