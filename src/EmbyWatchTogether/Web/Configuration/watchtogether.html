@@ -31,7 +31,7 @@
         .wt-sectionHeading h2 { margin: 0; font-size: 1.5em; }
         .wt-sectionDescription { margin: .5em 0 0; }
         .wt-pageHeading { grid-column: 1 / -1; }
-        .wt-pageHeading h1, #wtSettingsSection > .wt-sectionHeading h2 { margin: 0; font-size: 2.25em; font-weight: 700; }
+        .wt-pageHeading h1, #wtSettingsSection > .wt-sectionHeading h2, #wtRoomsHeading { margin: 0; font-size: 2.25em; font-weight: 700; }
         .wt-pageHeading > p { margin: .6em 0 0; }
         .wt-pageColumns { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); column-gap: 2.75em; row-gap: 2.25em; }
         .wt-pageColumns > #wtInvitationSection { padding-left: 2.75em; border-left: 1px solid var(--wt-border); }
@@ -58,7 +58,12 @@
         .wt-page .wt-selectField > .selectArrowContainer .selectArrow { margin-top: 0; }
         .wt-formActions { display: flex; flex-wrap: wrap; align-items: center; gap: .75em; margin-top: 1.25em; }
         .wt-formHint { margin: 0; overflow-wrap: anywhere; }
-        .wt-page #wtConfigSection .checkboxContainer { margin: 1.5em 0; }
+        .wt-formHint:empty { display: none; }
+        .wt-page .wt-roomsStatus { margin: 0 0 1em; }
+        .wt-page #wtConfigSection .checkboxContainer { display: block; margin: 1em 0; }
+        .wt-page #wtConfigSection > .fieldDescription { margin: .75em 0 0; }
+        .wt-page #wtConfigSection .selectContainer > .fieldDescription { margin-top: .5em; }
+        .wt-page .wt-updateHelp { margin: .75em 0 0; }
         h3.wt-updateSetting { margin-top: 1.75em; padding-top: 1.5em; border-top: 1px solid var(--wt-border); }
         .selectContainer.wt-updateSetting { width: 100%; max-width: 40em; }
         .wt-updateSetting select, .wt-tokenField, .wt-tokenField input { width: 100%; max-width: 40em; box-sizing: border-box; }
@@ -79,8 +84,7 @@
         #wtInvitations button { margin-top: .75em; }
         .wt-refresh { white-space: nowrap; min-width: 6em; }
         .wt-roomList { display: flex; flex-direction: column; gap: 2.5em; }
-        #wtRoomsSection > .wt-sectionHeading { margin-bottom: 1.1em; }
-        #wtRoomsHeading { font-size: 1em; color: var(--wt-muted); font-weight: 400; }
+        #wtRoomsSection > .wt-sectionHeading { margin-bottom: 1.7em; align-items: center; }
         #wtRoomsSection > .wt-sectionHeading .wt-sectionDescription { font-size: .9em; }
         .wt-roomCard { min-width: 0; padding: 1.4em; border: 1px solid var(--wt-border); border-radius: .6em; box-sizing: border-box; }
         .wt-roomHeader { display: flex; align-items: center; flex-wrap: wrap; gap: .85em 1.15em; margin-bottom: 1.4em; }
@@ -167,7 +171,7 @@
             .wt-pageColumns, .wt-settingsGrid { grid-template-columns: minmax(0, 1fr); gap: 1.75em; }
             .wt-pageColumns > #wtInvitationSection, .wt-settingsAside { padding-left: 0; border-left: 0; }
             .wt-pageColumns:not(.wt-pageColumns--single) > #wtInvitationSection, .wt-settingsAside { padding-top: 1.75em; border-top: 1px solid var(--wt-border); }
-            .wt-pageHeading h1, #wtSettingsSection > .wt-sectionHeading h2 { font-size: 1.85em; }
+            .wt-pageHeading h1, #wtSettingsSection > .wt-sectionHeading h2, #wtRoomsHeading { font-size: 1.85em; }
         }
         @media (max-width: 35em) {
             .wt-roomCard { padding: 1em; }
@@ -193,7 +197,7 @@
             <p class="sectionDescription wt-lead">
                 创建房间后，两位参与者打开同一视频，播放、暂停和进度会自动同步。
             </p>
-            <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite">正在加载…</p>
+            <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite"></p>
         </div>
 
         <div id="wtInviteLayout" class="wt-pageColumns" hidden>
@@ -205,16 +209,12 @@
             <div class="wt-sectionHeading">
                 <div>
                     <h2>直接创建房间</h2>
-                    <p class="fieldDescription wt-sectionDescription">
-                        选择两名参与者，再指定一人为主用户（以主用户的播放进度为准）。
-                    </p>
                 </div>
             </div>
 
             <div class="wt-formGrid">
                 <div class="inputContainer wt-fieldWide">
                     <input is="emby-input" id="wtRoomName" label="房间名称" placeholder="例如：今晚的电影" autocomplete="off" />
-                    <div class="fieldDescription">名称只用于在本页识别房间。</div>
                 </div>
                 <div class="selectContainer wt-selectField">
                     <select is="emby-select" id="wtUserA" label="参与者 1"></select>
@@ -285,10 +285,10 @@
             <div class="wt-sectionHeading">
                 <div>
                     <h2 id="wtRoomsHeading">房间</h2>
-                    <p class="fieldDescription wt-sectionDescription">查看观看状态与参与者，管理播放同步。</p>
                 </div>
                 <button is="emby-button" id="wtRefresh" type="button" class="raised raised-outline wt-refresh">刷新</button>
             </div>
+            <p id="wtRoomsStatus" class="fieldDescription wt-roomsStatus" role="status" aria-live="polite" hidden></p>
             <div id="wtRooms" class="wt-roomList" aria-busy="true"></div>
         </div>
 
@@ -306,17 +306,12 @@
             <div class="wt-sectionHeading">
                 <div>
                     <h2>设置</h2>
-                    <p class="fieldDescription wt-sectionDescription">播放行为、更新通道与插件信息。</p>
                 </div>
             </div>
 
             <div class="wt-settingsGrid">
             <div class="wt-subGroup" id="wtConfigSection">
                 <h3 class="wt-subHeading">播放与更新</h3>
-                <p class="fieldDescription wt-sectionDescription">
-                    停止或退出视频时，选择是否暂停另一方播放，以及是否向另一方发送文字提示。
-                </p>
-
                 <label class="checkboxContainer">
                     <input is="emby-checkbox" id="wtPauseOtherOnPlaybackStop" type="checkbox" />
                     <span>停止或退出视频时暂停另一方</span>
@@ -327,18 +322,18 @@
                 </label>
                 <label class="checkboxContainer">
                     <input is="emby-checkbox" id="wtNotifyOnSyncActions" type="checkbox" />
-                    <span>同步操作时向播放端发送文字提示</span>
+                    <span>同步操作时发送文字提示</span>
                 </label>
-                <div class="fieldDescription">覆盖管理员暂停/继续、重新同步、加入/退出、视频不一致和同步完成提示；普通暂停、继续与进度调整不逐步弹窗。停止提示由上方独立开关控制，管理员主动发送消息不受此开关限制。提示样式和显示时长由播放端决定，不保证显示标题或约 3 秒消失。</div>
+                <div class="fieldDescription">显示房间操作与同步结果提示；停止提示单独设置。</div>
                 <h3 class="wt-subHeading wt-updateSetting">更新通道</h3>
                 <div class="selectContainer wt-fieldWide wt-updateSetting wt-selectField">
                     <select is="emby-select" id="wtUpdateChannel" label="更新通道">
                         <option value="stable" selected>正式版 / stable</option>
                         <option value="beta">测试版 / beta</option>
                     </select>
-                    <div class="fieldDescription">beta 可接收 stable 与 prerelease 中的更高版本，定时任务会按所选通道检查并自动安装；Emby 的任务开关和计划仍是控制入口。</div>
+                    <div class="fieldDescription">自动检查并安装所选通道的新版本；测试版通道也接收正式版。</div>
                 </div>
-                <div class="fieldDescription">此设置由 Emby 服务器保存，仅管理员可以修改。</div>
+                <div class="fieldDescription">仅管理员可修改。</div>
                 <div class="wt-formActions">
                     <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
                     <p class="fieldDescription wt-formHint" id="wtConfigStatus" role="status" aria-live="polite">正在读取配置…</p>
@@ -348,13 +343,13 @@
             <div class="wt-settingsAside">
             <div class="wt-subGroup" id="wtGitHubTokenSection">
                 <h3 class="wt-subHeading">GitHub Token <span class="wt-optional">可选</span></h3>
-                <p class="fieldDescription wt-sectionDescription">用于测试版更新检查，缓解 GitHub API 限流。</p>
+                <p class="fieldDescription wt-sectionDescription">测试版更新检查受限时可填写。</p>
                 <div class="inputContainer wt-fieldWide wt-tokenField">
                     <input is="emby-input" id="wtGitHubToken" type="password" label="输入新的 GitHub Token" placeholder="粘贴需要保存的 Token" autocomplete="new-password" spellcheck="false" autocapitalize="off" aria-describedby="wtGitHubTokenHelp wtGitHubTokenStatus" />
                 </div>
                 <details class="wt-tokenHelp">
                     <summary>如何获取 Token</summary>
-                    <p class="fieldDescription" id="wtGitHubTokenHelp">建议使用 fine-grained token，设置有效期，并仅授予读取公开仓库所需的最小权限。可在 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub Token 设置页</a>创建。保存后不会显示已有 Token。</p>
+                    <p class="fieldDescription" id="wtGitHubTokenHelp">在 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub</a> 创建 fine-grained token，设置有效期，仅授予读取公开仓库的权限。保存后不回显。</p>
                 </details>
                 <div class="wt-formActions">
                     <button is="emby-button" id="wtSaveGitHubToken" type="button" class="raised button-submit" disabled>保存 Token</button>
@@ -377,10 +372,8 @@
                         </svg>
                         <span>GitHub 项目</span>
                     </a>
-                    <p class="fieldDescription wt-formHint">
-                        插件更新由 Emby 计划任务自动处理（服务器 → 计划任务 → “Watch Together 更新检查”），可在那里调整检测时间或手动执行；安装后重启 Emby 生效。
-                    </p>
                 </div>
+                <p class="fieldDescription wt-updateHelp">在 Emby 计划任务的“Watch Together 更新检查”中调整检查时间或手动运行。安装后重启 Emby 生效。</p>
             </div>
             </div>
             </div>

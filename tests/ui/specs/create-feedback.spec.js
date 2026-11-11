@@ -66,7 +66,7 @@ test('创建POST成功后列表刷新失败仍保留创建成功事实', async (
   await prepareCreate(page, 'refresh-fails');
   await page.locator('#wtCreate').click();
   await expect(page.locator('#wtAdminSection').getByText(success, { exact: true })).toBeVisible();
-  await expect(page.locator('#wtStatus')).toContainText('房间加载失败');
+  await expect(page.locator('#wtRoomsStatus')).toContainText('房间列表刷新失败');
   await expect(page.locator('#wtStatus')).not.toContainText('创建失败');
   expect(await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.method === 'POST' && x.path === 'WatchTogether/Rooms').length)).toBe(1);
 });
