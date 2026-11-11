@@ -374,12 +374,12 @@ test('接受邀请网络失败只读回房间且不重发 POST', async ({ page }
   expect(requestLog.filter(x => x.method === 'GET' && x.path === 'WatchTogether/Rooms').length).toBeGreaterThanOrEqual(1);
 });
 
-test('原有 window.confirm 取消不发送请求', async ({ page }) => {
+test('宿主确认取消不发送请求', async ({ page }) => {
   await open(page);
   const leave = page.locator('.wt-roomCard button[data-act="leave"]');
-  page.once('dialog', dialog => dialog.dismiss());
   const before = await calls(page);
   await leave.click();
+  await page.locator('[data-confirm=cancel]').click();
   expect((await calls(page)).filter(x => x.method !== 'GET')).toEqual(before.filter(x => x.method !== 'GET'));
 });
 
@@ -454,13 +454,13 @@ test('GitHub Token 设置使用原生控件并保留保存、清除和取消确�
   const saved = await calls(page);
   expect(saved.filter(x => x.method === 'POST' && x.path === 'WatchTogether/GitHubToken').at(-1).body.Token).toBe('ghp_fixture_secret');
 
-  await page.once('dialog', dialog => dialog.dismiss());
   const beforeCancel = await calls(page);
   await page.locator('#wtClearGitHubToken').click();
+  await page.locator('[data-confirm=cancel]').click();
   expect((await calls(page)).filter(x => x.method === 'DELETE' && x.path === 'WatchTogether/GitHubToken')).toHaveLength(0);
   expect((await calls(page)).filter(x => x.method !== 'GET')).toEqual(beforeCancel.filter(x => x.method !== 'GET'));
-  await page.once('dialog', dialog => dialog.accept());
   await page.locator('#wtClearGitHubToken').click();
+  await page.locator('[data-confirm=ok]').click();
   await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已清除');
 });
 
@@ -487,8 +487,8 @@ test('Token 状态读取失败仍允许清除，保存失败清空草稿并保�
   await open(page, 'token-read-fail', 'light', 1024, 900);
   await expect(page.locator('#wtGitHubTokenStatus')).toContainText('可尝试清除');
   await expect(page.locator('#wtClearGitHubToken')).toBeEnabled();
-  await page.once('dialog', dialog => dialog.accept());
   await page.locator('#wtClearGitHubToken').click();
+  await page.locator('[data-confirm=ok]').click();
   await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已清除');
 
   await open(page, 'token-save-fail', 'light', 1024, 900);
