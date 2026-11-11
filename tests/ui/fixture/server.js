@@ -311,6 +311,39 @@ function page() {
         return { tabsContainer: middle, replaced: true };
       }
     };
+    // Mock the host module contract, not its actual rendering or native WebView.
+    // Native dialogs are deliberately disabled, matching the affected host.
+    window.confirm = function () { throw new Error('Native dialogs disabled'); };
+    window.__wtFixture.confirmations = [];
+    function hostConfirm(options) {
+      window.__wtFixture.confirmations.push(options);
+      if (params.get('confirm_mode') === 'throw') throw new Error('Mock display failure');
+      return new Promise(function (resolve, reject) {
+        var dialog = document.createElement('div');
+        dialog.setAttribute('role', 'alertdialog');
+        dialog.setAttribute('aria-label', options.title);
+        dialog.style.cssText = 'position:fixed;z-index:10000;inset:20% 10%;background:white;color:black;padding:24px;border:2px solid black';
+        var text = document.createElement('p'); text.textContent = options.text; dialog.appendChild(text);
+        function close(ok) { dialog.remove(); if (ok) resolve(); else reject('cancel'); }
+        window.__wtFixture.answerConfirmation = close;
+        ['cancel', 'ok'].forEach(function (id) {
+          var button = document.createElement('button');
+          button.textContent = id === 'ok' ? options.confirmText : '取消';
+          button.dataset.confirm = id;
+          button.onclick = function () { close(id === 'ok'); };
+          dialog.appendChild(button);
+        });
+        document.body.appendChild(dialog);
+      });
+    }
+    window.require = function (deps) {
+      if (deps.length !== 1 || deps[0] !== 'confirm') return Promise.reject(new Error('Unknown mock module'));
+      var mode = params.get('confirm_mode');
+      if (mode === 'missing') return Promise.reject(new Error('Mock module load failure'));
+      return new Promise(function (resolve) { setTimeout(function () {
+        resolve([mode === 'default' ? { default: hostConfirm } : hostConfirm]);
+      }, mode === 'slow' ? 350 : 0); });
+    };
     window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }, {}, {}, {}, {}, mainTabsManager); };
     var hostHeader = hasHostHeader ? '<header class="skinHeader" data-mock-host="true"><div class="headerLeft">emby</div><div class="headerMiddle headerSection sectionTabs"></div><div class="headerRight">mock host</div></header>' : '';
     document.querySelector('.fixture-host').innerHTML = hostHeader + '<div class="fixture-main"><div class="fixture-label" data-mock="true">模拟宿主 / mock Emby host + API · 不连接真实 Emby</div>' + sourceHtml + '</div>';

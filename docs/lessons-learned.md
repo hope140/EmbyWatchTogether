@@ -340,3 +340,11 @@
 - 稳定观察基线与前一轮样本是不同证据。双方进度差必须持续在 2 秒容差内，且相邻样本不出现可观察的大幅跳动或时间戳回退；最终一组对齐位置不能抹掉中间 seek。原 10 秒截止优先于成功判断。
 - 主控和被控目标快照保留可撤销播放标记。`StoppedPlaybackTests.TheaterHoldResume_*` 通过真实 SessionBridge/SDK 的 PlayState 替换、Stop、同 ID Start 证明旧 hold 不复活，并验证恢复 Watching 后 Pause/Unpause/Seek 正常处理。其证据是模拟传输，不是实机显示验收。
 - 等待与成功文字都需发送时复核双端语义，不只核对通知 token。原先暂停不能收到“自动继续”承诺；已恢复、停止、换会话/媒体、失去能力或关闭通知的排队消息必须退出。首次快照异常也退休 hold，避免保护恢复后自动重建旧意图。
+
+
+## 宿主确认对话框不能依赖原生 script dialog
+
+- EWT 原生 `window.confirm` 返回 false 会在暂离、结束/删除、管理员重新同步与清 Token 的 API 请求前直接返回。桌面 WebView 可以关闭默认 script dialog，因此浏览器中原生确认通过不代表桌面宿主可用。
+- 已只读核对 Emby Web 4.10.0.40 的重启确认链和 Windows 2.317.2.0 的确认模块：使用宿主 `confirm`，传入普通 `text`、`title`、`confirmText` 和 `primary: 'cancel'`；确认 resolve（可为 undefined），取消 reject，不应按返回值真伪判断。确认组件和服务器重启的执行组件不是同一层，不应调用重启组件来实现一般确认。
+- 异步确认必须限定原页面 generation、账号/服务器、路由与房间成员权限状态；取消或过期不发请求，重复点击不叠加确认。模块加载失败要显示错误，不能回退为无确认执行。普通暂停、继续和诊断不应因此新增弹窗。
+- UI fixture 模拟宿主模块契约并禁止 native confirm，覆盖确认/取消、重复点击及生命周期失效；它不是实际宿主的视觉或交互验收。真实新版客户端与旧版客户端仍须单独验证。

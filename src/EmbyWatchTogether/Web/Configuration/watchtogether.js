@@ -45,6 +45,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function clearPageData(page) {
+        page._wtConfirmation = null;
         releaseNativeTabs(page);
         clearInterval(page._wtTimer);
         clearAllRoomFeedback(page);
@@ -120,6 +121,87 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         loading.hide();
         setStatus(page, '账号或服务器已变化，请重新打开一起看。', true);
         return false;
+    }
+
+    function confirmationRoomState(page, roomId) {
+        var room = (page._wtRooms || []).filter(function (item) { return item.RoomId === roomId; })[0];
+        return room ? JSON.stringify([room.RoomId, room.Name, room.PrimaryUserId,
+            (room.ParticipantUserIds || []).map(idKey).sort(),
+            (room.JoinedParticipantUserIds || []).map(idKey).sort(),
+            room.CurrentUserJoined, room.CanEnd, room.IsAdmin]) : null;
+    }
+
+    // Emby hosts may disable native script dialogs. Use the same asynchronous
+    // confirm module as the dashboard; resolve means OK, reject means cancel.
+    function confirmAction(page, options, roomId, onConfirmed) {
+        if (!pageActionAllowed(page) || page._wtConfirmation) return;
+        var generation = page._wtGeneration;
+        var route = page._wtVisibleRoute;
+        var admin = page._wtIsAdmin;
+        var roomState = roomId ? confirmationRoomState(page, roomId) : null;
+        if (roomId && !roomState) return;
+        var pending = {};
+        page._wtConfirmation = pending;
+        if (roomId) {
+            setRoomBusy(page, roomId, true);
+            renderRooms(page, page._wtRooms || []);
+        } else {
+            setGitHubTokenBusy(page, true);
+        }
+
+        function owned() {
+            return pageActionAllowed(page) && page._wtGeneration === generation && page._wtConfirmation === pending;
+        }
+        function current() {
+            return owned() && page._wtVisibleRoute === route;
+        }
+        function release() {
+            if (!owned()) return false;
+            page._wtConfirmation = null;
+            if (roomId) {
+                setRoomBusy(page, roomId, false);
+                renderRooms(page, page._wtRooms || []);
+            } else {
+                setGitHubTokenBusy(page, false);
+            }
+            return true;
+        }
+        function feedback(text) {
+            if (roomId && confirmationRoomState(page, roomId)) {
+                roomFeedback(page, roomId, text, true, true);
+                renderRooms(page, page._wtRooms || []);
+            } else if (roomId) {
+                setStatus(page, text, true);
+            } else {
+                setGitHubTokenStatus(page, text, true);
+            }
+        }
+        function failed() {
+            if (release()) feedback('无法打开确认窗口，请重新打开一起看后重试。');
+        }
+        return Promise.resolve().then(function () {
+            return require(['confirm']);
+        }).then(function (modules) {
+            if (!current()) { release(); return; }
+            var confirm = modules && modules[0];
+            confirm = confirm && (confirm.default || confirm);
+            if (typeof confirm !== 'function') throw new Error('Confirmation module unavailable');
+            var result = confirm(Object.assign({ primary: 'cancel' }, options));
+            if (!result || typeof result.then !== 'function') throw new Error('Invalid confirmation result');
+            return result.then(function () {
+                if (!current()) { release(); return; }
+                var unchanged = admin === page._wtIsAdmin &&
+                    (!roomId || roomState === confirmationRoomState(page, roomId));
+                if (!release()) return;
+                if (!unchanged) {
+                    feedback('房间或权限已变化，请重新确认操作。');
+                    return;
+                }
+                onConfirmed();
+            }, function () {
+                release();
+            });
+        }, failed).catch(failed);
     }
 
     // Guard every continuation, including catch/finally and chained mutations.
@@ -1161,10 +1243,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function clearGitHubToken(page) {
         if (!pageActionAllowed(page)) return;
         if (page._wtIsAdmin !== true) return;
-        if (!window.confirm('清除 GitHub Token 后，beta 更新查询将恢复使用匿名 API，确认清除吗？')) {
-            return;
-        }
+        return confirmAction(page, { title: '清除 Token',
+            text: '清除 GitHub Token 后，beta 更新查询将恢复使用匿名 API，确认清除吗？',
+            confirmText: '清除' }, null, function () { clearGitHubTokenConfirmed(page); });
+    }
 
+    function clearGitHubTokenConfirmed(page) {
+        if (!pageActionAllowed(page) || page._wtIsAdmin !== true) return;
         setGitHubTokenBusy(page, true, 'clear');
         setGitHubTokenStatus(page, '正在清除 Token…');
         return apiSend(page, 'WatchTogether/GitHubToken', 'DELETE').then(function (result) {
@@ -2502,10 +2587,17 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function control(page, roomId, action, button) {
         if (!pageActionAllowed(page)) return;
-        var label = actionLabels[action] || '操作';
-        if (action === 'resync' && !window.confirm('重新同步会暂时暂停双方并重新对齐，确认继续吗？')) {
-            return;
+        if (action === 'resync') {
+            return confirmAction(page, { title: '重新同步',
+                text: '重新同步会暂时暂停双方并重新对齐，确认继续吗？',
+                confirmText: '重新同步' }, roomId, function () { controlConfirmed(page, roomId, action); });
         }
+        controlConfirmed(page, roomId, action);
+    }
+
+    function controlConfirmed(page, roomId, action) {
+        if (!pageActionAllowed(page)) return;
+        var label = actionLabels[action] || '操作';
         setRoomBusy(page, roomId, true);
         clearRoomFeedback(page, roomId);
         roomFeedback(page, roomId, label + '处理中…', false, true);
@@ -2571,11 +2663,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (!pageActionAllowed(page)) return;
         var roomName = room.Name || '未命名房间';
         var ending = room.CanEnd === true;
-        if (!window.confirm((ending ? '确认结束“' : '确认删除“') + roomName + '”吗？' +
-            (ending ? '结束房间会解除双方成员关系，只删除同步关系，不删除媒体。' : '这只删除同步关系，不删除媒体。'))) {
-            return;
-        }
+        return confirmAction(page, { title: ending ? '结束房间' : '删除房间',
+            text: (ending ? '确认结束“' : '确认删除“') + roomName + '”吗？' +
+                (ending ? '结束房间会解除双方成员关系，只删除同步关系，不删除媒体。' : '这只删除同步关系，不删除媒体。'),
+            confirmText: ending ? '结束' : '删除' }, room.RoomId, function () { deleteRoomConfirmed(page, room); });
+    }
 
+    function deleteRoomConfirmed(page, room) {
+        if (!pageActionAllowed(page)) return;
+        var roomName = room.Name || '未命名房间';
+        var ending = room.CanEnd === true;
         setRoomBusy(page, room.RoomId, true);
         roomFeedback(page, room.RoomId, '删除中…', false, true);
         renderRooms(page, page._wtRooms || []);
@@ -2601,9 +2698,16 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function membership(page, room, action, button) {
         if (!pageActionAllowed(page)) return;
-        if (action === 'leave' && !window.confirm('暂离“' + (room.Name || '未命名房间') + '”吗？暂离不会解除成员关系，并将尝试暂停仍在房间的一方。')) {
-            return;
+        if (action === 'leave') {
+            return confirmAction(page, { title: '暂离房间',
+                text: '暂离“' + (room.Name || '未命名房间') + '”吗？暂离不会解除成员关系，并将尝试暂停仍在房间的一方。',
+                confirmText: '暂离' }, room.RoomId, function () { membershipConfirmed(page, room, action); });
         }
+        membershipConfirmed(page, room, action);
+    }
+
+    function membershipConfirmed(page, room, action) {
+        if (!pageActionAllowed(page)) return;
         setRoomBusy(page, room.RoomId, true);
         clearRoomFeedback(page, room.RoomId);
         roomFeedback(page, room.RoomId, action === 'join' ? '加入中…' : '暂离中…', false, true);
