@@ -8,9 +8,11 @@
 
 ## 当前测试版
 
-- [v1.7.2.13 测试版说明](v1.7.2.13.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13) · [发布状态核查](../maintenance/v1.7.2.13-beta-publication.md)：自动等待提示与提前继续后的自然对齐恢复；真实双端和提示显示仍待验收。
+- [v1.7.2.14 测试版说明](v1.7.2.14.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.14)：宿主通用确认框与过期操作保护；真实客户端确认流程仍待验收。
 
 ## 历史发布
+
+- [v1.7.2.13 测试版说明](v1.7.2.13.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13) · [发布状态核查](../maintenance/v1.7.2.13-beta-publication.md)：自动等待提示与提前继续后的自然对齐恢复；真实双端和提示显示仍待验收。
 
 - [v1.7.2.12 测试版说明](v1.7.2.12.md)：换集提示合并、失效复核与通知开关的逐条生效边界。
 - [v1.7.2.11 测试版说明](v1.7.2.11.md)：停止来源的排队命令撤销与 Theater 换集能力兼容。
