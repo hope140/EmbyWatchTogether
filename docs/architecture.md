@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.16](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)。本文描述 beta 测试线；1.7.2.16 仅整理成功通知、创建表单及保存阶段结果反馈，不修改同步引擎。公开发布不等于安装或真实客户端全量验收，保存故障分支以自动测试为依据；各版本事实见[发布日志索引](releases/README.md)，验收反馈与证据边界见[兼容性记录](client-compatibility.md)。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.17](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)。本文描述 beta 测试线；1.7.2.17 在既有页面上精简操作文案，按结束或删除选择进度及失败用词，不修改同步引擎或业务行为。公开发布不等于安装或真实客户端全量验收，保存故障分支以自动测试为依据；各版本事实见[发布日志索引](releases/README.md)，验收反馈与证据边界见[兼容性记录](client-compatibility.md)。
 
 ## 运行时边界
 

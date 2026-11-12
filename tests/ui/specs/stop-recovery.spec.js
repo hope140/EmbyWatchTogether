@@ -28,7 +28,7 @@ test('停止后大位置差明确请求确认，成员操作说明视频切换�
     fixture.view.view._wtRefreshVisible();
   });
   await expect(page.locator('.wt-roomCard')).toContainText('停止后的进度差较大');
-  await expect(page.locator('.wt-roomCard')).toContainText('必要时会切换视频');
+  await expect(page.locator('.wt-roomCard')).toContainText('可能切换视频');
   expect(await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.method === 'POST').length)).toBe(0);
   await page.getByRole('button', { name: '请求重新同步', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.method === 'POST' && x.path.endsWith('/Resync')).length)).toBe(1);

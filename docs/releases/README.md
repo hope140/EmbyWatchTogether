@@ -8,9 +8,11 @@
 
 ## 当前测试版
 
-- [v1.7.2.16 测试版说明](v1.7.2.16.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16) · [发布状态核查](../maintenance/v1.7.2.16-beta-publication.md)：成功通知、创建表单与配置保存阶段结果反馈；保存异常由自动测试覆盖。
+- [v1.7.2.17 测试版说明](v1.7.2.17.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)：精简操作文案，区分结束与删除反馈；用户已确认文案预览，真实故障分支由自动测试覆盖。
 
 ## 历史发布
+
+- [v1.7.2.16 测试版说明](v1.7.2.16.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16) · [发布状态核查](../maintenance/v1.7.2.16-beta-publication.md)：成功通知、创建表单与配置保存阶段结果反馈；保存异常由自动测试覆盖。
 
 - [v1.7.2.15 测试版说明](v1.7.2.15.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.15)：页面文案与标题整理、列表刷新失败就近反馈；真实客户端继续日常观察。
 
