@@ -8,9 +8,11 @@
 
 ## 当前测试版
 
-- [v1.7.2.19 测试版说明](v1.7.2.19.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.19)：可选房间名称、随机四位编号与邀请复制反馈。
+- [v1.7.2.20 测试版说明](v1.7.2.20.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20)：重新同步按钮和管理员设置页文案。
 
 ## 历史发布
+
+- [v1.7.2.19 测试版说明](v1.7.2.19.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.19)：可选房间名称、随机四位编号与邀请复制反馈。
 
 - [v1.7.2.18 测试版说明](v1.7.2.18.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.18) · [发布核验](../maintenance/v1.7.2.18-beta-publication.md)：卡片图与双人图标、普通账号角色读取及 V21 缓存更新。
 
