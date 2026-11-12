@@ -1119,7 +1119,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function invitationAcceptMessage(status) {
         return {
-            accepted: '邀请已接受，房间已创建，请与对方打开同一视频。',
+            accepted: '房间已创建，请双方打开同一视频。',
             invalid_or_expired: '邀请码无效或已过期，请向对方索取新邀请码。',
             creator_cannot_accept: '不能接受自己创建的邀请码。',
             rate_limited: '尝试次数过多，请稍后再试。',
@@ -1254,7 +1254,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (!pageActionAllowed(page)) return;
         if (page._wtIsAdmin !== true) return;
         return confirmAction(page, { title: '清除 Token',
-            text: '清除 GitHub Token 后，beta 更新查询将恢复使用匿名 API，确认清除吗？',
+            text: '清除 Token？beta 查询将改用匿名 API。',
             confirmText: '清除' }, null, function () { clearGitHubTokenConfirmed(page); });
     }
 
@@ -1898,15 +1898,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         button.dataset.action = action;
         button.textContent = action === 'delete' ? (room.CanEnd ? '结束房间' : '删除房间') : action === 'leave' ? '暂离房间' : action === 'join' ? '加入房间' : action === 'diagnostics' ? '查看诊断' : actionLabels[action];
         button.title = action === 'delete'
-            ? (room.CanEnd ? '结束房间会解除双方成员关系；只删除同步关系，不删除媒体' : '删除这个房间；只删除同步关系，不删除媒体')
+            ? (room.CanEnd ? '解除双方成员关系，不删除媒体' : '仅移除同播关系，不删除媒体')
             : action === 'leave'
-                ? '暂离只退出同步状态，不解除成员关系；将尝试暂停仍在房间的一方'
+                ? '可重新加入，并尝试暂停对方'
                 : action === 'join'
-                    ? '加入后需要与另一位参与者打开同一视频'
+                    ? '请双方打开同一视频'
                     : action === 'diagnostics'
                         ? '读取当前房间的脱敏同步诊断'
                         : action === 'participantResync'
-                            ? '请求服务端重新对齐双方播放位置'
+                            ? '请求重新对齐双方进度'
                             : actionLabels[action] + '：' + (getStateInfo(room.State).description || '');
         button.addEventListener('click', function () {
             if (action === 'delete') {
@@ -2466,7 +2466,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 playback.appendChild(createActionButton(page, room, 'participantResync'));
                 var resyncHint = document.createElement('p');
                 resyncHint.className = 'fieldDescription wt-resyncHint';
-                resyncHint.textContent = '以主用户当前视频和进度为准，必要时会切换视频。';
+                resyncHint.textContent = '以主用户视频和进度为准，可能切换视频。';
                 playback.appendChild(resyncHint);
             }
             var pauseButton = null;
@@ -2494,7 +2494,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var membershipLine = document.createElement('p');
             membershipLine.className = 'fieldDescription wt-roomMembership';
             membershipLine.hidden = !isMember;
-            membershipLine.textContent = '暂离保留成员关系；结束房间会解除双方成员关系。';
+            membershipLine.textContent = '暂离可重新加入；结束解除双方关系。';
             controls.appendChild(membershipLine);
             var diagnosticsAction = document.createElement('div');
             diagnosticsAction.className = 'wt-diagnosticAction';
@@ -2622,7 +2622,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (!pageActionAllowed(page)) return;
         if (action === 'resync') {
             return confirmAction(page, { title: '重新同步',
-                text: '重新同步会暂时暂停双方并重新对齐，确认继续吗？',
+                text: '暂时暂停双方并重新对齐，继续吗？',
                 confirmText: '重新同步' }, roomId, function () { controlConfirmed(page, roomId, action); });
         }
         controlConfirmed(page, roomId, action);
@@ -2640,7 +2640,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 if (result && result.Error) {
                     roomFeedback(page, roomId, label + '已发起，但部分客户端未完成，请检查客户端。', true, true);
                 } else if (action === 'resync') {
-                    roomFeedback(page, roomId, '重新同步已开始，播放可能暂时暂停，请等待同步完成。', false, false);
+                    roomFeedback(page, roomId, '重新同步已开始，可能暂停播放，请稍候。', false, false);
                 } else if (result && result.Users && result.Users.length > 0) {
                     roomFeedback(page, roomId, label + '已向 ' + result.Users.length + ' 个当前会话发送。', false, false);
                 } else if (result && result.Users) {
@@ -2663,17 +2663,17 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (!pageActionAllowed(page)) return;
         setRoomBusy(page, roomId, true);
         clearRoomFeedback(page, roomId);
-        roomFeedback(page, roomId, '重新同步请求处理中…', false, true);
+        roomFeedback(page, roomId, '正在请求重新同步…', false, true);
         renderRooms(page, page._wtRooms || []);
         apiSend(page, 'WatchTogether/Rooms/' + encodeURIComponent(roomId) + '/Resync', 'POST')
             .then(function (result) {
                 var status = result && result.Status;
                 if (status === 'accepted') {
-                    roomFeedback(page, roomId, '重新同步请求已受理，双方将暂时暂停并重新对齐。', false, false);
+                    roomFeedback(page, roomId, '请求已受理，将尝试暂停双方并对齐。', false, false);
                 } else if (status === 'busy') {
                     roomFeedback(page, roomId, result.Reason === 'resync_cooldown'
-                        ? '刚刚已请求重新同步，请稍后再试。'
-                        : '同步正在进行，请等待当前同步完成。', true, true);
+                        ? '已请求重新同步，请稍后再试。'
+                        : '同步中，请等待完成。', true, true);
                 } else if (status === 'unavailable') {
                     roomFeedback(page, roomId, result.Reason === 'snapshot_unavailable'
                         ? '当前播放会话暂时不可读，请稍后再试。'
@@ -2697,8 +2697,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var roomName = room.Name || '未命名房间';
         var ending = room.CanEnd === true;
         return confirmAction(page, { title: ending ? '结束房间' : '删除房间',
-            text: (ending ? '确认结束“' : '确认删除“') + roomName + '”吗？' +
-                (ending ? '结束房间会解除双方成员关系，只删除同步关系，不删除媒体。' : '这只删除同步关系，不删除媒体。'),
+            text: (ending ? '结束“' : '删除“') + roomName + '”？双方将退出房间。',
             confirmText: ending ? '结束' : '删除' }, room.RoomId, function () { deleteRoomConfirmed(page, room); });
     }
 
@@ -2707,7 +2706,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var roomName = room.Name || '未命名房间';
         var ending = room.CanEnd === true;
         setRoomBusy(page, room.RoomId, true);
-        roomFeedback(page, room.RoomId, '删除中…', false, true);
+        roomFeedback(page, room.RoomId, ending ? '结束中…' : '删除中…', false, true);
         renderRooms(page, page._wtRooms || []);
         apiSend(page, 'WatchTogether/Rooms/' + encodeURIComponent(room.RoomId), 'DELETE')
             .then(function (result) {
@@ -2715,11 +2714,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     throw new Error('房间不存在或已删除');
                 }
                 clearRoomFeedback(page, room.RoomId);
-                notifySuccess(page, ending ? '房间已结束' : '房间已删除，只移除同步关系，媒体未删除。');
+                notifySuccess(page, ending ? '房间已结束' : '房间已删除');
                 return loadRooms(page);
             })
             .catch(function (err) {
-                roomFeedback(page, room.RoomId, '删除失败：' + errorMessage(err), true, true);
+                roomFeedback(page, room.RoomId, (ending ? '结束失败：' : '删除失败：') + errorMessage(err), true, true);
             })
             .then(function () {
                 setRoomBusy(page, room.RoomId, false);
@@ -2731,7 +2730,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (!pageActionAllowed(page)) return;
         if (action === 'leave') {
             return confirmAction(page, { title: '暂离房间',
-                text: '暂离“' + (room.Name || '未命名房间') + '”吗？暂离不会解除成员关系，并将尝试暂停仍在房间的一方。',
+                text: '暂离“' + (room.Name || '未命名房间') + '”？可重新加入，并尝试暂停对方。',
                 confirmText: '暂离' }, room.RoomId, function () { membershipConfirmed(page, room, action); });
         }
         membershipConfirmed(page, room, action);
@@ -2746,7 +2745,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         apiSend(page, 'WatchTogether/Rooms/' + encodeURIComponent(room.RoomId) + '/' + (action === 'join' ? 'Join' : 'Leave'), 'POST')
             .then(function (result) {
                 var text = action === 'join'
-                    ? '已加入房间，请与另一位参与者打开同一视频。'
+                    ? '已加入，请双方打开同一视频。'
                     : getLeaveFeedback(result);
                 if (action === 'leave' && Number(result && result.PauseFailed) > 0) {
                     roomFeedback(page, room.RoomId, text, true, true);
@@ -2770,12 +2769,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var succeeded = Number(result && result.PauseSucceeded) || 0;
         var failed = Number(result && result.PauseFailed) || 0;
         if (failed > 0) {
-            return '已暂离房间，但仍在房间的一方暂停失败，请检查客户端；成员关系仍保留。';
+            return '已暂离，对方暂停失败，请检查客户端。';
         }
         if (attempted > 0 && succeeded === attempted) {
-            return '已暂离房间，仍在房间的一方已暂停；成员关系仍保留。';
+            return '已暂离，对方已暂停，可重新加入。';
         }
-        return '已暂离房间，自动同步已停止；成员关系仍保留。';
+        return '已暂离，自动同步已停止；对方暂停未确认。';
     }
 
     function createRoom(page) {

@@ -35,7 +35,7 @@ for (const action of ['leave', 'delete', 'resync']) {
     const call = (await mutations(page))[0];
     if (action === 'delete') {
       expect(call.method).toBe('DELETE');
-      expect(await page.evaluate(() => window.__wtFixture.confirmations[1].text)).toContain('结束房间会解除双方成员关系，只删除同步关系，不删除媒体。');
+      expect(await page.evaluate(() => window.__wtFixture.confirmations[1].text)).toContain('双方将退出房间。');
       await expect.poll(() => page.evaluate(() => window.__wtFixture.toasts)).toEqual(['房间已结束']);
     }
     if (action === 'resync') expect(call.body.Action).toBe('resync');
