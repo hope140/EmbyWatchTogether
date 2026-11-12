@@ -2,7 +2,7 @@
 
 ## 当前验收状态
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前测试版为 [v1.7.2.16](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)，见[发布索引](releases/README.md)。1.7.2.16 的保存异常由自动测试覆盖，未在真实服务器人工注入故障；用户已于 2026-11-11 将 1.7.2.13 总体验收定为通过，并继续一周观察。部分双端场景未留存逐项实机证据，不否定这一总体反馈，也不自动扩大为后续版本新增界面的验收。发布不等于安装或真实客户端全量验收；对应范围见[测试版发布说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.16/docs/releases/v1.7.2.16.md)。main 与 beta 保持独立源码线，发布状态不代表 beta 实现已合入 main。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前测试版为 [v1.7.2.17](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)，见[发布索引](releases/README.md)。1.7.2.17 的操作文案预览已获用户确认；结束/删除失败、暂离暂停失败及既有保存异常由自动测试覆盖，未在真实服务器人工注入故障。用户已于 2026-11-11 将 1.7.2.13 总体验收定为通过，并继续一周观察。部分双端场景未留存逐项实机证据，不否定这一总体反馈，也不自动扩大为后续版本新增界面的验收。预览页面资源相同不等于 DLL 版本、源码标识或签名资产身份相同；发布不等于安装或真实客户端全量验收；对应范围见[测试版发布说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.17/docs/releases/v1.7.2.17.md)。main 与 beta 保持独立源码线，发布状态不代表 beta 实现已合入 main。
 
 ## 2026-10-18 验收记录（历史）
 

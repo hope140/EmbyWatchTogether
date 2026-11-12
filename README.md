@@ -4,9 +4,9 @@ Watch Together 是运行在 Emby Server 内的双人同步观看插件。两位�
 
 本文面向 Emby Server 管理员和普通使用者。当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，变化见[发布说明](docs/releases/v1.7.1.0.md)。开发者和维护者请从[开发者文档索引](docs/README.md)进入。
 
-测试通道提供 [v1.7.2.16 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)，变化和验证边界见[对应 tag 的测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.16/docs/releases/v1.7.2.16.md)。本版为 beta/prerelease，整理成功通知、创建表单与配置保存阶段结果反馈；保存异常由自动测试覆盖，未在真实服务器人工注入故障。发布不等于已安装或真实客户端全量验收。
+测试通道提供 [v1.7.2.17 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)，变化和验证边界见[对应 tag 的测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.17/docs/releases/v1.7.2.17.md)。本版为 beta/prerelease，精简结束、删除和暂离等操作的确认与结果提示；用户已确认文案预览，故障分支由自动测试覆盖，未在真实服务器人工注入验收。预览页面确认不等于已安装公开签名资产，也不等于真实客户端全量验收。
 
-本文所在 `main` 与 `beta` 保持独立源码线。测试版入口只同步公开发布状态，不表示 `main` 已包含 v1.7.2.16 的实现；[发布索引](docs/releases/README.md)区分当前版本和历史记录。
+本文所在 `main` 与 `beta` 保持独立源码线。测试版入口只同步公开发布状态，不表示 `main` 已包含 v1.7.2.17 的实现；[发布索引](docs/releases/README.md)区分当前版本和历史记录。
 
 ## 功能
 
