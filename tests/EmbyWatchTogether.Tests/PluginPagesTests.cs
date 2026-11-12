@@ -21,9 +21,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV25");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV25");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV25");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV26");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV26");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV26");
             Assert.Equal(4, pages.Count);
             Assert.Single(pages, page => page.EnableInUserMenu);
             Assert.All(pages.Where(page => !page.Name.EndsWith(".js")), page =>
@@ -31,7 +31,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV7");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV25.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV26.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
@@ -58,7 +58,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV25");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV26");
             Assert.Equal("people", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
@@ -75,15 +75,15 @@ namespace Emby.Plugins.WatchTogether.Tests
             var script = ReadResource(typeof(Plugin).Assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
             foreach (var route in new[] { "Rooms", "Invite", "Settings", "Native" })
             {
-                var name = "WatchTogether" + route + "V25" + (route == "Native" ? ".js" : "");
+                var name = "WatchTogether" + route + "V26" + (route == "Native" ? ".js" : "");
                 Assert.Contains(name, names);
                 Assert.DoesNotContain("WatchTogether" + route + "V22", html);
                 Assert.DoesNotContain("WatchTogether" + route + "V22", script);
                 Assert.Contains(name, route == "Native" ? html : script);
             }
-            Assert.DoesNotContain(names, name => name.Contains("V22") || name.Contains("V23") || name.Contains("V24"));
-            Assert.DoesNotContain("V24", html);
-            Assert.DoesNotContain("V24", script);
+            Assert.DoesNotContain(names, name => name.Contains("V22") || name.Contains("V23") || name.Contains("V24") || name.Contains("V25"));
+            Assert.DoesNotContain("V25", html);
+            Assert.DoesNotContain("V25", script);
         }
 
         private static int ReadBigEndianInt32(byte[] bytes)
@@ -100,7 +100,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV25.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV26.js\"", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", javascript);
             Assert.DoesNotContain("WatchTogetherSettingsV5", html);
@@ -114,7 +114,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("同步操作时发送文字提示", html);
             Assert.Contains("显示房间操作与同步结果提示；停止提示单独设置。", html);
             Assert.Contains("安装后重启 Emby 生效。", html);
-            Assert.Contains("这些设置对整台服务器生效。", html);
+            Assert.DoesNotContain("这些设置对整台服务器生效。", html);
             Assert.DoesNotContain("仅管理员可修改。", html);
             Assert.Contains("wtUpdateChannel", html);
             Assert.Contains("value=\"stable\"", html);
