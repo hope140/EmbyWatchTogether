@@ -38,7 +38,10 @@
 
 - [发布日志索引](releases/README.md)
 - [v1.7.1.0 正式版说明](releases/v1.7.1.0.md)
-- [v1.7.2.13 当前测试版说明](releases/v1.7.2.13.md) · [发布状态核查](maintenance/v1.7.2.13-beta-publication.md)
+- [v1.7.2.16 当前测试版说明](releases/v1.7.2.16.md) · [发布状态核查](maintenance/v1.7.2.16-beta-publication.md)
+- [v1.7.2.15 测试版说明](releases/v1.7.2.15.md)
+- [v1.7.2.14 测试版说明](releases/v1.7.2.14.md)
+- [v1.7.2.13 测试版说明](releases/v1.7.2.13.md) · [发布状态核查](maintenance/v1.7.2.13-beta-publication.md)
 - [v1.7.2.12 测试版说明](releases/v1.7.2.12.md)
 - [v1.7.2.11 测试版说明](releases/v1.7.2.11.md)
 - [v1.7.2.10 测试版说明](releases/v1.7.2.10.md)
