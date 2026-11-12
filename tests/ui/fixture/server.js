@@ -233,7 +233,7 @@ function page() {
       }
       if (path === 'WatchTogether/Invitations' && method === 'POST') {
         var expiresAt = new Date(Date.now() + 900000).toISOString();
-        invitations = [{ InvitationId: 'inv-1', Name: body && JSON.parse(body).Name || '周末邀请', ExpiresAtUtc: expiresAt }];
+        invitations = [{ InvitationId: 'inv-1', Name: body && JSON.parse(body).Name || '', ExpiresAtUtc: expiresAt }];
         return delay({ Status: 'created', Created: true, InvitationId: 'inv-1', Code: 'ABCD12EFghI3J4KLMNopQR', ExpiresAtUtc: expiresAt });
       }
       if (path.indexOf('/Accept') >= 0) return delay({ Status: 'accepted', Accepted: true });

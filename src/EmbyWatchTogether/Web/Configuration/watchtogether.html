@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherNativeV21.js"
+     data-controller="__plugin/WatchTogetherNativeV23.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -216,7 +216,7 @@
 
             <div class="wt-formGrid">
                 <div class="inputContainer wt-fieldWide">
-                    <input is="emby-input" id="wtRoomName" aria-describedby="wtRoomNameError" label="房间名称" placeholder="例如：今晚的电影" autocomplete="off" />
+                    <input is="emby-input" id="wtRoomName" aria-describedby="wtRoomNameError" label="房间名称" placeholder="留空自动生成房间名" autocomplete="off" />
                     <p id="wtRoomNameError" class="fieldDescription error" aria-live="polite" hidden></p>
                 </div>
                 <div class="selectContainer wt-selectField">
@@ -253,7 +253,7 @@
 
             <div class="wt-formGrid">
                 <div class="inputContainer wt-fieldWide">
-                    <input is="emby-input" id="wtInvitationName" label="房间名称（可选）" placeholder="例如：今晚的电影" autocomplete="off" />
+                    <input is="emby-input" id="wtInvitationName" label="房间名称" placeholder="留空自动生成房间名" autocomplete="off" />
                 </div>
             </div>
             <div class="wt-formActions">

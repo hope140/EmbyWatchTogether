@@ -13,10 +13,6 @@ async function form(page, mode='') {
 test('空表单安静、点击缺项定位、字段校验与重置',async({page})=>{
  await form(page);
  await expect(page.locator('#wtRoomNameError')).toBeHidden();
- await page.locator('#wtCreate').click();
- await expect(page.locator('#wtRoomName')).toBeFocused();
- await expect(page.locator('#wtRoomNameError')).toHaveText('请输入房间名称。');
- await page.locator('#wtRoomName').fill('新房间');
  await page.locator('#wtUserB').selectOption('user-a');
  await expect(page.locator('#wtUserBError')).toContainText('必须不同');
  await page.locator('#wtCreate').click();
@@ -63,8 +59,8 @@ test('重复提交只发送一次，成功后后备提示不会覆盖其他错�
  expect(await page.evaluate(()=>window.__wtFixture.apiCalls.filter(x=>x.method==='POST'&&x.path==='WatchTogether/Rooms').length)).toBe(1);
 });
 for(const width of [390,1280]) test('字段提示排版 '+width,async({page})=>{
- await page.setViewportSize({width,height:900});await form(page);await page.locator('#wtCreate').click();
- await expect(page.locator('#wtRoomNameError')).toBeVisible();
+ await page.setViewportSize({width,height:900});await form(page);await page.locator('#wtUserB').selectOption('user-a');await page.locator('#wtCreate').click();
+ await expect(page.locator('#wtUserBError')).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  await page.screenshot({path:test.info().outputPath('form-'+width+'.png'),fullPage:true});
 });
