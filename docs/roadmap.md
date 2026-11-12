@@ -1,6 +1,6 @@
 # Watch Together 路线图
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前测试版为 [v1.7.2.16](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)，见[发布索引](releases/README.md)。main 与 beta 保持独立源码线，测试版入口不表示其实现已合入 main。详细实施状态见 [`development-roadmap.md`](development-roadmap.md)。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前测试版为 [v1.7.2.17](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)，见[发布索引](releases/README.md)。main 与 beta 保持独立源码线，测试版入口不表示其实现已合入 main。详细实施状态见 [`development-roadmap.md`](development-roadmap.md)。
 
 ## 已整合能力
 
@@ -16,7 +16,7 @@
 
 ## 下一阶段安排
 
-后续管理员页面工作放在当前测试线转正式版之后，再单独确认范围。1.7.2.16 仍为 beta/prerelease；本次同步公开版本入口，不代表正式版发布授权、运行服务器已安装或真实双端全量验收。
+后续管理员页面工作放在当前测试线转正式版之后，再单独确认范围。1.7.2.17 仍为 beta/prerelease；本次同步公开版本入口，不代表正式版发布授权、运行服务器已安装或真实双端全量验收。
 
 ## 长期边界
 

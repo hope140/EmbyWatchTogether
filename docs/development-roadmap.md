@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前 Latest stable 为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.16](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)，见[发布索引](releases/README.md)。main 保持独立正式开发线；beta 发布不表示其实现已合入 main。1.7.2.16 的成功通知、创建表单和保存阶段结果反馈已公开发布；保存异常由自动测试覆盖，未人工故障验收。用户已于 2026-11-11 将 1.7.2.13 总体验收定为通过，并继续一周观察；未留存逐项实机证据的场景按证据边界说明，不否定总体验收。
+当前 Latest stable 为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.17](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)，见[发布索引](releases/README.md)。main 保持独立正式开发线；beta 发布不表示其实现已合入 main。1.7.2.17 的操作确认与结果提示精简已公开发布；用户已确认文案预览，故障分支由自动测试覆盖，未人工故障验收。用户已于 2026-11-11 将 1.7.2.13 总体验收定为通过，并继续一周观察；未留存逐项实机证据的场景按证据边界说明，不否定总体验收。
 
 后续管理员页面工作延后至当前测试线转正式版之后，再单独确认范围；本次仅同步文档，不代表已授权正式版发布或现有服务器安装。
 

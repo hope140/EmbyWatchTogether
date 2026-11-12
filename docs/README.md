@@ -4,7 +4,7 @@
 
 ## 当前实现
 
-以下相对链接指向 `main` 文档；beta 的实现与验收边界请查看[测试版 tag 架构说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.16/docs/architecture.md)，不将其视为已合入 main。当前公开版本见[发布索引](releases/README.md)。
+以下相对链接指向 `main` 文档；beta 的实现与验收边界请查看[测试版 tag 架构说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.17/docs/architecture.md)，不将其视为已合入 main。当前公开版本见[发布索引](releases/README.md)。
 
 - [当前架构](architecture.md)：运行时组件、状态、嵌入式 UI、持久化和信任边界。
 - [技术文档](technical.md)：API、运行时约束、构建、测试、打包、签名发布和排错。
@@ -40,7 +40,7 @@
 
 - [发布日志索引](releases/README.md)
 - [v1.7.1.0 当前正式版说明](releases/v1.7.1.0.md)
-- [v1.7.2.16 当前测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.16/docs/releases/v1.7.2.16.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)
+- [v1.7.2.17 当前测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.17/docs/releases/v1.7.2.17.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)
 - [v1.6.1.0 Release Notes](releases/v1.6.1.0.md)
 - [v1.7.0.0 测试版说明](releases/v1.7.0.0.md)
 - [v1.7.0.0 测试版发布记录](maintenance/v1.7.0.0-beta-publication.md)

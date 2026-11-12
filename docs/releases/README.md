@@ -8,12 +8,13 @@
 
 ## 当前测试版
 
-- [v1.7.2.16 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.16/docs/releases/v1.7.2.16.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)：成功通知、创建表单与配置保存阶段结果反馈；保存异常由自动测试覆盖，发布不等于安装或真实客户端全量验收。
+- [v1.7.2.17 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.17/docs/releases/v1.7.2.17.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)：精简结束、删除和暂离等操作的确认与结果提示；文案预览已确认，故障分支由自动测试覆盖，发布不等于安装或真实客户端全量验收。
 
 `main` 与 `beta` 保持独立源码线。此索引记录公开发布状态；测试版说明链接到对应 tag，不表示 main 已包含该测试版实现。
 
 ## 历史发布
 
+- [v1.7.2.16 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.16/docs/releases/v1.7.2.16.md)：成功通知、创建表单与配置保存阶段结果反馈；保存异常由自动测试覆盖。
 - [v1.7.2.15 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.15/docs/releases/v1.7.2.15.md)：页面文案、标题与列表刷新失败反馈。
 - [v1.7.2.14 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.14/docs/releases/v1.7.2.14.md)：宿主确认框与过期操作保护。
 - [v1.7.2.13 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.13/docs/releases/v1.7.2.13.md)：等待提示与提前继续后的自然对齐恢复；用户于 2026-11-11 宣布总体验收通过，并继续一周观察，逐项证据范围见[兼容性记录](../client-compatibility.md)。
