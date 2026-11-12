@@ -8,6 +8,10 @@ async function invitePage(page, admin = false) {
 }
 for (const name of ['', '   ', '周末电影']) test('手动名称可选且保留已填值 '+JSON.stringify(name), async ({page}) => {
   await invitePage(page, true);
+  for (const id of ['#wtRoomName', '#wtInvitationName']) {
+    await expect(page.locator(id)).toHaveAttribute('label', '房间名称');
+    await expect(page.locator(id)).toHaveAttribute('placeholder', '留空自动生成房间名');
+  }
   await page.locator('#wtRoomName').fill(name);
   await page.locator('#wtCreate').click();
   await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.filter(x=>x.method==='POST' && x.path==='WatchTogether/Rooms').length)).toBe(1);
