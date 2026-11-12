@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，beta 版本及发布状态以 [GitHub Releases](https://github.com/hope140/EmbyWatchTogether/releases) 为准。本文描述 1.7.2.13 测试线；用户已确认 1.7.2.11 的换集跟随成功，但这不等于全部双端场景或本次提示显示已验收。各版本事实和边界见[发布日志索引](releases/README.md)。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.16](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)。本文描述 beta 测试线；1.7.2.16 仅整理成功通知、创建表单及保存阶段结果反馈，不修改同步引擎。公开发布不等于安装或真实客户端全量验收，保存故障分支以自动测试为依据；各版本事实见[发布日志索引](releases/README.md)，验收反馈与证据边界见[兼容性记录](client-compatibility.md)。
 
 ## 运行时边界
 
@@ -51,7 +51,7 @@ S124 已随 v1.7.0.1 发布，使用 V16 页面/控制器缓存键，去除 Dash
 
 邀请、房间操作、确认、配置保存和按需诊断沿用既有业务。Token 不回显，离页清空敏感输入；所有旧代次回调与操作入口都核对页面身份。清理页面时也恢复三个静态创建/接受按钮的 busy 和文字，管理员创建按钮随后按权限与当前表单重新判定可用性；旧请求不能解锁新代次操作。详细候选边界和验证见 [S122 契约](native-pages-media-plan.md)；此前原生控件验证保留在 `native-controls-plan.md`。
 
-管理员创建房间的结果显示在当前创建表单内，独立于输入校验和房间卡反馈。POST 成功后立即保留创建成功事实，后续列表读取失败仍单独显示读取错误；离页清空结果，旧代次请求不能写入新页面。
+管理员创建房间在 POST 成功后重置表单并显示宿主 toast“房间已创建”；输入校验、操作失败与列表读取失败分别反馈，后续列表刷新不能抹掉创建成功事实。成功通知只传固定可信文案，与业务 Promise 分离；toast 失败使用独立备用提示，不重发业务请求，迟到结果仍受页面身份与路由保护。配置保存区分读取、提交和回读：提交请求失败不能断言未写入，提交成功但回读失败保留“已提交、待确认”的结果；自动测试边界见[1.7.2.16 发布说明](releases/v1.7.2.16.md)。
 
 ## 状态与持久化
 
