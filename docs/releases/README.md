@@ -8,7 +8,7 @@
 
 ## 当前测试版
 
-- [v1.7.2.18 测试版说明](v1.7.2.18.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.18)：卡片图与双人图标、普通账号角色读取及 V21 缓存更新。
+- [v1.7.2.18 测试版说明](v1.7.2.18.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.18) · [发布核验](../maintenance/v1.7.2.18-beta-publication.md)：卡片图与双人图标、普通账号角色读取及 V21 缓存更新。
 
 ## 历史发布
 
