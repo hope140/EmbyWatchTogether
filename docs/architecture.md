@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.17](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)。本文描述 beta 测试线；1.7.2.17 在既有页面上精简操作文案，按结束或删除选择进度及失败用词，不修改同步引擎或业务行为。公开发布不等于安装或真实客户端全量验收，保存故障分支以自动测试为依据；各版本事实见[发布日志索引](releases/README.md)，验收反馈与证据边界见[兼容性记录](client-compatibility.md)。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.18](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.18)。本文描述 beta 测试线；1.7.2.18 更新卡片与侧栏图标，修正普通用户角色读取并统一 V21 缓存身份，不修改同步引擎或服务端权限。公开发布不等于安装或全量客户端验收；各版本事实见[发布日志索引](releases/README.md)，证据边界见[兼容性记录](client-compatibility.md)。
 
 ## 运行时边界
 
@@ -38,6 +38,8 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。 更新提示通过按 `ISessionManager` 共享的有界发送槽位执行，最多等待 5 秒；不响应取消的传输继续占位直到实际完成，后续计划任务不会叠加发送。提示超时或失败不阻止安装、不改写已安装事实，调用方真实取消仍向上传播。
 
 ## 嵌入式 UI
+
+页面先通过宿主 getCurrentUser({enableCache:false}) 核对当前用户 ID 和明确的 Policy.IsAdministrator，仅管理员读取 WatchTogether/Users；普通用户读取自己的房间与邀请。角色读取失败不授予管理权限，身份或页面代次失效时旧结果无效。服务端独立执行权限与房间过滤；宿主 SDK 离线用户回退保持原样，未证明它导致本次问题。
 
 本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV21`、`WatchTogetherInviteV21`、`WatchTogetherSettingsV21`，共享 `WatchTogetherNativeV21.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
