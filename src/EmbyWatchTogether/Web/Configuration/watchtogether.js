@@ -1285,9 +1285,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV20',
-        invite: 'WatchTogetherInviteV20',
-        settings: 'WatchTogetherSettingsV20'
+        rooms: 'WatchTogetherRoomsV21',
+        invite: 'WatchTogetherInviteV21',
+        settings: 'WatchTogetherSettingsV21'
     };
 
     function currentRoute(page) {
