@@ -22,7 +22,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         pause: '暂停播放',
         resume: '继续播放',
         resync: '重新同步',
-        participantResync: '请求重新同步'
+        participantResync: '重新同步'
     };
 
     var maxDiagnosticEvents = 50;
@@ -1288,9 +1288,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV23',
-        invite: 'WatchTogetherInviteV23',
-        settings: 'WatchTogetherSettingsV23'
+        rooms: 'WatchTogetherRoomsV24',
+        invite: 'WatchTogetherInviteV24',
+        settings: 'WatchTogetherSettingsV24'
     };
 
     function currentRoute(page) {
@@ -1412,7 +1412,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         ] : [
             '加入房间后，与另一位参与者打开同一视频。',
             '播放、暂停和进度会自动同步。',
-            '需要重新对齐时，点击“请求重新同步”。'
+            '需要重新对齐时，点击“重新同步”。'
         ];
         applyRoute(page);
         helpSteps.forEach(function (step, index) {
