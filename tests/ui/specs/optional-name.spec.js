@@ -3,7 +3,7 @@ async function invitePage(page, admin = false) {
   await page.goto('/?scenario=' + (admin ? 'admin-member' : 'empty'));
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
   if (admin) await page.evaluate(() => window.__wtFixture.setRooms([]));
-  await page.locator('.tabs-viewmenubar a[href*="InviteV23"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="InviteV24"]').click();
   await expect(page.locator('#wtCreateInvitation')).toBeVisible();
 }
 for (const name of ['', '   ', '周末电影']) test('手动名称可选且保留已填值 '+JSON.stringify(name), async ({page}) => {
@@ -39,7 +39,7 @@ test('迟到复制失败不污染切页后的提示',async({page})=>{
   await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:()=>new Promise((_,reject)=>window.rejectCopy=reject)}}));
   await page.locator('#wtCreateInvitation').click();await page.locator('#wtCopyInvitationCode').click();
   await expect.poll(()=>page.evaluate(()=>typeof window.rejectCopy)).toBe('function');
-  await page.locator('.tabs-viewmenubar a[href*="RoomsV23"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="RoomsV24"]').click();
   await page.evaluate(()=>window.rejectCopy(new Error('late')));
   await expect(page.locator('#wtInvitationStatus')).not.toContainText('自动复制失败');
 });

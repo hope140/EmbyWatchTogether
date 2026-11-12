@@ -21,9 +21,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV23");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV23");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV23");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV24");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV24");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV24");
             Assert.Equal(4, pages.Count);
             Assert.Single(pages, page => page.EnableInUserMenu);
             Assert.All(pages.Where(page => !page.Name.EndsWith(".js")), page =>
@@ -31,7 +31,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV7");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV23.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV24.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
@@ -58,14 +58,14 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV23");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV24");
             Assert.Equal("people", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
         }
 
         [Fact]
-        public void OptionalName_RetiresCachedV22PageAndControllerKeysTogether()
+        public void ResyncLabel_RetiresPreviousPageAndControllerKeysTogether()
         {
 #pragma warning disable SYSLIB0050
             var plugin = (Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin));
@@ -75,13 +75,15 @@ namespace Emby.Plugins.WatchTogether.Tests
             var script = ReadResource(typeof(Plugin).Assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
             foreach (var route in new[] { "Rooms", "Invite", "Settings", "Native" })
             {
-                var name = "WatchTogether" + route + "V23" + (route == "Native" ? ".js" : "");
+                var name = "WatchTogether" + route + "V24" + (route == "Native" ? ".js" : "");
                 Assert.Contains(name, names);
                 Assert.DoesNotContain("WatchTogether" + route + "V22", html);
                 Assert.DoesNotContain("WatchTogether" + route + "V22", script);
                 Assert.Contains(name, route == "Native" ? html : script);
             }
-            Assert.DoesNotContain(names, name => name.Contains("V22"));
+            Assert.DoesNotContain(names, name => name.Contains("V22") || name.Contains("V23"));
+            Assert.DoesNotContain("V23", html);
+            Assert.DoesNotContain("V23", script);
         }
 
         private static int ReadBigEndianInt32(byte[] bytes)
@@ -98,7 +100,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV23.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV24.js\"", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", javascript);
             Assert.DoesNotContain("WatchTogetherSettingsV5", html);
