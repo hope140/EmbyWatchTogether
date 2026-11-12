@@ -1001,7 +1001,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             var item = document.createElement('div');
             item.className = 'wt-roomMeta';
             var name = document.createElement('div');
-            name.textContent = invitation.Name || '未命名房间';
+            name.textContent = invitation.Name || '接受邀请后生成房间名';
             var expiry = document.createElement('div');
             expiry.textContent = invitationDate(invitation.ExpiresAtUtc);
             var revoke = document.createElement('button', { is: 'emby-button' });
@@ -1288,9 +1288,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV22',
-        invite: 'WatchTogetherInviteV22',
-        settings: 'WatchTogetherSettingsV22'
+        rooms: 'WatchTogetherRoomsV23',
+        invite: 'WatchTogetherInviteV23',
+        settings: 'WatchTogetherSettingsV23'
     };
 
     function currentRoute(page) {

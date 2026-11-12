@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
 using MediaBrowser.Model.Serialization;
@@ -19,6 +20,19 @@ namespace Emby.Plugins.WatchTogether.Tests
         public void Dispose() { Directory.Delete(directory, true); }
         private static Room Create(RoomManager manager, string name, int id) =>
             manager.CreateRoom("server", "", name, "admin", new[] { "a" + id, "b" + id }, "a" + id);
+        private sealed class FixedRandom : Random
+        {
+            private readonly int index;
+            public int LastBound { get; private set; }
+            public FixedRandom(int index) { this.index = index; }
+            public override int Next(int maxValue) { LastBound = maxValue; return index; }
+        }
+        private static FixedRandom SelectIndex(RoomManager manager, int index)
+        {
+            var random = new FixedRandom(index);
+            typeof(RoomManager).GetField("_roomNameRandom", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(manager, random);
+            return random;
+        }
         private static Mock<IJsonSerializer> Serializer()
         {
             var mock = new Mock<IJsonSerializer>();
@@ -35,8 +49,35 @@ namespace Emby.Plugins.WatchTogether.Tests
         public void BothPaths_GenerateFixedNamesForBlankInput(string input)
         {
             var manager = new RoomManager();
-            Assert.Equal("房间 #0000", Create(manager, input, 0).Name);
-            Assert.Equal("房间 #0001", manager.CreateSelfServiceRoom("server", "", input, "c", "d").Name);
+            var first = Create(manager, input, 0).Name;
+            var second = manager.CreateSelfServiceRoom("server", "", input, "c", "d").Name;
+            Assert.Matches("^房间 #[0-9]{4}$", first);
+            Assert.Matches("^房间 #[0-9]{4}$", second);
+            Assert.NotEqual(first, second);
+        }
+
+        [Theory]
+        [InlineData(0, "房间 #0000")]
+        [InlineData(372, "房间 #0372")]
+        [InlineData(9999, "房间 #9999")]
+        public void RandomSelectionUsesEntireAvailableRange(int index, string expected)
+        {
+            var manager = new RoomManager();
+            var random = SelectIndex(manager, index);
+            Assert.Equal(expected, Create(manager, null, 0).Name);
+            Assert.Equal(10000, random.LastBound);
+        }
+
+        [Fact]
+        public void RepeatedRandomIndexSkipsOccupiedNumbersWithoutRetry()
+        {
+            var manager = new RoomManager();
+            var random = SelectIndex(manager, 372);
+            Create(manager, " 房间 #0372 ", 0);
+            Assert.Equal("房间 #0373", Create(manager, null, 1).Name);
+            Assert.Equal(9999, random.LastBound);
+            Assert.Equal("房间 #0374", manager.CreateSelfServiceRoom("server", "", null, "c", "d").Name);
+            Assert.Equal(9998, random.LastBound);
         }
 
         [Fact]
@@ -45,7 +86,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var manager = new RoomManager();
             Assert.Equal(" 房间 #0000 ", Create(manager, " 房间 #0000 ", 0).Name);
             Assert.Equal("周末电影", manager.CreateSelfServiceRoom("server", "", "周末电影", "c", "d").Name);
-            Assert.Equal("房间 #0001", Create(manager, null, 1).Name);
+            Assert.NotEqual("房间 #0000", Create(manager, null, 1).Name);
             // Explicit duplicate names were allowed before and remain allowed.
             Assert.Equal("周末电影", Create(manager, "周末电影", 2).Name);
         }
@@ -73,10 +114,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             var manager = new RoomManager(new RoomStore(FilePath, Serializer().Object));
             var first = Create(manager, null, 0);
             manager = new RoomManager(new RoomStore(FilePath, Serializer().Object));
-            Assert.Equal("房间 #0000", manager.GetRoom(first.Id).Name);
-            Assert.Equal("房间 #0001", Create(manager, " ", 1).Name);
+            Assert.Equal(first.Name, manager.GetRoom(first.Id).Name);
+            Assert.NotEqual(first.Name, Create(manager, " ", 1).Name);
             manager.DeleteRoom(first.Id);
-            Assert.Equal("房间 #0000", Create(manager, null, 2).Name);
+            Assert.Matches("^房间 #[0-9]{4}$", Create(manager, null, 2).Name);
         }
 
         [Fact]
@@ -112,7 +153,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Throws<RoomStoreException>(() => Create(manager, null, 0));
             Assert.Empty(manager.ListRooms());
             serializer.Setup(s => s.SerializeToString(It.IsAny<object>())).Returns<object>(o => JsonSerializer.Serialize(o));
-            Assert.Equal("房间 #0000", Create(manager, null, 0).Name);
+            Assert.Matches("^房间 #[0-9]{4}$", Create(manager, null, 0).Name);
         }
 
         [Theory]
@@ -123,11 +164,16 @@ namespace Emby.Plugins.WatchTogether.Tests
             var manager = new RoomManager();
             using var invitations = new RoomInvitationManager();
             var code = invitations.Create("creator", name).Code;
-            Create(manager, null, 0);
+            var existing = Create(manager, null, 0);
             var accepted = invitations.Accept(code, "accepter", invite =>
                 manager.CreateSelfServiceRoom("server", "", invite.Name, invite.CreatorUserId, "accepter"));
             Assert.True(accepted.Succeeded);
-            Assert.Equal(name.Length == 0 ? "房间 #0001" : name, accepted.Room.Name);
+            if (name.Length == 0)
+            {
+                Assert.Matches("^房间 #[0-9]{4}$", accepted.Room.Name);
+                Assert.NotEqual(existing.Name, accepted.Room.Name);
+            }
+            else Assert.Equal(name, accepted.Room.Name);
             Assert.False(invitations.Accept(code, "third", _ => throw new Exception("must not run")).Succeeded);
         }
     }

@@ -61,6 +61,7 @@ namespace Emby.Plugins.WatchTogether
 
         private readonly object _lock = new object();
         private readonly RoomStore _store;
+        private readonly Random _roomNameRandom = new Random(Guid.NewGuid().GetHashCode());
         private readonly Dictionary<string, Room> _rooms = new Dictionary<string, Room>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, RoomRuntime> _runtimes = new Dictionary<string, RoomRuntime>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, object> _roomGates = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -211,13 +212,17 @@ namespace Emby.Plugins.WatchTogether
             var used = new HashSet<string>(
                 _rooms.Values.Select(room => (room.Name ?? string.Empty).Trim()),
                 StringComparer.OrdinalIgnoreCase);
+            var available = new List<string>();
             for (var number = 0; number < 10000; number++)
             {
                 var candidate = "房间 #" + number.ToString("D4", CultureInfo.InvariantCulture);
-                if (!used.Contains(candidate)) return candidate;
+                if (!used.Contains(candidate)) available.Add(candidate);
             }
-
-            throw new InvalidOperationException("automatic room names are exhausted; provide a room name");
+            if (available.Count == 0)
+                throw new InvalidOperationException("automatic room names are exhausted; provide a room name");
+            // Choose uniformly from free names, without collision retry loops.
+            // The registry lock also serializes access to this Random instance.
+            return available[_roomNameRandom.Next(available.Count)];
         }
 
         public bool DeleteRoom(string roomId)
