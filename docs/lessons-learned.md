@@ -144,6 +144,8 @@
 - 结论：修改嵌入式管理页时，同时递增 `Plugin.GetPages()` 中 HTML 页面和 JavaScript 控制器的 `Name`，并让 HTML 的 `data-controller` 使用新的控制器键；对应页面测试必须检查三者一致。
 - 验证：GitHub Token 管理区加入后，页面键和控制器键同步更新为 `WatchTogetherDiagnosticsV2` / `WatchTogetherDiagnosticsV2.js`，`PluginPagesTests` 检查嵌入资源与控制器声明。
 
+- 2026-11-12 补充：普通账号角色修复更新服务器 JS 后，新版 Windows 客户端完全重启仍报旧错误；页面/控制器沿用 V20，资源可缓存且条件请求为 304。一起升级三页、控制器、HTML 与路由引用至 V21 后，用户确认问题解决。服务器已返回新字节不等于客户端已执行新模块；未抓取客户端网络时不把 SDK 离线回退判为根因。`RoleFix_RetiresCachedV20PageAndControllerKeysTogether` 与三页/多宿主浏览器回归锁定资源契约。
+
 ## 19. 页面账号变化必须同步使读取和操作失效
 
 此节的 generation/menu 实现与浏览器证据属于历史 UI VNext。S116 按用户确认恢复原服务器单页控制器，不将这些历史证据记为当前页面已实现或已验收。
@@ -358,3 +360,8 @@
 
 - Emby Web 4.10.0.40 与 Windows 2.317.2.0 的 toast 模块接受 text 并返回 Promise，使用 status 语义；模块导出兼容 function/default。宿主将 text 作为 HTML 渲染，因此当前适配层只传固定可信文案。通知失败须与已完成的业务 Promise 分离，既不能误报业务失败，也不能重发请求；保留独立可访问备用区域。
 - 配置保存的读取、提交和回读必须分别标识结果。提交拒绝或网络断开不能证明服务器未写入；提交成功后回读失败也不能再称保存失败。`config-save-stages.spec.js` 用实际夹具写入后拒绝响应覆盖不确定结果，并覆盖生命周期失效；这些自动测试不是服务器人工故障验收。
+
+## 管理员接口失败不能用于普通用户角色探测（2026-11-12）
+
+- Emby 4.10.0.40 实际把 `RequireAdmin` 的 `UnauthorizedAccessException` 映射为 HTTP 500；mock 的 403 不能证明宿主行为。先读取匹配当前身份且含明确布尔策略的用户信息，仅管理员调用用户目录；失败不默认管理员，也不吞掉真实 500。
+- 服务端权限仍是边界；页面请求须受账号、服务器与页面代次保护。固定 SDK 不包含完整 HTTP 映射实现时，不猜测替代异常类型。证据与限制见[调查记录](maintenance/nonadmin-role-access.md)。
