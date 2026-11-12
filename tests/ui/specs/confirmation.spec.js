@@ -33,7 +33,11 @@ for (const action of ['leave', 'delete', 'resync']) {
     await page.locator('[data-confirm=ok]').click();
     await expect.poll(() => mutations(page)).toHaveLength(1);
     const call = (await mutations(page))[0];
-    if (action === 'delete') expect(call.method).toBe('DELETE');
+    if (action === 'delete') {
+      expect(call.method).toBe('DELETE');
+      expect(await page.evaluate(() => window.__wtFixture.confirmations[1].text)).toContain('结束房间会解除双方成员关系，只删除同步关系，不删除媒体。');
+      await expect.poll(() => page.evaluate(() => window.__wtFixture.toasts)).toEqual(['房间已结束']);
+    }
     if (action === 'resync') expect(call.body.Action).toBe('resync');
   });
 }

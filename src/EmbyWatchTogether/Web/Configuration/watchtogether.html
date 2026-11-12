@@ -53,6 +53,7 @@
         .wt-page .wt-selectField > .selectLabelText { grid-row: 1; grid-column: 1; }
         .wt-page .wt-selectField > select { grid-row: 2; grid-column: 1; min-width: 0; }
         .wt-page .wt-selectField > .fieldDescription { grid-row: 3; grid-column: 1; }
+        .wt-page #wtPrimaryError + .fieldDescription { grid-row: 4; }
         .wt-page .wt-selectField > .selectArrowContainer { position: static; grid-row: 2; grid-column: 1; align-self: center; justify-self: end; margin-inline-end: .3em; }
         .wt-page .wt-selectField > .selectArrowContainer > div:first-child { display: none; }
         .wt-page .wt-selectField > .selectArrowContainer .selectArrow { margin-top: 0; }
@@ -197,6 +198,7 @@
             <p class="sectionDescription wt-lead">
                 创建房间后，两位参与者打开同一视频，播放、暂停和进度会自动同步。
             </p>
+            <div id="wtSuccessFallback" role="status" aria-live="polite" aria-relevant="additions"></div>
             <p class="sectionDescription wt-statusLine" id="wtStatus" role="status" aria-live="polite"></p>
         </div>
 
@@ -214,16 +216,20 @@
 
             <div class="wt-formGrid">
                 <div class="inputContainer wt-fieldWide">
-                    <input is="emby-input" id="wtRoomName" label="房间名称" placeholder="例如：今晚的电影" autocomplete="off" />
+                    <input is="emby-input" id="wtRoomName" aria-describedby="wtRoomNameError" label="房间名称" placeholder="例如：今晚的电影" autocomplete="off" />
+                    <p id="wtRoomNameError" class="fieldDescription error" aria-live="polite" hidden></p>
                 </div>
                 <div class="selectContainer wt-selectField">
-                    <select is="emby-select" id="wtUserA" label="参与者 1"></select>
+                    <select is="emby-select" id="wtUserA" aria-describedby="wtUserAError" label="参与者 1"></select>
+                    <p id="wtUserAError" class="fieldDescription error" aria-live="polite" hidden></p>
                 </div>
                 <div class="selectContainer wt-selectField">
-                    <select is="emby-select" id="wtUserB" label="参与者 2"></select>
+                    <select is="emby-select" id="wtUserB" aria-describedby="wtUserBError" label="参与者 2"></select>
+                    <p id="wtUserBError" class="fieldDescription error" aria-live="polite" hidden></p>
                 </div>
                 <div class="selectContainer wt-fieldWide wt-selectField">
-                    <select is="emby-select" id="wtPrimary" label="主用户"></select>
+                    <select is="emby-select" id="wtPrimary" aria-describedby="wtPrimaryError" label="主用户"></select>
+                    <p id="wtPrimaryError" class="fieldDescription error" aria-live="polite" hidden></p>
                     <div class="fieldDescription">主用户的播放位置作为同步基准。</div>
                 </div>
             </div>

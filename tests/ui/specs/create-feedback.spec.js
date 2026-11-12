@@ -44,12 +44,12 @@ async function navigate(page, route) {
   if (route === 'Invite') await expect(page.locator('#wtUserA option')).toHaveCount(3);
 }
 
-const success = '房间“周末一起看”已创建，请让双方打开同一视频。';
+const success = '房间已创建';
 
 test('创建成功反馈在当前创建页可见，刷新及名称校验不会覆盖', async ({ page }) => {
   await prepareCreate(page);
   await page.locator('#wtCreate').click();
-  const result = page.locator('#wtAdminSection').getByText(success, { exact: true });
+  const result = page.locator('.fixture-toast').filter({ hasText: success });
   await expect(result).toBeVisible();
   await expect(page.locator('#wtRoomName')).toHaveValue('');
   await expect(page.locator('#wtCreate')).not.toHaveAttribute('aria-busy', 'true');
@@ -57,7 +57,7 @@ test('创建成功反馈在当前创建页可见，刷新及名称校验不会�
   await page.evaluate(() => window.__wtFixture.view.view._wtRefreshVisible());
   await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.method === 'GET' && x.path === 'WatchTogether/Rooms').length)).toBeGreaterThan(roomReads);
   await expect.poll(() => page.evaluate(() => window.__wtFixture.view.view._wtRoomsLoading)).toBe(false);
-  await expect(result).toBeVisible();
+  expect(await page.evaluate(() => window.__wtFixture.toasts)).toEqual([success]);
   expect(await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.method === 'POST' && x.path === 'WatchTogether/Rooms').length)).toBe(1);
   await page.screenshot({ path: test.info().outputPath('create-feedback.png'), fullPage: true });
 });
@@ -65,7 +65,7 @@ test('创建成功反馈在当前创建页可见，刷新及名称校验不会�
 test('创建POST成功后列表刷新失败仍保留创建成功事实', async ({ page }) => {
   await prepareCreate(page, 'refresh-fails');
   await page.locator('#wtCreate').click();
-  await expect(page.locator('#wtAdminSection').getByText(success, { exact: true })).toBeVisible();
+  await expect(page.locator('.fixture-toast').filter({ hasText: success })).toBeVisible();
   await expect(page.locator('#wtRoomsStatus')).toContainText('房间列表刷新失败');
   await expect(page.locator('#wtStatus')).not.toContainText('创建失败');
   expect(await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.method === 'POST' && x.path === 'WatchTogether/Rooms').length)).toBe(1);
@@ -75,7 +75,7 @@ test('创建POST失败在创建表单显示错误并保留输入供重试', asyn
   await prepareCreate(page, 'post-fails');
   await page.locator('#wtCreate').click();
   await expect(page.locator('#wtAdminSection').getByText(/^创建失败：/)).toBeVisible();
-  await expect(page.locator('#wtAdminSection').getByText(success, { exact: true })).toHaveCount(0);
+  await expect(page.locator('.fixture-toast').filter({ hasText: success })).toHaveCount(0);
   await expect(page.locator('#wtRoomName')).toHaveValue('周末一起看');
   await expect(page.locator('#wtCreate')).toBeEnabled();
 });
@@ -87,7 +87,7 @@ test('离页后旧创建完成不能向新页面写入成功反馈', async ({ pa
   await navigate(page, 'Rooms');
   await navigate(page, 'Invite');
   await page.evaluate(() => window.__wtFixture.finishCreate());
-  await expect(page.locator('#wtAdminSection').getByText(success, { exact: true })).toHaveCount(0);
+  await expect(page.locator('.fixture-toast').filter({ hasText: success })).toHaveCount(0);
   await expect(page.locator('#wtRoomName')).toHaveValue('');
   await expect(page.locator('#wtCreate')).not.toHaveAttribute('aria-busy', 'true');
 });
@@ -95,8 +95,9 @@ test('离页后旧创建完成不能向新页面写入成功反馈', async ({ pa
 test('离开创建页后已显示的成功反馈被清除', async ({ page }) => {
   await prepareCreate(page);
   await page.locator('#wtCreate').click();
-  await expect(page.locator('#wtAdminSection').getByText(success, { exact: true })).toBeVisible();
+  await expect(page.locator('.fixture-toast').filter({ hasText: success })).toBeVisible();
   await navigate(page, 'Rooms');
   await navigate(page, 'Invite');
-  await expect(page.locator('#wtAdminSection').getByText(success, { exact: true })).toHaveCount(0);
+  await expect(page.locator('.fixture-toast').filter({ hasText: success })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__wtFixture.toasts)).toEqual([success]);
 });
