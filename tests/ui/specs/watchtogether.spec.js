@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V24"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V25"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -111,6 +111,9 @@ test('原生三页导航只显示当前区域并保留原生内容限宽', async
   await expect(page.locator('#wtSettingsSection')).toBeHidden();
   await selectView(page, 'settings');
   await expect(page.locator('#wtSettingsSection')).toBeVisible();
+  await expect(page.locator('#wtSettingsSection')).toContainText('这些设置对整台服务器生效。');
+  await expect(page.locator('#wtSettingsSection')).not.toContainText('仅管理员可修改。');
+  await expect(page.locator('#wtGitHubTokenSection')).toContainText('测试版更新检查遇到 GitHub 请求限制时可填写。');
   await expect(page.locator('input[is="emby-input"]')).toHaveCount(4);
   await expect(page.locator('select[is="emby-select"]')).toHaveCount(4);
   await expect(page.locator('input[is="emby-checkbox"]')).toHaveCount(3);
