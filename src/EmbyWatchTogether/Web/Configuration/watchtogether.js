@@ -1285,9 +1285,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV20',
-        invite: 'WatchTogetherInviteV20',
-        settings: 'WatchTogetherSettingsV20'
+        rooms: 'WatchTogetherRoomsV21',
+        invite: 'WatchTogetherInviteV21',
+        settings: 'WatchTogetherSettingsV21'
     };
 
     function currentRoute(page) {
@@ -1726,7 +1726,27 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function loadUsers(page) {
-        return apiGet(page, 'WatchTogether/Users').then(function (list) {
+        var roleLoaded = false;
+        return pageRequest(page, 'current-user:role', function () {
+            return ApiClient.getCurrentUser({ enableCache: false });
+        }).then(function (user) {
+            if (!user || String(user.Id || '') !== page._wtIdentity.user ||
+                !user.Policy || typeof user.Policy.IsAdministrator !== 'boolean') {
+                throw new Error('当前用户角色信息不完整，请重新打开页面。');
+            }
+            roleLoaded = true;
+            if (user.Policy.IsAdministrator) return apiGet(page, 'WatchTogether/Users');
+            page._wtIsAdmin = false;
+            page._wtTabsPermissionReady = true;
+            page._wtRooms = null;
+            page._wtUsers = [];
+            fillSelect(page.querySelector('#wtUserA'), [], null);
+            fillSelect(page.querySelector('#wtUserB'), [], null);
+            syncForm(page);
+            setAdminVisibility(page, false);
+            return null;
+        }).then(function (list) {
+            if (list === null) return;
             page._wtIsAdmin = true;
             page._wtTabsPermissionReady = true;
             setAdminVisibility(page, true);
@@ -1736,7 +1756,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             fillSelect(page.querySelector('#wtUserB'), page._wtUsers, page._wtUsers.length > 1 ? page._wtUsers[1].Id : null);
             syncForm(page);
         }).catch(function (err) {
-            page._wtIsAdmin = isPermissionError(err) ? false : undefined;
+            page._wtIsAdmin = roleLoaded && isPermissionError(err) ? false : undefined;
             page._wtTabsPermissionReady = true;
             page._wtRooms = null;
             page._wtUsers = [];
@@ -1744,7 +1764,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             fillSelect(page.querySelector('#wtUserB'), [], null);
             syncForm(page);
             setAdminVisibility(page, false);
-            if (isPermissionError(err)) {
+            if (!roleLoaded) {
+                setFormHint(page, '当前用户权限暂时无法确认，请重新打开页面。', true);
+                setStatus(page, '当前用户权限读取失败：' + errorMessage(err), true);
+            } else if (isPermissionError(err)) {
                 setFormHint(page, '只有管理员可以创建房间。', true);
                 setStatus(page, '');
             } else {
