@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 
@@ -135,7 +136,7 @@ namespace Emby.Plugins.WatchTogether
                     id: Guid.NewGuid().ToString("N"),
                     serverId: serverId,
                     serverUrl: serverUrl ?? string.Empty,
-                    name: name ?? string.Empty,
+                    name: ResolveRoomName(name),
                     adminUserId: adminUserId,
                     primaryUserId: primaryUserId,
                     participantUserIds: members,
@@ -185,7 +186,7 @@ namespace Emby.Plugins.WatchTogether
                     id: Guid.NewGuid().ToString("N"),
                     serverId: serverId,
                     serverUrl: serverUrl ?? string.Empty,
-                    name: name ?? string.Empty,
+                    name: ResolveRoomName(name),
                     adminUserId: creatorUserId,
                     primaryUserId: creatorUserId,
                     participantUserIds: members,
@@ -199,6 +200,24 @@ namespace Emby.Plugins.WatchTogether
                 _roomGates[room.Id] = new object();
                 return room;
             }
+        }
+
+        // Called only while holding _lock, through persistence and registration.
+        // Names are display metadata; explicit names retain their existing semantics.
+        private string ResolveRoomName(string name)
+        {
+            if (!string.IsNullOrWhiteSpace(name)) return name;
+
+            var used = new HashSet<string>(
+                _rooms.Values.Select(room => (room.Name ?? string.Empty).Trim()),
+                StringComparer.OrdinalIgnoreCase);
+            for (var number = 0; number < 10000; number++)
+            {
+                var candidate = "房间 #" + number.ToString("D4", CultureInfo.InvariantCulture);
+                if (!used.Contains(candidate)) return candidate;
+            }
+
+            throw new InvalidOperationException("automatic room names are exhausted; provide a room name");
         }
 
         public bool DeleteRoom(string roomId)

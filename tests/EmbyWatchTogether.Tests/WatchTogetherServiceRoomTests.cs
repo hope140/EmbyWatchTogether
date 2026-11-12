@@ -28,6 +28,32 @@ namespace Emby.Plugins.WatchTogether.Tests
     [Collection("Plugin singleton")]
     public class WatchTogetherServiceRoomTests
     {
+        [Theory]
+        [InlineData(null)]
+        [InlineData("周末电影")]
+        public void CreateAndAccept_ExposeResolvedNamesWithoutChangingPermissions(string name)
+        {
+            var creator = Guid.NewGuid().ToString("N");
+            var accepter = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var plugin = NewPlugin(manager, null, null, "server-1");
+            using var invitations = new RoomInvitationManager();
+            SetPluginProperty(plugin, "Invitations", invitations);
+            var admin = NewService(creator, true);
+            var request = new CreateRoomRequest { Name = name, ParticipantUserIds = new[] { creator, accepter }, PrimaryUserId = creator };
+            var created = WithPlugin(plugin, () => admin.Post(request));
+            Assert.Equal(name ?? "房间 #0000", GetString(created, "Name"));
+            manager.DeleteRoom(GetString(created, "RoomId"));
+            var ordinary = NewService(accepter);
+            Assert.Throws<UnauthorizedAccessException>(() => WithPlugin(plugin, () => ordinary.Post(request)));
+            var invitation = invitations.Create(creator, name);
+            var accepted = WithPlugin(plugin, () => ordinary.Post(new AcceptInvitationRequest { Code = invitation.Code }));
+            Assert.True(GetBoolean(accepted, "Accepted"));
+            Assert.Equal(name ?? "房间 #0000", GetString(accepted, "Name"));
+            Assert.Equal(creator, GetString(accepted, "PrimaryUserId"));
+            Assert.Empty(invitations.List(creator));
+        }
+
         [Fact]
         public void Rooms_ExposeRestrictedParticipantSummariesAndSanitizeRuntimeError()
         {

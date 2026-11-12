@@ -4,6 +4,8 @@
 
 当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.18](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.18)。本文描述 beta 测试线；1.7.2.18 更新卡片与侧栏图标，修正普通用户角色读取并统一 V21 缓存身份，不修改同步引擎或服务端权限。公开发布不等于安装或全量客户端验收；各版本事实见[发布日志索引](releases/README.md)，证据边界见[兼容性记录](client-compatibility.md)。
 
+本分支另有[可选房间名服务器预览](maintenance/optional-room-name-preview.md)：空白名称在注册锁内生成并持久化，当前预览页面键为 V22；不代表公开 1.7.2.18 资产已改变。
+
 ## 运行时边界
 
 插件目标为 `netstandard2.0`，由 Emby 服务器加载。`Plugin` 暴露插件元数据和嵌入式配置页；`WatchTogetherEntryPoint` 负责启动、配置热更新和停止时释放运行时对象。仓库不依赖外部同步服务。
@@ -41,7 +43,7 @@ Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用
 
 页面先通过宿主 getCurrentUser({enableCache:false}) 核对当前用户 ID 和明确的 Policy.IsAdministrator，仅管理员读取 WatchTogether/Users；普通用户读取自己的房间与邀请。角色读取失败不授予管理权限，身份或页面代次失效时旧结果无效。服务端独立执行权限与房间过滤；宿主 SDK 离线用户回退保持原样，未证明它导致本次问题。
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV21`、`WatchTogetherInviteV21`、`WatchTogetherSettingsV21`，共享 `WatchTogetherNativeV21.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV22`、`WatchTogetherInviteV22`、`WatchTogetherSettingsV22`，共享 `WatchTogetherNativeV22.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
 

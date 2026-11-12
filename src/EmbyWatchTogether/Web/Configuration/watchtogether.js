@@ -1083,9 +1083,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             setInvitationStatus(page, '当前没有可复制的邀请码。', true);
             return;
         }
-        var copied = window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText
-            ? window.navigator.clipboard.writeText(value)
-            : Promise.reject(new Error('clipboard_unavailable'));
+        var copied = Promise.resolve().then(function () {
+            if (!window.navigator || !window.navigator.clipboard || !window.navigator.clipboard.writeText) {
+                throw new Error('clipboard_unavailable');
+            }
+            return window.navigator.clipboard.writeText(value);
+        });
         scopedPromise(page, copied).then(function () {
             page._wtInvitationCopied = true;
             renderInvitationCode(page);
@@ -1096,7 +1099,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             if (button) {
                 button.textContent = '复制邀请码';
             }
-            setInvitationStatus(page, '复制失败，请手动选择并复制邀请码。', true);
+            setInvitationStatus(page, '自动复制失败，请手动复制邀请码。', true);
         });
     }
 
@@ -1285,9 +1288,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV21',
-        invite: 'WatchTogetherInviteV21',
-        settings: 'WatchTogetherSettingsV21'
+        rooms: 'WatchTogetherRoomsV22',
+        invite: 'WatchTogetherInviteV22',
+        settings: 'WatchTogetherSettingsV22'
     };
 
     function currentRoute(page) {
@@ -1701,9 +1704,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         syncPrimarySelect(page);
         var ids = ['wtRoomName', 'wtUserA', 'wtUserB', 'wtPrimary'];
         var fields = ids.map(function (id) { return page.querySelector('#' + id); });
-        var name = fields[0].value.trim(), a = fields[1].value, b = fields[2].value;
+        var a = fields[1].value, b = fields[2].value;
         var errors = {};
-        if (!name) errors.wtRoomName = '请输入房间名称。';
         if (!a) errors.wtUserA = '请选择参与者。';
         if (!b) errors.wtUserB = '请选择参与者。';
         if (a && a === b) errors.wtUserB = '两名参与者必须不同。';
@@ -2818,13 +2820,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var a = participantA ? participantA.value : '';
         var b = participantB ? participantB.value : '';
 
-        if (!name) {
-            setStatus(page, '请先填写房间名称。', true);
-            if (nameInput) {
-                nameInput.focus();
-            }
-            return;
-        }
         if (page._wtUsers.length < 2 || !a || !b) {
             setStatus(page, '至少需要选择两名参与者。', true);
             return;

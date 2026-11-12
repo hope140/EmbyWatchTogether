@@ -24,7 +24,7 @@ async function noBackdrop(page) {
   await expect(page.locator('.wt-roomBackdrop')).not.toHaveAttribute('src', /.+/);
 }
 async function selectView(page, suffix) {
-  await page.locator('.headerMiddle a[href*="WatchTogether' + suffix + 'V21"]').click();
+  await page.locator('.headerMiddle a[href*="WatchTogether' + suffix + 'V22"]').click();
   await expect(page.locator('.tabs-viewmenubar')).toHaveCount(1);
 }
 
