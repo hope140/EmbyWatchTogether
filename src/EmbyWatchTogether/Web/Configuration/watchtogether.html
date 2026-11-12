@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherNativeV24.js"
+     data-controller="__plugin/WatchTogetherNativeV26.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -339,7 +339,6 @@
                     </select>
                     <div class="fieldDescription">自动检查并安装所选通道的新版本；测试版通道也接收正式版。</div>
                 </div>
-                <div class="fieldDescription">仅管理员可修改。</div>
                 <div class="wt-formActions">
                     <button is="emby-button" id="wtSaveConfig" type="button" class="raised button-submit" disabled>保存设置</button>
                     <p class="fieldDescription wt-formHint" id="wtConfigStatus" role="status" aria-live="polite">正在读取配置…</p>
@@ -349,7 +348,7 @@
             <div class="wt-settingsAside">
             <div class="wt-subGroup" id="wtGitHubTokenSection">
                 <h3 class="wt-subHeading">GitHub Token <span class="wt-optional">可选</span></h3>
-                <p class="fieldDescription wt-sectionDescription">测试版更新检查受限时可填写。</p>
+                <p class="fieldDescription wt-sectionDescription">测试版更新检查遇到 GitHub 请求限制时可填写。</p>
                 <div class="inputContainer wt-fieldWide wt-tokenField">
                     <input is="emby-input" id="wtGitHubToken" type="password" label="输入新的 GitHub Token" placeholder="粘贴需要保存的 Token" autocomplete="new-password" spellcheck="false" autocapitalize="off" aria-describedby="wtGitHubTokenHelp wtGitHubTokenStatus" />
                 </div>
