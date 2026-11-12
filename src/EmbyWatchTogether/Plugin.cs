@@ -177,7 +177,7 @@ namespace Emby.Plugins.WatchTogether
                     EnableInMainMenu = false,
                     EnableInUserMenu = true,
                     MenuSection = "server",
-                    MenuIcon = "sync",
+                    MenuIcon = "people",
                 },
                 new PluginPageInfo
                 {

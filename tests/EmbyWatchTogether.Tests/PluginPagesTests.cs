@@ -36,7 +36,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
-        public void Plugin_ExposesValidPngThumbnailAndSyncMenuIcon()
+        public void Plugin_ExposesValidPngThumbnailAndPeopleMenuIcon()
         {
 #pragma warning disable SYSLIB0050
             var plugin = (Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin));
@@ -53,13 +53,13 @@ namespace Emby.Plugins.WatchTogether.Tests
                     Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, reader.ReadBytes(8));
                     Assert.Equal(13, ReadBigEndianInt32(reader.ReadBytes(4)));
                     Assert.Equal(new byte[] { 73, 72, 68, 82 }, reader.ReadBytes(4));
-                    Assert.Equal(1280, ReadBigEndianInt32(reader.ReadBytes(4)));
-                    Assert.Equal(720, ReadBigEndianInt32(reader.ReadBytes(4)));
+                    Assert.Equal(640, ReadBigEndianInt32(reader.ReadBytes(4)));
+                    Assert.Equal(360, ReadBigEndianInt32(reader.ReadBytes(4)));
                 }
             }
 
             var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV20");
-            Assert.Equal("sync", page.MenuIcon);
+            Assert.Equal("people", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
         }
