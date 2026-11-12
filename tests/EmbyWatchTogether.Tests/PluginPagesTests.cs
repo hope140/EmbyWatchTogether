@@ -182,10 +182,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("clearAllRoomFeedback", javascript);
             Assert.Contains("_wtStatusTimer", javascript);
             Assert.DoesNotContain("正在处理此房间，请稍候", javascript);
-            Assert.Contains("房间“' + roomName + '”已结束；双方成员关系已解除，媒体未删除", javascript);
+            Assert.Contains("ending ? '房间已结束'", javascript);
             var deleteFunctionIndex = javascript.IndexOf("function deleteRoom", System.StringComparison.Ordinal);
             var deleteFeedbackIndex = javascript.IndexOf("clearRoomFeedback(page, room.RoomId)", deleteFunctionIndex, System.StringComparison.Ordinal);
-            var deleteStatusIndex = javascript.IndexOf("setTransientStatus(page, ending", deleteFunctionIndex, System.StringComparison.Ordinal);
+            var deleteStatusIndex = javascript.IndexOf("notifySuccess(page, ending", deleteFunctionIndex, System.StringComparison.Ordinal);
             Assert.True(deleteFeedbackIndex >= 0 && deleteStatusIndex > deleteFeedbackIndex);
             Assert.DoesNotContain("room.Error", javascript);
             Assert.Contains("getPluginConfiguration", javascript);

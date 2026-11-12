@@ -336,7 +336,26 @@ function page() {
         document.body.appendChild(dialog);
       });
     }
+    window.__wtFixture.toasts = [];
+    function hostToast(options) {
+      var mode = params.get('toast_mode');
+      if (mode === 'throw') throw new Error('Toast display failed');
+      if (mode === 'reject') return Promise.reject(new Error('Toast CSS failed'));
+      window.__wtFixture.toasts.push(options.text);
+      var output = document.createElement('output');
+      output.setAttribute('role', 'status'); output.className = 'fixture-toast';
+      output.textContent = options.text; document.body.appendChild(output);
+      return new Promise(function (resolve) { setTimeout(function () { output.remove(); resolve(); }, 1200); });
+    }
     window.require = function (deps) {
+      if (deps[0] === 'toast') {
+        var toastMode = params.get('toast_mode');
+        if (toastMode === 'missing') return Promise.reject(new Error('Toast missing'));
+        return new Promise(function (resolve) {
+          var finish = function () { resolve([toastMode === 'default' ? { default: hostToast } : hostToast]); };
+          if (toastMode === 'slow') window.__wtFixture.finishToast = finish; else finish();
+        });
+      }
       if (deps.length !== 1 || deps[0] !== 'confirm') return Promise.reject(new Error('Unknown mock module'));
       var mode = params.get('confirm_mode');
       if (mode === 'missing') return Promise.reject(new Error('Mock module load failure'));

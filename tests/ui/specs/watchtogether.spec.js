@@ -419,7 +419,7 @@ test('设置保存失败后保留修改', async ({ page }) => {
   await expect(checkbox).not.toBeChecked();
   await expect(page.locator('#wtSaveConfig')).toBeEnabled();
   await page.locator('#wtSaveConfig').click();
-  await expect(page.locator('#wtConfigStatus')).toContainText('配置保存失败');
+  await expect(page.locator('#wtConfigStatus')).toContainText('配置提交请求失败，结果尚未确认，请重新读取检查。');
   await expect(checkbox).not.toBeChecked();
   await expect(checkbox).not.toBeChecked();
   await page.screenshot({ path: path.join(artifactDir, 'mobile-settings-390.png'), fullPage: true });
@@ -449,7 +449,8 @@ test('GitHub Token 设置使用原生控件并保留保存、清除和取消确�
 
   await page.locator('#wtGitHubToken').fill('ghp_fixture_secret');
   await page.locator('#wtSaveGitHubToken').click();
-  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已保存');
+  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已配置');
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.toasts.includes('Token 已保存'))).toBe(true);
   await expect(page.locator('#wtGitHubToken')).toHaveValue('');
   const saved = await calls(page);
   expect(saved.filter(x => x.method === 'POST' && x.path === 'WatchTogether/GitHubToken').at(-1).body.Token).toBe('ghp_fixture_secret');
@@ -461,7 +462,7 @@ test('GitHub Token 设置使用原生控件并保留保存、清除和取消确�
   expect((await calls(page)).filter(x => x.method !== 'GET')).toEqual(beforeCancel.filter(x => x.method !== 'GET'));
   await page.locator('#wtClearGitHubToken').click();
   await page.locator('[data-confirm=ok]').click();
-  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已清除');
+  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('尚未配置 Token');
 });
 
 test('设置页浅深主题主体背景与文字保持可读，并保留移动截图', async ({ page }) => {
@@ -489,7 +490,7 @@ test('Token 状态读取失败仍允许清除，保存失败清空草稿并保�
   await expect(page.locator('#wtClearGitHubToken')).toBeEnabled();
   await page.locator('#wtClearGitHubToken').click();
   await page.locator('[data-confirm=ok]').click();
-  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已清除');
+  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('尚未配置 Token');
 
   await open(page, 'token-save-fail', 'light', 1024, 900);
   await page.locator('#wtGitHubToken').fill('ghp_fixture_secret');

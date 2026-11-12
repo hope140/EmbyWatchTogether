@@ -13,9 +13,9 @@
 | 通道 | 当前版本 | 适合谁 |
 | --- | --- | --- |
 | 正式版 | [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0) · [说明](docs/releases/v1.7.1.0.md) | 希望使用 stable 版本的用户 |
-| 测试版 | [v1.7.2.13](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13) · [说明](docs/releases/v1.7.2.13.md) | 愿意测试最新改进的用户 |
+| 测试版 | [v1.7.2.16](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16) · [说明](docs/releases/v1.7.2.16.md) | 愿意测试最新改进的用户 |
 
-v1.7.2.13 为 beta/prerelease，改善换集等待提示与提前继续后的同步恢复。真实双端等待提示、提前继续后的同步和异常时手动重新同步仍待验收；1.7.2.11 已确认的换集跟随不代表这些新场景已通过。查看[全部版本说明](docs/releases/README.md)和[客户端验收范围](docs/client-compatibility.md)。
+v1.7.2.16 为 beta/prerelease，整理成功通知、创建表单及配置保存阶段反馈。保存异常由自动测试覆盖，未在真实服务器人工注入故障；本次仅发布测试包，不自动安装现有服务器。查看[全部版本说明](docs/releases/README.md)和[客户端验收范围](docs/client-compatibility.md)。
 
 ## 能做什么
 
@@ -26,7 +26,7 @@ v1.7.2.13 为 beta/prerelease，改善换集等待提示与提前继续后的同
 
 ## 安装
 
-1. 从 [Latest stable Release](https://github.com/hope140/EmbyWatchTogether/releases/latest) 下载 `EmbyWatchTogether.zip`。如需测试版，请从[测试版 Release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13) 下载。
+1. 从 [Latest stable Release](https://github.com/hope140/EmbyWatchTogether/releases/latest) 下载 `EmbyWatchTogether.zip`。如需测试版，请从[测试版 Release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16) 下载。
 2. 停止 Emby Server，解压并将 `Emby.Plugins.WatchTogether.dll` 直接放入 Emby Server 数据目录的 `plugins` 目录，不要再套一层子目录。
 3. 启动 Emby Server，在 **Dashboard → Plugins → Watch Together** 确认插件及设置页可用。
 
