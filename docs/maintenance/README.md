@@ -23,3 +23,5 @@
 | 1.6.1.0 | [正式版发布](v1.6.1.0-publication.md) |
 
 未单列维护记录的版本仍保留[发布说明](../releases/README.md)和对应 GitHub Release。不得据索引缺项推断未发布，也不为补齐列表编造核验事实。
+
+- [可选房间名称与随机编号](optional-room-name-preview.md)：1.7.2.19 的实现、邀请列表修正与自动测试边界。
