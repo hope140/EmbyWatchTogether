@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前 Latest stable 为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.13](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13)，见[发布索引](releases/README.md)。本文以 `main` 源码为准；beta 的实现说明见[对应 tag 架构文档](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.13/docs/architecture.md)，不能视为已合入 main。
+当前 Latest stable 为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.16](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16)，见[发布索引](releases/README.md)。本文以 `main` 源码为准；beta 的实现说明见[对应 tag 架构文档](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.16/docs/architecture.md)，不能视为已合入 main。
 
 历史发布记录：2026-10-18 的正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)。用户于 2026-10-18 确认本轮验收通过，签名资产、tag 与 Latest 已独立核验；操作证据见[发布维护记录](maintenance/v1.6.1.0-publication.md)。
 
