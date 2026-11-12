@@ -13,9 +13,9 @@
 | 通道 | 当前版本 | 适合谁 |
 | --- | --- | --- |
 | 正式版 | [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0) · [说明](docs/releases/v1.7.1.0.md) | 希望使用 stable 版本的用户 |
-| 测试版 | [v1.7.2.19](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.19) · [说明](docs/releases/v1.7.2.19.md) | 愿意测试最新改进的用户 |
+| 测试版 | [v1.7.2.20](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20) · [说明](docs/releases/v1.7.2.20.md) | 愿意测试最新改进的用户 |
 
-v1.7.2.19 为 beta/prerelease，房间名称可留空，创建时随机分配未占用的四位数字名；空名称邀请在接受前显示待生成提示，复制失败时保留邀请码并引导手动复制。用户已确认对应服务器预览，异常与并发边界由自动测试覆盖。查看[全部版本说明](docs/releases/README.md)和[客户端验收范围](docs/client-compatibility.md)。
+v1.7.2.20 为 beta/prerelease，调整普通成员重新同步按钮和管理员设置页文案，不改变权限或同步逻辑。查看[全部版本说明](docs/releases/README.md)和[客户端验收范围](docs/client-compatibility.md)。
 
 ## 能做什么
 
@@ -26,7 +26,7 @@ v1.7.2.19 为 beta/prerelease，房间名称可留空，创建时随机分配未
 
 ## 安装
 
-1. 从 [Latest stable Release](https://github.com/hope140/EmbyWatchTogether/releases/latest) 下载 `EmbyWatchTogether.zip`。如需测试版，请从[测试版 Release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.19) 下载。
+1. 从 [Latest stable Release](https://github.com/hope140/EmbyWatchTogether/releases/latest) 下载 `EmbyWatchTogether.zip`。如需测试版，请从[测试版 Release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20) 下载。
 2. 停止 Emby Server，解压并将 `Emby.Plugins.WatchTogether.dll` 直接放入 Emby Server 数据目录的 `plugins` 目录，不要再套一层子目录。
 3. 启动 Emby Server，在 **Dashboard → Plugins → Watch Together** 确认插件及设置页可用。
 
