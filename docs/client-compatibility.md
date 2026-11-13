@@ -49,6 +49,8 @@ name-preview3 本地源码 `283013f` 与 PR #63 `baa47ab` 文件树 `4d333907a87
 - EWT [会话筛选](../src/EmbyWatchTogether/SessionSelector.cs)使用设备会话的 `LastActivityDate`，默认以 60 秒判断过期；上述播放会话 Ping 本身不更新该字段。保住播放记录并不必然保住 EWT 的会话选择，也不证明官方远控连接可用。[快照](../src/EmbyWatchTogether/SessionSnapshot.cs)中的媒体与暂停状态来自服务器最近已知状态。
 - [Emby 插件 API](https://dev.emby.media/reference/pluginapi/MediaBrowser.Controller.Session.SessionInfo.html)公开播放会话 Ping；[控制器 API](https://dev.emby.media/reference/pluginapi/MediaBrowser.Controller.Session.ISessionController.html)暴露活跃状态。本地 SDK 中无控制器时 `SessionInfo.IsActive` 仍可为 true；连接活跃、发送成功或历史暂停状态都不能单独证明播放器仍在同一媒体暂停。网络中断、客户端崩溃、切集未上报及多设备同账号都可能造成过期状态。
 
+**用户反馈的远控现象：** iOS Emby 是控制端，用它控制另一台播放设备；目标播放设备的播放会话失活后，官方远控功能失效。iOS 作为播放端长暂停是否发生同样情况未测试，不作已复现记录。该反馈不能单独确定控制连接是否也已失效。
+
 **未证实：** 官方为何从该服务器版本起跳过暂停定时进度、是否存在其他保活通道，以及现场官方远控失效是播放会话消失、控制连接失效还是两者共同造成。客户端可能通过 WebSocket 报告状态，不能仅凭缺少 HTTP 请求断定未发送。Emby 早期[播放上报文档](https://dev.emby.media/doc/restapi/Playback-Check-ins.html)和[官方社区说明](https://emby.media/community/topic/113458-repeat-diskaccess-embysessionsplayingprogress-even-when-paused/)提供历史背景，不代表已解释新版行为。
 
 如以后重启调查，应分别验证播放会话与控制连接，覆盖长暂停、恢复、停止、切集、断网、客户端退出/崩溃和重连；保留真实客户端证据，避免用自动测试或单个客户端的结果外推全部客户端。
