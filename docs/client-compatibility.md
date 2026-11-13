@@ -37,3 +37,18 @@ name-preview3 本地源码 `283013f` 与 PR #63 `baa47ab` 文件树 `4d333907a87
 ## 如何补充证据
 
 记录操作时间及其时区、服务器/双方客户端版本、插件版本与源码或 DLL 哈希、操作步骤、预期和实际结果。优先附插件导出的脱敏诊断及截图，不上传 Token 或完整未脱敏日志。普通地址栏请求缺少页面认证头时的 401，不能替代已登录页面验收。连续观看的口述观察可保留，但缺少具体构建、媒体与时段时不扩展为全场景通过。
+
+## 长暂停与播放会话调查（2026-11-13）
+
+**决定：暂缓 EWT 通用保活，保持官方行为。** 未找到安全、可靠且通用于不同客户端的确认方式之前，不由 EWT 无限期伪造心跳；个人 Windows 客户端的上报方案单独处理，不作为 EWT 的通用客户端依赖。
+
+已核实的证据与适用范围：
+
+- 对本地保存的 Emby Windows 2.317.2.0 包静态分析：Web 播放管理器有 10 秒定时器；当服务器版本满足 4.8.0.56、当前状态为暂停且属于定时上报时，代码跳过播放进度请求。暂停操作本身可单独上报。混淆后的代码分析不等同于现场请求抓包，也不能证明其他客户端采用同样逻辑。
+- 对本地 Emby Server SDK 4.9.0.52-beta、4.9.1.90 的 `MediaBrowser.Controller.dll` 静态分析：播放会话最后一次 Ping 超过约 60 秒后，定时器先发起自动停止，之后才检查暂停状态；`SessionInfo.Ping(playSessionId)` 只刷新已有播放会话，不负责重建。Work 现场观察到暂停上报后约 60 秒被服务器清理；尚未逐字节核对 NAS 运行程序集与本地 SDK 完全一致。
+- EWT [会话筛选](../src/EmbyWatchTogether/SessionSelector.cs)使用设备会话的 `LastActivityDate`，默认以 60 秒判断过期；上述播放会话 Ping 本身不更新该字段。保住播放记录并不必然保住 EWT 的会话选择，也不证明官方远控连接可用。[快照](../src/EmbyWatchTogether/SessionSnapshot.cs)中的媒体与暂停状态来自服务器最近已知状态。
+- [Emby 插件 API](https://dev.emby.media/reference/pluginapi/MediaBrowser.Controller.Session.SessionInfo.html)公开播放会话 Ping；[控制器 API](https://dev.emby.media/reference/pluginapi/MediaBrowser.Controller.Session.ISessionController.html)暴露活跃状态。本地 SDK 中无控制器时 `SessionInfo.IsActive` 仍可为 true；连接活跃、发送成功或历史暂停状态都不能单独证明播放器仍在同一媒体暂停。网络中断、客户端崩溃、切集未上报及多设备同账号都可能造成过期状态。
+
+**未证实：** 官方为何从该服务器版本起跳过暂停定时进度、是否存在其他保活通道，以及现场官方远控失效是播放会话消失、控制连接失效还是两者共同造成。客户端可能通过 WebSocket 报告状态，不能仅凭缺少 HTTP 请求断定未发送。Emby 早期[播放上报文档](https://dev.emby.media/doc/restapi/Playback-Check-ins.html)和[官方社区说明](https://emby.media/community/topic/113458-repeat-diskaccess-embysessionsplayingprogress-even-when-paused/)提供历史背景，不代表已解释新版行为。
+
+如以后重启调查，应分别验证播放会话与控制连接，覆盖长暂停、恢复、停止、切集、断网、客户端退出/崩溃和重连；保留真实客户端证据，避免用自动测试或单个客户端的结果外推全部客户端。
