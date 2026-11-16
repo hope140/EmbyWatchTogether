@@ -3,10 +3,10 @@ async function invitePage(page, admin = false) {
   await page.goto('/?scenario=' + (admin ? 'admin-member' : 'empty'));
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
   if (admin) await page.evaluate(() => window.__wtFixture.setRooms([]));
-  await page.locator('.tabs-viewmenubar a[href*="InviteV26"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="InviteV30"]').click();
   await expect(page.locator('#wtCreateInvitation')).toBeVisible();
 }
-for (const name of ['', '   ', '周末电影']) test('手动名称可选且保留已填值 '+JSON.stringify(name), async ({page}) => {
+for (const name of ['', '   ', '周末电影', '  周末电影  ']) test('手动名称可选且保留已填值 '+JSON.stringify(name), async ({page}) => {
   await invitePage(page, true);
   for (const id of ['#wtRoomName', '#wtInvitationName']) {
     await expect(page.locator(id)).toHaveAttribute('label', '房间名称');
@@ -15,7 +15,7 @@ for (const name of ['', '   ', '周末电影']) test('手动名称可选且保�
   await page.locator('#wtRoomName').fill(name);
   await page.locator('#wtCreate').click();
   await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.filter(x=>x.method==='POST' && x.path==='WatchTogether/Rooms').length)).toBe(1);
-  expect(await page.evaluate(() => window.__wtFixture.apiCalls.find(x=>x.method==='POST' && x.path==='WatchTogether/Rooms').body.Name)).toBe(name.trim());
+  expect(await page.evaluate(() => window.__wtFixture.apiCalls.find(x=>x.method==='POST' && x.path==='WatchTogether/Rooms').body.Name)).toBe(name.trim() ? name : '');
   await expect(page.locator('#wtRoomNameError')).toBeHidden();
   await expect(page.locator('#wtRoomName')).toHaveValue('');
 });
@@ -39,7 +39,14 @@ test('迟到复制失败不污染切页后的提示',async({page})=>{
   await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:()=>new Promise((_,reject)=>window.rejectCopy=reject)}}));
   await page.locator('#wtCreateInvitation').click();await page.locator('#wtCopyInvitationCode').click();
   await expect.poll(()=>page.evaluate(()=>typeof window.rejectCopy)).toBe('function');
-  await page.locator('.tabs-viewmenubar a[href*="RoomsV26"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="RoomsV30"]').click();
   await page.evaluate(()=>window.rejectCopy(new Error('late')));
   await expect(page.locator('#wtInvitationStatus')).not.toContainText('自动复制失败');
+});
+
+for (const name of ['  周末电影  ', '   ']) test('邀请码自定义名称保留首尾空格，空白则留空 ' + JSON.stringify(name), async ({page}) => {
+  await invitePage(page);
+  await page.locator('#wtInvitationName').fill(name);
+  await page.locator('#wtCreateInvitation').click();
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.find(x => x.path === 'WatchTogether/Invitations' && x.method === 'POST')?.body?.Name)).toBe(name.trim() ? name : null);
 });

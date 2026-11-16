@@ -153,7 +153,7 @@ function page() {
     var diagnosticData = ${JSON.stringify(diagnostic('recovering'))};
     if (scenario !== 'recovering') diagnosticData = ${JSON.stringify(diagnostic('active'))};
     if (scenario === 'drift-positive') diagnosticData = ${JSON.stringify(diagnostic('drift-positive'))};
-    var apiCalls = []; var accountId = scenario === 'admin-manage' ? 'admin-other' : 'user-a'; var tokenConfigured = false; var serverAddress = location.origin;
+    var apiCalls = []; var languageCalls = []; var accountId = scenario === 'admin-manage' ? 'admin-other' : 'user-a'; var tokenConfigured = false; var serverAddress = location.origin;
     var stateOverride = null; var stateFailure = false; var roomsFailure = params.get('rooms_failure') === 'true';
     var mediaOverrides = {}; var mediaFailure = 0; var mediaDelay = 0; var stateDelay = 0;
     var imageUrlOverride; var imageDelay = 0; var imageCalls = [];
@@ -220,6 +220,10 @@ function page() {
       return delay({});
     }
     function send(path, method, body) {
+      if (path === 'WatchTogether/NotificationLanguage') {
+        languageCalls.push({ userId: accountId, language: JSON.parse(body).Language });
+        return scenario === 'language-fail' ? fail(503) : delay({});
+      }
       apiCalls.push({ method: method, path: path, body: body ? JSON.parse(body) : null });
       if (scenario === 'accept-fail' && path.indexOf('/Accept') >= 0) return delay({ Status: 'invalid_or_expired', Accepted: false });
       if (scenario === 'accept-network' && path.indexOf('/Accept') >= 0) return fail(503);
@@ -242,7 +246,7 @@ function page() {
       if (path.indexOf('/Leave') >= 0) return delay({ PauseAttempted: 1, PauseSucceeded: 1, PauseFailed: 0 });
       return delay({});
     }
-    window.__wtFixture = { apiCalls: apiCalls, errors: [], getRooms: function () { return rooms; }, config: config,
+    window.__wtFixture = { apiCalls: apiCalls, languageCalls: languageCalls, errors: [], getRooms: function () { return rooms; }, config: config,
       switchAccount: function (id) { accountId = id; }, switchServer: function (value) { serverAddress = value; },
       setRooms: function (value) { rooms = value; }, setState: function (value) { stateOverride = value; },
       setInvitations: function (value) { invitations = value; },
@@ -363,9 +367,11 @@ function page() {
         resolve([mode === 'default' ? { default: hostConfirm } : hostConfirm]);
       }, mode === 'slow' ? 350 : 0); });
     };
-    window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }, {}, {}, {}, {}, mainTabsManager); };
+    window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }, params.get('locale') === 'missing' ? {} : (params.get('locale') === 'default' ? { default: { getCurrentLocale: function () { return 'zh-CN'; } } } : { getCurrentLocale: function () { if (params.get('locale') === 'throw') throw new Error('Unavailable'); return window.__wtFixture.locale || params.get('locale') || 'zh-CN'; } }), {}, {}, {}, mainTabsManager); };
     var hostHeader = hasHostHeader ? '<header class="skinHeader" data-mock-host="true"><div class="headerLeft">emby</div><div class="headerMiddle headerSection sectionTabs"></div><div class="headerRight">mock host</div></header>' : '';
     document.querySelector('.fixture-host').innerHTML = hostHeader + '<div class="fixture-main"><div class="fixture-label" data-mock="true">模拟宿主 / mock Emby host + API · 不连接真实 Emby</div>' + sourceHtml + '</div>';
+    if (params.has('html_lang')) document.documentElement.lang = params.get('html_lang');
+    if (params.has('culture')) document.documentElement.setAttribute('data-culture', params.get('culture'));
     var page = document.querySelector('.wt-page');
     var selectHost = params.get('select_host');
     if (selectHost === 'legacy' || selectHost === 'modern') {

@@ -20,6 +20,8 @@ namespace Emby.Plugins.WatchTogether
         public string[] ParticipantUserIds { get; set; }
 
         public string PrimaryUserId { get; set; }
+
+        public string Language { get; set; }
     }
 
     [Route("/WatchTogether/Invitations", "POST")]
@@ -41,6 +43,8 @@ namespace Emby.Plugins.WatchTogether
     public class AcceptInvitationRequest
     {
         public string Code { get; set; }
+
+        public string Language { get; set; }
     }
 
     [Route("/WatchTogether/Rooms/{Id}", "DELETE")]
@@ -95,6 +99,12 @@ namespace Emby.Plugins.WatchTogether
         public string Text { get; set; }
     }
 
+    [Route("/WatchTogether/NotificationLanguage", "POST")]
+    public class SetNotificationLanguageRequest
+    {
+        public string Language { get; set; }
+    }
+
     [Route("/WatchTogether/Users", "GET")]
     public class GetUsersRequest { }
 
@@ -121,6 +131,18 @@ namespace Emby.Plugins.WatchTogether
     public class WatchTogetherService : BaseApiService, IService
     {
         internal Plugin RuntimePlugin { get; set; }
+
+        public object Post(SetNotificationLanguageRequest request)
+        {
+            var userId = CurrentUserId();
+            if (string.IsNullOrWhiteSpace(userId)) throw new UnauthorizedAccessException("authenticated user required");
+            if (request == null || (request.Language != "zh" && request.Language != "en" && request.Language != "zh-Hant"))
+                throw new ArgumentException("unsupported language");
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
+            if (plugin.NotificationLanguages == null) throw new ServiceUnavailableException("notification language storage unavailable");
+            plugin.NotificationLanguages.SetLanguage(userId, request.Language);
+            return new { Language = request.Language };
+        }
 
         public object Get(GetRoomsRequest request)
         {
@@ -171,7 +193,8 @@ namespace Emby.Plugins.WatchTogether
                 name: request.Name,
                 adminUserId: CurrentUserId(),
                 participantUserIds: request.ParticipantUserIds ?? Array.Empty<string>(),
-                primaryUserId: request.PrimaryUserId);
+                primaryUserId: request.PrimaryUserId,
+                language: request.Language);
 
             return new
             {
@@ -271,7 +294,8 @@ namespace Emby.Plugins.WatchTogether
                     string.Empty,
                     invitation.Name,
                     invitation.CreatorUserId,
-                    CurrentUserId()),
+                    CurrentUserId(),
+                    language: request?.Language),
                 DateTimeOffset.UtcNow);
             if (!result.Succeeded)
             {
@@ -869,6 +893,10 @@ namespace Emby.Plugins.WatchTogether
                 // Explicit administrator messages remain independent of automatic notices.
                 if (requireSyncNotifications && !IsSyncNotificationsEnabled(plugin))
                     return DisplayMessageResult.Skipped;
+                // Custom administrator messages are sent verbatim.
+                var language = requireSyncNotifications ? NotificationText.LanguageFor(message.UserId, plugin.GetNotificationLanguage) : "zh";
+                string header = requireSyncNotifications ? NotificationText.Translate(message.Header, message.UserId, _ => language) : message.Header;
+                string text = requireSyncNotifications ? NotificationText.Translate(message.Text, message.UserId, _ => language) : message.Text;
                 var messageIssuer = plugin.Issuer as IMessageIssuer;
                 if (messageIssuer != null)
                 {
@@ -877,8 +905,8 @@ namespace Emby.Plugins.WatchTogether
                         message.ControllingUserId,
                         message.UserId,
                         snapshot,
-                        message.Header,
-                        message.Text,
+                        header,
+                        text,
                         message.TimeoutMs,
                         DateTimeOffset.UtcNow,
                         out _) ? DisplayMessageResult.Sent : DisplayMessageResult.Failed;
@@ -889,8 +917,8 @@ namespace Emby.Plugins.WatchTogether
                     plugin.Bridge.SendDisplayMessageAsync(
                             message.ControllingUserId,
                             snapshot.SessionId,
-                            message.Header,
-                            message.Text,
+                            header,
+                            text,
                             message.TimeoutMs,
                             timeout.Token)
                         .GetAwaiter().GetResult();
@@ -1071,7 +1099,7 @@ namespace Emby.Plugins.WatchTogether
                 // A missing/deleted user must not make a room response fail.
             }
 
-            return "未知用户";
+            return null;
         }
 
         private static string ToPublicError(string error)

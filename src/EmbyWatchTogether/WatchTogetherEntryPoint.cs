@@ -23,6 +23,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly object _lifecycleLock = new object();
         private Plugin _plugin;
         private RoomStore _store;
+        private NotificationLanguageStore _notificationLanguages;
         private RoomManager _rooms;
         private RoomInvitationManager _invitations;
         private SessionBridge _bridge;
@@ -70,6 +71,10 @@ namespace Emby.Plugins.WatchTogether
                     bridge = new SessionBridge(_sessionManager);
                     var store = new RoomStore(Path.Combine(plugin.DataFolderPath, "rooms.json"), _jsonSerializer);
                     var rooms = new RoomManager(store);
+                    // Preference storage is optional for playback and fails closed to Chinese.
+                    NotificationLanguageStore notificationLanguages = null;
+                    try { notificationLanguages = new NotificationLanguageStore(Path.Combine(plugin.DataFolderPath, "notification-languages.json"), _jsonSerializer); }
+                    catch (Exception ex) { LogStartupException("通知语言存储不可用。", ex); }
                     invitations = new RoomInvitationManager(creatorInRoom: rooms.IsUserInAnyRoom);
                     var provider = new SessionBridgeSnapshotProvider(bridge);
                     var issuer = new SessionBridgeCommandIssuer(bridge, _logManager);
@@ -85,13 +90,15 @@ namespace Emby.Plugins.WatchTogether
                         notifyOtherOnPlaybackStop: options.NotifyOtherOnPlaybackStop,
                         notifyOnSyncActions: options.NotifyOnSyncActions,
                         messageIssuer: issuer,
-                        logManager: _logManager);
+                        logManager: _logManager,
+                        notificationLanguage: userId => notificationLanguages?.GetLanguage(userId) ?? "zh");
 
                     // Keep the internal ownership visible to event handlers while
                     // withholding all runtime references from Plugin until Start
                     // has completed successfully.
                     _plugin = plugin;
                     _store = store;
+                    _notificationLanguages = notificationLanguages;
                     _rooms = rooms;
                     _invitations = invitations;
                     _bridge = bridge;
@@ -117,6 +124,7 @@ namespace Emby.Plugins.WatchTogether
 
                     // Publish the runtime graph only after every object has been
                     // constructed and the background engine has started.
+                    plugin.NotificationLanguages = notificationLanguages;
                     plugin.Store = store;
                     plugin.Rooms = rooms;
                     plugin.Invitations = invitations;
@@ -159,6 +167,7 @@ namespace Emby.Plugins.WatchTogether
 
                     _plugin = null;
                     _store = null;
+                    _notificationLanguages = null;
                     _rooms = null;
                     _invitations = null;
                     _issuer = null;
@@ -216,6 +225,7 @@ namespace Emby.Plugins.WatchTogether
 
                 _plugin = null;
                 _store = null;
+                _notificationLanguages = null;
                 _rooms = null;
                 _invitations = null;
                 _issuer = null;
@@ -258,6 +268,8 @@ namespace Emby.Plugins.WatchTogether
                 return;
             }
 
+            if (ReferenceEquals(plugin.NotificationLanguages, _notificationLanguages))
+                plugin.NotificationLanguages = null;
             if (ReferenceEquals(plugin.Store, _store))
             {
                 plugin.Store = null;

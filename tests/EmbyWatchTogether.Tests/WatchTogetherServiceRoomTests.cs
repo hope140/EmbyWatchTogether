@@ -56,6 +56,51 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Empty(invitations.List(creator));
         }
 
+        [Theory]
+        [InlineData("zh", "房间 #")]
+        [InlineData("zh-Hant", "房間 #")]
+        [InlineData("en", "Room #")]
+        [InlineData(null, "房间 #")]
+        [InlineData("unsupported", "房间 #")]
+        public void RoomCreationUsesRequestLanguageForBothEntryPoints(string language, string prefix)
+        {
+            var creator = Guid.NewGuid().ToString("N");
+            var accepter = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var plugin = NewPlugin(manager, null, null, "server-1");
+            using var invitations = new RoomInvitationManager();
+            SetPluginProperty(plugin, "Invitations", invitations);
+            var admin = NewService(creator, true);
+            var request = new CreateRoomRequest { Language = language, ParticipantUserIds = new[] { creator, accepter }, PrimaryUserId = creator };
+            var created = WithPlugin(plugin, () => admin.Post(request));
+            Assert.Matches("^" + prefix + "[0-9]{4}$", GetString(created, "Name"));
+            var originalName = GetString(created, "Name");
+            Assert.Equal(originalName, manager.GetRoom(GetString(created, "RoomId")).Name);
+            manager.DeleteRoom(GetString(created, "RoomId"));
+            var invitation = invitations.Create(creator, "");
+            var accepted = WithPlugin(plugin, () => NewService(accepter).Post(new AcceptInvitationRequest { Code = invitation.Code, Language = language }));
+            Assert.True(GetBoolean(accepted, "Accepted"));
+            Assert.Matches("^" + prefix + "[0-9]{4}$", GetString(accepted, "Name"));
+        }
+
+        [Theory]
+        [InlineData("zh")]
+        [InlineData("zh-Hant")]
+        [InlineData("en")]
+        public void ExplicitRoomNamesRemainUnchangedForAllLanguages(string language)
+        {
+            var creator = Guid.NewGuid().ToString("N"); var accepter = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager(); var plugin = NewPlugin(manager, null, null, "server-1");
+            var request = new CreateRoomRequest { Name = " 自定義名稱 ", Language = language, ParticipantUserIds = new[] { creator, accepter }, PrimaryUserId = creator };
+            var created = WithPlugin(plugin, () => NewService(creator, true).Post(request));
+            Assert.Equal(" 自定義名稱 ", GetString(created, "Name"));
+            manager.DeleteRoom(GetString(created, "RoomId"));
+            using var invitations = new RoomInvitationManager(); SetPluginProperty(plugin, "Invitations", invitations);
+            var code = invitations.Create(creator, " 自定義名稱 ").Code;
+            var accepted = WithPlugin(plugin, () => NewService(accepter).Post(new AcceptInvitationRequest { Code = code, Language = language }));
+            Assert.Equal(" 自定義名稱 ", GetString(accepted, "Name"));
+        }
+
         [Fact]
         public void Rooms_ExposeRestrictedParticipantSummariesAndSanitizeRuntimeError()
         {
@@ -87,6 +132,20 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.True(GetBoolean(summaries[0], "IsPrimary"));
             Assert.Equal("另一位用户", GetString(summaries[1], "Name"));
             Assert.False(GetBoolean(summaries[1], "IsPrimary"));
+        }
+
+        [Fact]
+        public void MissingParticipantNameIsNullSoClientsCanLocalizeFallback()
+        {
+            var a = Guid.NewGuid().ToString("N"); var b = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", a, new[] { a, b }, a);
+            var plugin = NewPlugin(manager, null, null, "server-1");
+            var service = NewService(a);
+            var response = WithPlugin(plugin, () => service.Get(new GetRoomsRequest()));
+            var item = GetRoomResponse(response, room.Id);
+            var participants = ((System.Collections.IEnumerable)item.GetType().GetProperty("Participants").GetValue(item)).Cast<object>().ToArray();
+            Assert.All(participants, participant => Assert.Null(participant.GetType().GetProperty("Name").GetValue(participant)));
         }
 
         [Fact]
@@ -493,6 +552,37 @@ namespace Emby.Plugins.WatchTogether.Tests
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Never);
             WithPlugin(plugin, () => service.Post(new JoinRoomRequest { Id = room.Id }));
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public void AdministratorControlUsesRecipientLanguagesButCustomMessageIsVerbatim()
+        {
+            var u1 = Guid.NewGuid().ToString("N"); var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var serializer = new Mock<MediaBrowser.Model.Serialization.IJsonSerializer>();
+            serializer.Setup(x => x.SerializeToString(It.IsAny<object>())).Returns<object>(x => System.Text.Json.JsonSerializer.Serialize(x));
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wt-pref-" + Guid.NewGuid().ToString("N"), "language.json");
+            try
+            {
+                var languages = new NotificationLanguageStore(path, serializer.Object);
+                languages.SetLanguage(u1, "en");
+                SetPluginProperty(plugin, "NotificationLanguages", languages);
+                var service = NewService(u1, true);
+                WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "pause" }));
+                sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Text == "An administrator paused room playback."), It.IsAny<CancellationToken>()), Times.Once);
+                sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.Is<MessageCommand>(m => m.Text == "管理员已暂停房间播放"), It.IsAny<CancellationToken>()), Times.Once);
+                sm.Invocations.Clear();
+                const string custom = "管理员已暂停房间播放";
+                WithPlugin(plugin, () => service.Post(new SendRoomMessageRequest { Id = room.Id, Text = custom }));
+                sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.Is<MessageCommand>(m => m.Text == custom), It.IsAny<CancellationToken>()), Times.Exactly(2));
+            }
+            finally { var directory = System.IO.Path.GetDirectoryName(path); if (System.IO.Directory.Exists(directory)) System.IO.Directory.Delete(directory, true); }
         }
 
         [Theory]

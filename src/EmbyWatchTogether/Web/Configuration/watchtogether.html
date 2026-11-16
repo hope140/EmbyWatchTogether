@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherNativeV26.js"
+     data-controller="__plugin/WatchTogetherNativeV30.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -306,6 +306,7 @@
                 <li id="wtHelpStep3">看到“同步中”后即可一起观看。</li>
             </ol>
             <p class="fieldDescription">一方暂时不在线时，房间会等待；恢复后会继续尝试同步。</p>
+            <p id="wtLanguageStatus" class="fieldDescription error" role="status" aria-live="polite" hidden></p>
         </div>
 
         <div class="verticalSection wt-section" id="wtSettingsSection" hidden style="display:none">
@@ -378,7 +379,7 @@
                         <span>GitHub 项目</span>
                     </a>
                 </div>
-                <p class="fieldDescription wt-updateHelp">在 Emby 计划任务的“Watch Together 更新检查”中调整检查时间或手动运行。安装后重启 Emby 生效。</p>
+                <p class="fieldDescription wt-updateHelp">在 Emby 计划任务的“Watch Together → Update Plugin”中调整检查时间或手动运行。安装后重启 Emby 生效。</p>
             </div>
             </div>
             </div>
