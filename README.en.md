@@ -61,6 +61,6 @@ The project is licensed under [Apache License 2.0](LICENSE). See the [image note
 
 ## Interface language and translations
 
-The page first tries the Emby host's interface language, then the page language and browser language. Chinese locales use Chinese; other locales currently use English. The language is checked when the page is opened or resumed; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting. Playback notifications sent directly by the server currently remain in Chinese because the server does not have a reliable recipient interface language for them.
+The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Chinese locales use Chinese; other locales currently use English. The language is checked when the page is opened or resumed; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting. Playback notifications sent directly by the server currently remain in Chinese because the server does not have a reliable recipient interface language for them.
 
 Contributions for other languages are welcome; see the [translation guide](docs/translations.md).

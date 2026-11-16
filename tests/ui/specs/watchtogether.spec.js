@@ -693,3 +693,53 @@ test('changing host language is applied when the view resumes', async ({ page })
   await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
   await expect(page.locator('.wt-roomCard')).toContainText('Both participants are connected');
 });
+
+test('language changes update waiting status in both directions', async ({ page }) => {
+  await page.goto('/?scenario=waiting&locale=zh-CN');
+  await expect(page.locator('.wt-roomCard')).toContainText('等待双方打开同一视频并开始播放');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('.wt-roomCard')).toContainText('Wait for both participants to open the same video and start playing');
+  await page.evaluate(() => { window.__wtFixture.locale = 'zh-CN'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('.wt-roomCard')).toContainText('等待双方打开同一视频并开始播放');
+});
+
+test('English settings identify the actual scheduled task', async ({ page }) => {
+  await page.goto('/?scenario=admin-member&locale=en-US');
+  await selectView(page, 'settings');
+  await expect(page.locator('.wt-updateHelp')).toContainText('Watch Together → Update Plugin');
+});
+
+test('host default export and page culture are supported', async ({ page }) => {
+  await page.goto('/?locale=default&html_lang=en');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
+  await page.goto('/?locale=missing&culture=zh-CN&html_lang=en');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
+});
+
+test('operation labels translate after actions and page cleanup', async ({ page }) => {
+  await page.goto('/?scenario=empty&locale=zh-CN');
+  await selectView(page, 'invite');
+  await page.locator('#wtCreateInvitation').click();
+  await expect(page.locator('#wtInvitationCode')).toHaveText('ABCD12EFghI3J4KLMNopQR');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtCreateInvitation')).toHaveText('Create invitation code');
+  await page.evaluate(() => { window.__wtFixture.locale = 'zh-CN'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtCreateInvitation')).toHaveText('创建邀请码');
+  await page.goto('/?scenario=admin-member&locale=zh-CN');
+  await selectView(page, 'settings');
+  await expect(page.locator('#wtSaveConfig')).toBeEnabled();
+  await page.locator('#wtSaveConfig').click();
+  await expect(page.locator('#wtSaveConfig')).toHaveText('保存设置');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtSaveConfig')).toHaveText('Save settings');
+});
+
+test('leaving during a pending invitation restores the label in the new language', async ({ page }) => {
+  await page.goto('/?scenario=late&locale=zh-CN');
+  await selectView(page, 'invite');
+  await page.locator('#wtCreateInvitation').click();
+  await expect(page.locator('#wtCreateInvitation')).toHaveText('创建中…');
+  await page.evaluate(() => { window.__wtFixture.view.onPause(); window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtCreateInvitation')).toHaveText('Create invitation code');
+  await expect(page.locator('#wtCreateInvitation')).toBeEnabled();
+});

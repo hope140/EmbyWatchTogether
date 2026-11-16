@@ -363,10 +363,11 @@ function page() {
         resolve([mode === 'default' ? { default: hostConfirm } : hostConfirm]);
       }, mode === 'slow' ? 350 : 0); });
     };
-    window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }, params.get('locale') === 'missing' ? {} : { getCurrentLocale: function () { if (params.get('locale') === 'throw') throw new Error('Unavailable'); return window.__wtFixture.locale || params.get('locale') || 'zh-CN'; } }, {}, {}, {}, mainTabsManager); };
+    window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }, params.get('locale') === 'missing' ? {} : (params.get('locale') === 'default' ? { default: { getCurrentLocale: function () { return 'zh-CN'; } } } : { getCurrentLocale: function () { if (params.get('locale') === 'throw') throw new Error('Unavailable'); return window.__wtFixture.locale || params.get('locale') || 'zh-CN'; } }), {}, {}, {}, mainTabsManager); };
     var hostHeader = hasHostHeader ? '<header class="skinHeader" data-mock-host="true"><div class="headerLeft">emby</div><div class="headerMiddle headerSection sectionTabs"></div><div class="headerRight">mock host</div></header>' : '';
     document.querySelector('.fixture-host').innerHTML = hostHeader + '<div class="fixture-main"><div class="fixture-label" data-mock="true">模拟宿主 / mock Emby host + API · 不连接真实 Emby</div>' + sourceHtml + '</div>';
     if (params.has('html_lang')) document.documentElement.lang = params.get('html_lang');
+    if (params.has('culture')) document.documentElement.setAttribute('data-culture', params.get('culture'));
     var page = document.querySelector('.wt-page');
     var selectHost = params.get('select_host');
     if (selectHost === 'legacy' || selectHost === 'modern') {

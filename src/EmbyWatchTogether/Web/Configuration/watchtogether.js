@@ -16,7 +16,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "正在让另一位参与者打开主用户当前视频": "Asking the other participant to open the primary user’s current video",
         "当前房间暂时无法使用，请刷新后重试": "The current room is temporarily unavailable, please refresh and try again.",
         "暂停播放": "Pause playback",
-        "继续播放": "continue playing",
+        "继续播放": "Resume playback",
         "重新同步": "Resync",
         "账号或服务器已变化，请重新打开一起看。": "The account or server has changed. Please reopen Watch Together.",
         "无法打开确认窗口，请重新打开一起看后重试。": "Unable to open the confirmation dialog. Reopen Watch Together and try again.",
@@ -119,7 +119,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "远程控制失败": "Remote control failed",
         "时间未知": "Time unknown",
         "导出诊断 JSON": "Export diagnostic JSON",
-        "读取时间：": "Reading time:",
+        "读取时间：": "Retrieved at: ",
         "状态": "Status",
         "状态原因": "Status reason",
         "当前状态需要检查": "Current status needs to be checked",
@@ -162,7 +162,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "等待打开视频确认": "Waiting for opening video confirmation",
         "准备发送": "ready to send",
         "重试次数": "Number of retries",
-        "操作代际": "operating generation",
+        "操作代际": "Operation generation",
         "持续时间": "duration",
         "最近错误": "recent errors",
         "对齐与恢复": "Align and restore",
@@ -194,15 +194,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "播放漂移": "Playback drift",
         "当前漂移": "current drift",
         "最大绝对漂移": "maximum absolute drift",
-        "纠偏保持计时": "Correction and keeping timing",
+        "纠偏保持计时": "Time above correction threshold",
         "自动纠偏次数": "Number of automatic corrections",
         "最近自动纠偏": "Recent automatic correction",
         "最近纠偏漂移": "Recent correction drift",
-        "冷却剩余": "Cool remaining",
+        "冷却剩余": "Cooldown remaining",
         "最近结果": "recent results",
         "最近动作": "Recent actions",
         "动作目标": "action target",
-        "动作控制": "motion control",
+        "动作控制": "Action command",
         "动作结果": "action result",
         "事件记录": "event record",
         "暂无事件记录。": "There is no event record yet.",
@@ -212,7 +212,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "诊断详情": "Diagnosis details",
         "正在读取诊断…": "Reading diagnostics…",
         "读取中…": "Reading…",
-        "当前浏览器不支持导出诊断 JSON。": "Current browsers do not support exporting diagnostic JSON.",
+        "当前浏览器不支持导出诊断 JSON。": "This browser does not support exporting diagnostic JSON.",
         "有效期暂时无法显示": "The validity period cannot be displayed at the moment",
         "有效期至：": "Valid until:",
         "已复制": "Copied",
@@ -316,7 +316,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "当前版本：": "Current version:",
         "打开 GitHub 项目": "Open GitHub project",
         "GitHub 项目": "GitHub projects",
-        "在 Emby 计划任务的“Watch Together 更新检查”中调整检查时间或手动运行。安装后重启 Emby 生效。": "Adjust the check time in the Emby scheduled task \"Watch Together Update Check\" or run it manually. Restart Emby after installation to take effect.",
+        "在 Emby 计划任务的“Watch Together → Update Plugin”中调整检查时间或手动运行。安装后重启 Emby 生效。": "In Emby Scheduled Tasks, adjust the schedule or run Watch Together → Update Plugin manually. Restart Emby after installation.",
         "邀请": "Invite",
         "我的房间": "My rooms",
         "加入房间后，与另一位参与者打开同一视频。": "After joining, both participants should open the same video.",
@@ -347,7 +347,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "房间所属服务器暂不可用，请确认当前服务器连接。": "The server to which the room belongs is temporarily unavailable. Please confirm the current server connection.",
         "暂时无法读取播放会话，自动同步已进入保护状态；恢复后会重新对齐。": "The playback session cannot be read at the moment, and automatic synchronization has entered a protected state; it will be realigned after recovery.",
         "两位参与者打开了不同视频，请打开同一视频。": "Two participants have opened different videos, please open the same video.",
-        "播放已停止，请双方重新打开同一视频。": "Playback has stopped, please both participants reopen the same video.",
+        "播放已停止，请双方重新打开同一视频。": "Playback has stopped. Both participants should reopen the same video.",
         "双方已打开同一视频，但停止后的进度差较大。如需以主用户当前进度恢复，请使用房间内的重新同步操作。": "Both parties have opened the same video, but the progress after stopping is quite different. To resume at the primary user's current progress, use the in-room resync operation.",
         "播放控制未完成，请检查两位参与者的客户端。": "Playback control is not complete, please check both participants' clients.",
         "仍有参与者未加入，请先让双方加入房间。": "There are still participants who have not joined, please let both participants join the room first.",
@@ -369,7 +369,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "解除双方成员关系，不删除媒体": "Terminate the membership relationship between both participants without deleting the media",
         "仅移除同播关系，不删除媒体": "Remove the room relationship without deleting media",
         "可重新加入，并尝试暂停对方": "Can rejoin and try to pause the other participant",
-        "请双方打开同一视频": "Please both participants open the same video",
+        "请双方打开同一视频": "Both participants should open the same video",
         "读取当前房间的脱敏同步诊断": "Read redacted synchronization diagnostics for this room",
         "请求重新对齐双方进度": "Request to realign the progress of both participants",
         "特别篇": "Special",
@@ -383,7 +383,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "播放状态已过期，正在等待重新读取。": "The playback status has expired and is waiting to be reread.",
         "状态读取失败，请刷新后重试。": "Status reading failed, please refresh and try again.",
         "正在读取当前播放状态…": "Reading current playback status...",
-        "视频不一致": "Video is inconsistent",
+        "视频不一致": "Videos do not match",
         "等待连接恢复": "Wait for connection to be restored",
         "等待播放": "waiting to play",
         "正在同步\n": "Synchronizing\n",
@@ -430,7 +430,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "结束中…": "Ending…",
         "删除中…": "Deleting…",
         "房间不存在或已删除": "The room does not exist or has been deleted",
-        "房间已结束": "room ended",
+        "房间已结束": "Room ended",
         "房间已删除": "Room deleted",
         "结束失败：": "End failed:",
         "删除失败：": "Delete failed:",
@@ -439,7 +439,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "暂离": "Leave",
         "加入中…": "Joining…",
         "暂离中…": "Temporarily away...",
-        "已加入，请双方打开同一视频。": "Already joined, please open the same video on both sides.",
+        "已加入，请双方打开同一视频。": "You joined the room. Both participants should open the same video.",
         "加入": "Join",
         "已暂离，对方暂停失败，请检查客户端。": "You left the room, but the other participant could not be paused. Check their client.",
         "已暂离，对方已暂停，可重新加入。": "You left the room and the other participant was paused. You can rejoin.",
@@ -455,8 +455,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function currentLocale() {
         var locale;
         try {
-            if (globalize && typeof globalize.getCurrentLocale === 'function') locale = globalize.getCurrentLocale();
+            var hostGlobalize = globalize && (typeof globalize.getCurrentLocale === 'function' ? globalize : globalize.default);
+            if (hostGlobalize && typeof hostGlobalize.getCurrentLocale === 'function') locale = hostGlobalize.getCurrentLocale();
         } catch (error) { /* Older hosts may not expose a locale. */ }
+        if (typeof locale !== 'string' || !locale.trim()) locale = document.documentElement.getAttribute('data-culture') || (document.body && document.body.getAttribute('data-culture'));
         if (typeof locale !== 'string' || !locale.trim()) locale = document.documentElement.lang;
         if (typeof locale !== 'string' || !locale.trim()) locale = navigator.language || '';
         return /^zh(?:[-_]|$)/i.test(locale.trim()) ? 'zh' : 'en';
@@ -475,7 +477,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 if (node.parentElement && node.parentElement.closest('style, script')) continue;
                 var original = node.nodeValue;
                 var key = original.trim();
-                if (key && translations.en[key]) entries.push({ node: node, original: original, key: key });
+                if (key && translations.en[key]) {
+                    entries.push({ node: node, parent: node.parentElement, original: original, key: key });
+                    if (node.parentElement && node.parentElement.tagName === 'BUTTON') node.parentElement._wtStaticLabelKey = key;
+                }
             }
             page.querySelectorAll('*').forEach(function (element) {
                 ['label', 'placeholder', 'title', 'aria-label'].forEach(function (name) {
@@ -487,7 +492,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
         page._wtStaticTranslations.forEach(function (entry) {
             if (entry.attribute) entry.node.setAttribute(entry.attribute, t(entry.key));
-            else entry.node.nodeValue = entry.original.replace(entry.key, t(entry.key));
+            else if (entry.node.parentNode === entry.parent) entry.node.nodeValue = entry.original.replace(entry.key, t(entry.key));
+            else if (entry.parent && entry.parent.tagName === 'BUTTON') entry.parent.textContent = t(entry.key);
         });
     }
 
@@ -3128,7 +3134,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             button.disabled = false;
             button.removeAttribute('aria-busy');
             if (button._wtOriginalLabel) {
-                button.textContent = button._wtOriginalLabel;
+                button.textContent = button._wtStaticLabelKey ? t(button._wtStaticLabelKey) : button._wtOriginalLabel;
+                button._wtOriginalLabel = null;
             }
         }
     }
@@ -3422,12 +3429,12 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         BaseView.prototype.onResume.apply(this, arguments);
         var page = this.view;
         locale = currentLocale();
-        translateStatic(page);
         window.removeEventListener('focus', page._wtRefreshVisible);
         page._wtActive = false;
         page._wtGeneration = (page._wtGeneration || 0) + 1;
         page._wtRoute = currentRoute(page);
         clearPageData(page);
+        translateStatic(page);
         page._wtIdentity = pageIdentity();
         page._wtActive = true;
         if (!pageActionAllowed(page)) return;
