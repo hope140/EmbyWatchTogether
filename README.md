@@ -1,12 +1,12 @@
 # Emby Watch Together
 
+中文 · [English](README.en.md)
+
 让同一台 Emby Server 上的两个人一起观看：创建房间，打开同一视频，由服务器协调播放状态和进度。插件运行在 Emby Server 内，无需额外同步服务。
 
 [安装](#安装) · [开始使用](#开始一起观看) · [兼容性与帮助](#兼容性与帮助) · [开发者文档](docs/README.md)
 
 ![Watch Together 房间首页示意：视频展示区、双人状态与房间控制](docs/images/watch-together-preview.png)
-
-*基于用户截图经 AI 脱敏及示意处理，部分界面文字与实际产品不同，并非原始截图；操作以本文说明及实际界面为准。电影素材权利与来源见[图像说明](docs/images/README.md)。*
 
 ## 选择版本
 
@@ -66,3 +66,9 @@ Emby 的 **Dashboard → 计划任务 → Watch Together → Update Plugin** 可
 开发者和维护者请从[文档索引](docs/README.md)进入，构建、API 和排错细节见[技术文档](docs/technical.md)。
 
 项目按 [Apache License 2.0](LICENSE) 许可；文档图片的来源与许可见[图像说明](docs/images/README.md)。
+
+## 界面语言与翻译
+
+页面优先读取 Emby 宿主提供的界面语言；不可用时依次尝试页面语言和浏览器语言。中文语言区域显示中文，其他语言目前显示英文。每次进入页面时重新读取语言；修改 Emby 语言后可重新进入页面或刷新。部分客户端或宿主可能不提供该接口，回退语言未必与 Emby 设置一致。播放过程中由服务器直接发送的通知目前仍为中文，因为这些通知没有可靠的接收端界面语言信息。
+
+欢迎贡献其他语言：请参阅[翻译说明](docs/translations.md)。

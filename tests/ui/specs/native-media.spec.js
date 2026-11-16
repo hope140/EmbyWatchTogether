@@ -185,7 +185,7 @@ test('切换三页保持单导航，状态未变时焦点与busy稳定', async (
   await open(page, 'admin-member');
   for (let i = 0; i < 3; i++) {
     for (const name of ['Invite', 'Settings', 'Rooms']) {
-      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V26"]').click();
+      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V27"]').click();
       await expect(page.locator('.tabs-viewmenubar a')).toHaveCount(3);
     }
   }
@@ -214,4 +214,9 @@ test('State挂起超过新鲜度窗口不继续展示旧片名，成功后恢复
   await page.evaluate(() => window.__wtFixture.setStateDelay(0));
   await refresh(page);
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
+});
+
+test('English episode metadata keeps season and episode numbers in natural order', async ({ page }) => {
+  await page.goto('/?scenario=active&locale=en-US');
+  await expect(page.locator('.wt-roomMediaDetail')).toHaveText('Season 1 · Episode 3');
 });

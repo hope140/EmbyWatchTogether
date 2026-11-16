@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V26"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V27"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -664,4 +664,32 @@ test('浅色、深色和仅 HSL 主题均保持可读且无外部字体', async 
     expect(await page.locator('link[rel="stylesheet"][href*="http"]').count()).toBe(0);
     if (theme === 'dark') await page.screenshot({ path: path.join(artifactDir, 'desktop-dark-active-room.png'), fullPage: true });
   }
+});
+
+test('host locale localizes static controls, room status, diagnostics and confirmation', async ({ page }) => {
+  await page.goto('/?scenario=active&locale=en-US');
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+  await expect(page.locator('.wt-roomCard')).toContainText('Both participants are connected');
+  await page.locator('.wt-roomCard button[data-act="diagnostics"]').click();
+  await expect(page.locator('.wt-diagnosticToolbar')).toContainText('Export diagnostic JSON');
+  await page.locator('.wt-roomCard button[data-act="delete"]').click();
+  await expect(page.getByRole('alertdialog', { name: 'End room' })).toContainText('Both participants will leave the room.');
+});
+
+test('locale falls back safely when host locale is missing or throws', async ({ page }) => {
+  await page.goto('/?locale=missing&html_lang=zh-CN');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
+  await page.goto('/?locale=throw&html_lang=en');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+  await page.goto('/?locale=fr-FR&html_lang=zh-CN');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+});
+
+test('changing host language is applied when the view resumes', async ({ page }) => {
+  await page.goto('/?locale=zh-CN');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+  await expect(page.locator('.wt-roomCard')).toContainText('Both participants are connected');
 });
