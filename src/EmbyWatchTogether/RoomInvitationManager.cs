@@ -76,7 +76,7 @@ namespace Emby.Plugins.WatchTogether
                     Guid.NewGuid().ToString("N"),
                     hash,
                     creatorUserId,
-                    (name ?? string.Empty).Trim(),
+                    string.IsNullOrWhiteSpace(name) ? string.Empty : name,
                     createdAt,
                     createdAt.AddMinutes(ExpiryMinutes));
                 _invitations.Add(invitation.Id, invitation);

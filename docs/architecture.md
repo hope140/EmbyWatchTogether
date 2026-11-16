@@ -39,13 +39,13 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。 更新提示通过按 `ISessionManager` 共享的有界发送槽位执行，最多等待 5 秒；不响应取消的传输继续占位直到实际完成，后续计划任务不会叠加发送。提示超时或失败不阻止安装、不改写已安装事实，调用方真实取消仍向上传播。
 
-页面打开时向认证接口提交实际选用的中英文，独立的 `notification-languages.json` 按账号持久化偏好；无记录或存储不可读时自动通知默认中文。播放通知在原有身份及新鲜度校验后按接收者选择固定文案，自定义管理员消息保留原文；不同设备共用账号，以服务器最后成功保存为准。更新管理员广播仍走独立路径。
+页面打开时向认证接口提交实际选用的简体中文、繁体中文或英文，独立的 `notification-languages.json` 按账号持久化偏好；无记录或存储不可读时自动通知默认中文。播放通知在原有身份及新鲜度校验后按接收者选择固定文案，自定义管理员消息保留原文；不同设备共用账号，以服务器最后成功保存为准。更新管理员广播仍走独立路径。房间默认名在创建时按请求页面语言生成并作为普通名称持久化，手动建房使用创建页面语言，邀请码建房使用接受页面语言；缺省或不支持的语言回退简体中文，已有及自定义名称不迁移。
 
 ## 嵌入式 UI
 
 页面先通过宿主 getCurrentUser({enableCache:false}) 核对当前用户 ID 和明确的 Policy.IsAdministrator，仅管理员读取 WatchTogether/Users；普通用户读取自己的房间与邀请。角色读取失败不授予管理权限，身份或页面代次失效时旧结果无效。服务端独立执行权限与房间过滤；宿主 SDK 离线用户回退保持原样，未证明它导致本次问题。
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV26`、`WatchTogetherInviteV26`、`WatchTogetherSettingsV26`，共享 `WatchTogetherNativeV26.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV29`、`WatchTogetherInviteV29`、`WatchTogetherSettingsV29`，共享 `WatchTogetherNativeV29.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
 

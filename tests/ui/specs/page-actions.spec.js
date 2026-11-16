@@ -45,7 +45,7 @@ const actions = [
 ];
 
 async function navigate(page, route) {
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + route + 'V28"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + route + 'V29"]').click();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
 }
 

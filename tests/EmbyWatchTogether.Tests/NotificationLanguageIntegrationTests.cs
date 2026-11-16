@@ -32,10 +32,10 @@ namespace Emby.Plugins.WatchTogether.Tests
                 var first = Guid.NewGuid(); var second = Guid.NewGuid();
                 var a = Service(plugin, first); var b = Service(plugin, second);
                 a.Post(new SetNotificationLanguageRequest { Language = "en" });
-                b.Post(new SetNotificationLanguageRequest { Language = "zh" });
+                b.Post(new SetNotificationLanguageRequest { Language = "zh-Hant" });
                 var loaded = new NotificationLanguageStore(path, serializer);
                 Assert.Equal("en", loaded.GetLanguage(first.ToString("N")));
-                Assert.Equal("zh", loaded.GetLanguage(second.ToString("N")));
+                Assert.Equal("zh-Hant", loaded.GetLanguage(second.ToString("N")));
                 Assert.Throws<ArgumentException>(() => a.Post(new SetNotificationLanguageRequest { Language = "fr" }));
                 Assert.Throws<UnauthorizedAccessException>(() => Service(plugin, null).Post(new SetNotificationLanguageRequest { Language = "en" }));
                 Assert.Equal("en", loaded.GetLanguage(first.ToString("N")));
@@ -50,6 +50,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             const string notice = "双方打开了不同视频，已暂停同步；请打开同一视频";
             Assert.Contains("Different videos", Translate(notice, "a", preferences));
             Assert.Equal(notice, Translate(notice, "b", preferences));
+            Assert.Contains("雙方開啟", Translate(notice, "c", _ => "zh-Hant"));
             Assert.Equal(notice, Translate(notice, "a", _ => throw new IOException()));
             Assert.Equal("custom text", Translate("custom text", "a", preferences));
         }

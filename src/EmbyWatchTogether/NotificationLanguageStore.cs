@@ -32,9 +32,10 @@ namespace Emby.Plugins.WatchTogether
                 var loaded = NewMap();
                 foreach (var entry in entries)
                 {
-                    if (entry == null || string.IsNullOrWhiteSpace(entry.UserId) || !IsLanguage(entry.Language) || loaded.ContainsKey(entry.UserId))
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.UserId) || !IsStoredLanguage(entry.Language) ||
+                        (entry.Script != null && (entry.Script != "Hant" || entry.Language != "zh")) || loaded.ContainsKey(entry.UserId))
                         throw new InvalidDataException("Invalid notification language entry.");
-                    loaded.Add(entry.UserId, entry.Language);
+                    loaded.Add(entry.UserId, entry.Script == "Hant" ? "zh-Hant" : entry.Language);
                 }
                 _languages = loaded;
             }
@@ -56,14 +57,20 @@ namespace Emby.Plugins.WatchTogether
         public void SetLanguage(string userId, string language)
         {
             if (string.IsNullOrWhiteSpace(userId)) throw new ArgumentException("userId is required", nameof(userId));
-            if (!IsLanguage(language)) throw new ArgumentException("language must be zh or en", nameof(language));
+            if (!IsLanguage(language)) throw new ArgumentException("language must be zh, zh-Hant or en", nameof(language));
             lock (_writeLock)
             {
                 if (_loadFailed) throw new InvalidDataException("Notification language data could not be loaded.");
                 var candidate = new Dictionary<string, string>(_languages, StringComparer.OrdinalIgnoreCase);
                 if (candidate.TryGetValue(userId, out var existing) && existing == language) return;
                 candidate[userId] = language;
-                var entries = candidate.Select(pair => new NotificationLanguageEntry { UserId = pair.Key, Language = pair.Value }).ToList();
+                // Older versions understand zh/en only. Preserve a readable
+                // zh value and store the Traditional script as optional metadata.
+                var entries = candidate.Select(pair => new NotificationLanguageEntry {
+                    UserId = pair.Key,
+                    Language = pair.Value == "zh-Hant" ? "zh" : pair.Value,
+                    Script = pair.Value == "zh-Hant" ? "Hant" : null
+                }).ToList();
                 string payload = _serializer.SerializeToString(entries);
                 if (payload == null) throw new InvalidDataException("Notification language serialization failed.");
                 string temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -83,7 +90,8 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private static bool IsLanguage(string language) => language == "zh" || language == "en";
+        private static bool IsLanguage(string language) => IsStoredLanguage(language) || language == "zh-Hant";
+        private static bool IsStoredLanguage(string language) => language == "zh" || language == "en";
         private static Dictionary<string, string> NewMap() => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -91,5 +99,6 @@ namespace Emby.Plugins.WatchTogether
     {
         public string UserId { get; set; }
         public string Language { get; set; }
+        public string Script { get; set; }
     }
 }

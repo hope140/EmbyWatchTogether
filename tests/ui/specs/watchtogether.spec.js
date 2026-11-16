@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V28"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V29"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -747,10 +747,10 @@ test('leaving during a pending invitation restores the label in the new language
 test('page reports its language for the authenticated account and changes it on resume', async ({ page }) => {
   await page.goto('/?scenario=empty&locale=zh-CN');
   await expect.poll(() => page.evaluate(() => window.__wtFixture.languageCalls)).toEqual([{ userId: 'user-a', language: 'zh' }]);
-  await expect(page.locator('#wtHelpSection')).toContainText('播放通知使用您上次打开此页面时的语言');
+  await expect(page.locator('#wtHelpSection')).toContainText('播放通知语言：本账号上次打开此页面时的语言');
   await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
   await expect.poll(() => page.evaluate(() => window.__wtFixture.languageCalls.at(-1))).toEqual({ userId: 'user-a', language: 'en' });
-  await expect(page.locator('#wtHelpSection')).toContainText('Playback notifications use the language');
+  await expect(page.locator('#wtHelpSection')).toContainText('Playback notifications use this account');
 });
 
 test('a language preference request failure does not prevent the room page loading', async ({ page }) => {
@@ -760,3 +760,78 @@ test('a language preference request failure does not prevent the room page loadi
   await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
   await expect(page.locator('#wtLanguageStatus')).toContainText('Could not save the notification language');
 });
+
+for (const [tag, expected] of [
+  ['zh-Hant', 'zh-Hant'], ['zh-TW', 'zh-Hant'], ['zh-HK', 'zh-Hant'],
+  ['zh-MO', 'zh-Hant'], ['zh_hant_hk', 'zh-Hant'], ['zh-Hans-TW', 'zh'],
+  ['zh-CN', 'zh'], ['zh-SG', 'zh'], ['en-US', 'en'], ['fr-FR', 'en']
+]) {
+  test(`host language ${tag} is normalized to ${expected}`, async ({ page }) => {
+    await page.goto('/?scenario=empty&locale=' + tag);
+    await expect.poll(() => page.evaluate(() => window.__wtFixture.languageCalls.at(-1)?.language)).toBe(expected);
+    await expect(page.locator('#wtRoomsHeading')).toHaveText(expected === 'zh-Hant' ? '我的房間' : expected === 'zh' ? '我的房间' : 'My rooms');
+  });
+}
+
+test('Traditional Chinese covers dynamic status, confirmation, feedback and switch', async ({ page }) => {
+  await page.goto('/?scenario=waiting&locale=zh-TW');
+  await expect(page.locator('.wt-roomCard')).toContainText('等待雙方開啟同一影片並開始播放');
+  await expect(page.locator('.wt-roomCard')).toContainText('房間控制');
+  await page.locator('.wt-roomCard button[data-act="delete"]').click();
+  await expect(page.getByRole('alertdialog', { name: '結束房間' })).toBeVisible();
+  await page.locator('[data-confirm=cancel]').click();
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('.wt-roomCard')).toContainText('Wait for both participants to open the same video');
+  await page.evaluate(() => { window.__wtFixture.locale = 'zh-HK'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('.wt-roomCard')).toContainText('等待雙方開啟同一影片並開始播放');
+});
+
+for (const [tag, expected] of [['zh-CN', 'zh'], ['zh-TW', 'zh-Hant'], ['en-US', 'en']]) {
+  test(`both creation paths submit ${expected}`, async ({ page }) => {
+    await page.goto('/?scenario=admin-member&locale=' + tag);
+    await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+    await page.evaluate(() => window.__wtFixture.setRooms([]));
+    await selectView(page, 'invite');
+    await page.locator('#wtCreate').click();
+    await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.find(x => x.method === 'POST' && x.path === 'WatchTogether/Rooms')?.body?.Language)).toBe(expected);
+    await page.locator('#wtInvitationAcceptCode').fill('abc123');
+    await page.locator('#wtAcceptInvitation').click();
+    await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.find(x => x.path.includes('/Accept'))?.body?.Language)).toBe(expected);
+  });
+}
+
+for (const locale of ['zh-CN', 'zh-TW', 'en-US']) {
+  test(`notification language hint is readable for ordinary users at 320px: ${locale}`, async ({ page }) => {
+    await page.setViewportSize({width: 320, height: 850});
+    await page.goto('/?scenario=empty&locale=' + locale);
+    const hint = page.locator('.wt-languageHint');
+    await expect(hint).toBeVisible();
+    await expect(hint).not.toBeEmpty();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const box = await hint.boundingBox();
+    expect(box.width).toBeLessThanOrEqual(320);
+  });
+}
+
+test('Traditional dictionary covers every source key and preserves placeholders', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../../src/EmbyWatchTogether/Web/Configuration/watchtogether.js'), 'utf8');
+  const english = source.split('var translations = { en: {')[1].split('}, "zh-Hant": {')[0];
+  const traditional = source.split('}, "zh-Hant": {')[1].split('} };')[0];
+  const en = JSON.parse('{' + english + '}');
+  const tw = JSON.parse('{' + traditional + '}');
+  expect(Object.keys(tw).sort()).toEqual(Object.keys(en).sort());
+  for (const key of Object.keys(en)) {
+    expect(typeof tw[key], key).toBe('string');
+    expect(tw[key], key).not.toBe('');
+    expect(tw[key].match(/\{\d+\}/g) || [], key).toEqual(key.match(/\{\d+\}/g) || []);
+  }
+});
+
+for (const [tag, expected] of [['zh-CN', '未知用户'], ['zh-TW', '未知使用者'], ['en-US', 'unknown user']]) {
+  test(`missing participant name uses localized fallback: ${tag}`, async ({ page }) => {
+    await page.goto('/?scenario=active&locale=' + tag);
+    await expect(page.locator('.wt-roomCard')).toBeVisible();
+    await page.evaluate(() => { const rooms = window.__wtFixture.getRooms(); rooms[0].Participants[0].Name = null; window.__wtFixture.setRooms(rooms); window.__wtFixture.refresh(); });
+    await expect(page.locator('.wt-roomCard')).toContainText(expected);
+  });
+}

@@ -6251,18 +6251,20 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(2, _messageIssuer.Issued.Count);
         }
 
-        [Fact]
-        public void DifferentVideoNotice_UsesEachRecipientsLanguage()
+        [Theory]
+        [InlineData("en", "Watch Together", "Different videos")]
+        [InlineData("zh-Hant", "一起觀看", "雙方開啟")]
+        public void DifferentVideoNotice_UsesEachRecipientsLanguage(string language, string header, string body)
         {
             var room = CreateRoom();
-            var engine = CreateEngine(notifyOnSyncActions: true, notificationLanguage: id => id == "u1" ? "en" : "zh");
+            var engine = CreateEngine(notifyOnSyncActions: true, notificationLanguage: id => id == "u1" ? language : "zh");
             SetCandidates(Snapshot("s1", "u1", paused: false, position: 0, itemId: "a"),
                 Snapshot("s2", "u2", paused: false, position: 0, itemId: "b"));
             engine.PollOnce(_clock.Now);
             var messages = _messageIssuer.Issued;
             Assert.Equal(2, messages.Count);
-            Assert.Equal("Watch Together", messages.Single(m => m.userId == "u1").header);
-            Assert.Contains("Different videos", messages.Single(m => m.userId == "u1").text);
+            Assert.Equal(header, messages.Single(m => m.userId == "u1").header);
+            Assert.Contains(body, messages.Single(m => m.userId == "u1").text);
             Assert.Equal("双方打开了不同视频，已暂停同步；请打开同一视频", messages.Single(m => m.userId == "u2").text);
         }
 

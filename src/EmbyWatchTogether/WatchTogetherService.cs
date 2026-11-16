@@ -20,6 +20,8 @@ namespace Emby.Plugins.WatchTogether
         public string[] ParticipantUserIds { get; set; }
 
         public string PrimaryUserId { get; set; }
+
+        public string Language { get; set; }
     }
 
     [Route("/WatchTogether/Invitations", "POST")]
@@ -41,6 +43,8 @@ namespace Emby.Plugins.WatchTogether
     public class AcceptInvitationRequest
     {
         public string Code { get; set; }
+
+        public string Language { get; set; }
     }
 
     [Route("/WatchTogether/Rooms/{Id}", "DELETE")]
@@ -132,7 +136,7 @@ namespace Emby.Plugins.WatchTogether
         {
             var userId = CurrentUserId();
             if (string.IsNullOrWhiteSpace(userId)) throw new UnauthorizedAccessException("authenticated user required");
-            if (request == null || (request.Language != "zh" && request.Language != "en"))
+            if (request == null || (request.Language != "zh" && request.Language != "en" && request.Language != "zh-Hant"))
                 throw new ArgumentException("unsupported language");
             var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
             if (plugin.NotificationLanguages == null) throw new ServiceUnavailableException("notification language storage unavailable");
@@ -189,7 +193,8 @@ namespace Emby.Plugins.WatchTogether
                 name: request.Name,
                 adminUserId: CurrentUserId(),
                 participantUserIds: request.ParticipantUserIds ?? Array.Empty<string>(),
-                primaryUserId: request.PrimaryUserId);
+                primaryUserId: request.PrimaryUserId,
+                language: request.Language);
 
             return new
             {
@@ -289,7 +294,8 @@ namespace Emby.Plugins.WatchTogether
                     string.Empty,
                     invitation.Name,
                     invitation.CreatorUserId,
-                    CurrentUserId()),
+                    CurrentUserId(),
+                    language: request?.Language),
                 DateTimeOffset.UtcNow);
             if (!result.Succeeded)
             {
@@ -1093,7 +1099,7 @@ namespace Emby.Plugins.WatchTogether
                 // A missing/deleted user must not make a room response fail.
             }
 
-            return "未知用户";
+            return null;
         }
 
         private static string ToPublicError(string error)

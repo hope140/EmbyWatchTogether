@@ -94,7 +94,8 @@ namespace Emby.Plugins.WatchTogether
             string adminUserId,
             IReadOnlyList<string> participantUserIds,
             string primaryUserId,
-            DateTimeOffset? now = null)
+            DateTimeOffset? now = null,
+            string language = null)
         {
             if (string.IsNullOrWhiteSpace(serverId))
             {
@@ -137,7 +138,7 @@ namespace Emby.Plugins.WatchTogether
                     id: Guid.NewGuid().ToString("N"),
                     serverId: serverId,
                     serverUrl: serverUrl ?? string.Empty,
-                    name: ResolveRoomName(name),
+                    name: ResolveRoomName(name, language),
                     adminUserId: adminUserId,
                     primaryUserId: primaryUserId,
                     participantUserIds: members,
@@ -165,7 +166,8 @@ namespace Emby.Plugins.WatchTogether
             string name,
             string creatorUserId,
             string accepterUserId,
-            DateTimeOffset? now = null)
+            DateTimeOffset? now = null,
+            string language = null)
         {
             if (string.IsNullOrWhiteSpace(serverId)) throw new ArgumentException("serverId is required", nameof(serverId));
             if (string.IsNullOrWhiteSpace(creatorUserId)) throw new ArgumentException("creatorUserId is required", nameof(creatorUserId));
@@ -187,7 +189,7 @@ namespace Emby.Plugins.WatchTogether
                     id: Guid.NewGuid().ToString("N"),
                     serverId: serverId,
                     serverUrl: serverUrl ?? string.Empty,
-                    name: ResolveRoomName(name),
+                    name: ResolveRoomName(name, language),
                     adminUserId: creatorUserId,
                     primaryUserId: creatorUserId,
                     participantUserIds: members,
@@ -205,7 +207,7 @@ namespace Emby.Plugins.WatchTogether
 
         // Called only while holding _lock, through persistence and registration.
         // Names are display metadata; explicit names retain their existing semantics.
-        private string ResolveRoomName(string name)
+        private string ResolveRoomName(string name, string language)
         {
             if (!string.IsNullOrWhiteSpace(name)) return name;
 
@@ -213,9 +215,10 @@ namespace Emby.Plugins.WatchTogether
                 _rooms.Values.Select(room => (room.Name ?? string.Empty).Trim()),
                 StringComparer.OrdinalIgnoreCase);
             var available = new List<string>();
+            var prefix = language == "en" ? "Room #" : language == "zh-Hant" ? "房間 #" : "房间 #";
             for (var number = 0; number < 10000; number++)
             {
-                var candidate = "房间 #" + number.ToString("D4", CultureInfo.InvariantCulture);
+                var candidate = prefix + number.ToString("D4", CultureInfo.InvariantCulture);
                 if (!used.Contains(candidate)) available.Add(candidate);
             }
             if (available.Count == 0)

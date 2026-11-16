@@ -32,6 +32,21 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal("zh", new NotificationLanguageStore(FilePath, Serializer().Object).GetLanguage("one"));
         }
 
+        private sealed class LegacyEntry { public string UserId { get; set; } public string Language { get; set; } }
+
+        [Fact]
+        public void TraditionalPreferenceUsesLegacyReadableLanguageAndSurvivesReload()
+        {
+            var store = new NotificationLanguageStore(FilePath, Serializer().Object);
+            store.SetLanguage("one", "zh-Hant");
+            var raw = JsonSerializer.Deserialize<List<NotificationLanguageEntry>>(File.ReadAllText(FilePath));
+            Assert.Equal("zh", raw.Single().Language);
+            Assert.Equal("Hant", raw.Single().Script);
+            var legacy = JsonSerializer.Deserialize<List<LegacyEntry>>(File.ReadAllText(FilePath));
+            Assert.Equal("zh", legacy.Single().Language);
+            Assert.Equal("zh-Hant", new NotificationLanguageStore(FilePath, Serializer().Object).GetLanguage("one"));
+        }
+
         [Fact]
         public void InvalidInputIsRejectedWithoutWriting()
         {
