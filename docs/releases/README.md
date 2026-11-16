@@ -4,7 +4,7 @@
 
 ## 当前正式版
 
-- [v1.7.1.0 发布说明](v1.7.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)：原生分页与媒体展示进入 stable。
+- [v1.7.3.0 发布说明](v1.7.3.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0)：正式版。
 
 ## 当前测试版
 
@@ -127,6 +127,3 @@
 - 重启、回滚或人工验收要求。
 ```
 
-## 待发布候选
-
-- [v1.7.3.0 说明](v1.7.3.0.md)：正式版候选，尚未发布。
