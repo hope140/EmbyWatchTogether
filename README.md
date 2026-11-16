@@ -4,7 +4,7 @@
 
 让同一台 Emby Server 上的两个人一起观看：创建房间，打开同一视频，由服务器协调播放状态和进度。插件运行在 Emby Server 内，无需额外同步服务。
 
-[安装](#安装) · [开始使用](#开始一起观看) · [兼容性与帮助](#兼容性与帮助) · [开发者文档](docs/README.md)
+[选择版本](#选择版本) · [安装](#安装) · [开始使用](#开始一起观看) · [语言](#界面语言与翻译) · [帮助](#兼容性与帮助)
 
 ![Watch Together 房间首页示意：视频展示区、双人状态与房间控制](docs/images/watch-together-preview.png)
 
@@ -15,7 +15,7 @@
 | 正式版 | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [说明](docs/releases/v1.7.3.0.md) | 希望使用 stable 版本的用户 |
 | 测试版 | [v1.7.3.1](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.1) · [说明](docs/releases/v1.7.3.1.md) | 愿意测试最新改进的用户 |
 
-v1.7.3.1 为 beta/prerelease，提供简体中文、繁体中文和英文界面及按账号保存的播放通知语言；播放通知尚未完成真实客户端验收。查看[全部版本说明](docs/releases/README.md)和[客户端验收范围](docs/client-compatibility.md)。
+测试版提供简体中文、繁体中文和英文界面及按账号保存的播放通知语言；播放通知尚未完成真实客户端验收。查看[全部版本说明](docs/releases/README.md)和[客户端兼容性记录](docs/client-compatibility.md)。
 
 ## 能做什么
 
@@ -26,7 +26,7 @@ v1.7.3.1 为 beta/prerelease，提供简体中文、繁体中文和英文界面�
 
 ## 安装
 
-1. 从 [Latest stable Release](https://github.com/hope140/EmbyWatchTogether/releases/latest) 下载 `EmbyWatchTogether.zip`。如需测试版，请从[测试版 Release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.1) 下载。
+1. 从上方所选版本的 Release 页面下载 `EmbyWatchTogether.zip`。
 2. 停止 Emby Server，解压并将 `Emby.Plugins.WatchTogether.dll` 直接放入 Emby Server 数据目录的 `plugins` 目录，不要再套一层子目录。
 3. 启动 Emby Server，在 **Dashboard → Plugins → Watch Together** 确认插件及设置页可用。
 
@@ -34,7 +34,7 @@ v1.7.3.1 为 beta/prerelease，提供简体中文、繁体中文和英文界面�
 
 ## 开始一起观看
 
-在 Emby 用户菜单打开 **Watch Together**。管理员可以使用三个页面：
+在 Emby 用户菜单打开 **Watch Together**（测试版中文服务器菜单显示“同映”，实际显示仍待确认）。管理员可以使用三个页面：
 
 | 页面 | 用途 |
 | --- | --- |
@@ -56,6 +56,16 @@ v1.7.3.1 为 beta/prerelease，提供简体中文、繁体中文和英文界面�
 
 Emby 的 **Dashboard → 计划任务 → Watch Together → Update Plugin** 可调整时间、禁用或手动执行更新；其中 Watch Together 是任务分类，Update Plugin 是任务名称。`stable` 通道使用 GitHub Latest；`beta` 从公开、非 draft 的 stable 和 prerelease 中选择最高规范版本。安装前会校验签名、大小、哈希、程序集名称和版本，安装成功后按提示重启 Emby。可选 GitHub Token 用于 beta 的 Releases API 查询，页面不回显 Token，匿名查询也可使用。
 
+## 界面语言与翻译
+
+**1.7.3.1 测试版：**页面优先读取 Emby 宿主提供的界面语言；不可用时依次尝试页面 culture、页面语言和浏览器语言。简体中文区域显示简体，繁体中文（如 zh-Hant、台湾、香港和澳门）显示繁体，其他语言目前显示英文。每次进入页面时重新读取语言；修改 Emby 语言后可重新进入页面或刷新。部分客户端或宿主可能不提供该接口，回退语言未必与 Emby 设置一致。
+
+播放通知使用本账号上次成功打开此页面时的语言；多设备以服务器最后收到的保存为准，未保存时默认简体中文。管理员自定义消息保留原文，插件更新的管理员广播仍为中文。
+
+新房间留空名称时按创建页面的语言生成并固定；邀请码建房使用接受页面语言，旧房间及自定义名称不会改名。保存语言失败时页面会提示并沿用此前语言。
+
+欢迎贡献其他语言：请参阅[翻译说明](docs/translations.md)。
+
 ## 兼容性与帮助
 
 - 一个房间恰好两人，双方须登录同一台 Emby Server；不支持多人房间或跨服务器同步。
@@ -66,9 +76,3 @@ Emby 的 **Dashboard → 计划任务 → Watch Together → Update Plugin** 可
 开发者和维护者请从[文档索引](docs/README.md)进入，构建、API 和排错细节见[技术文档](docs/technical.md)。
 
 项目按 [Apache License 2.0](LICENSE) 许可；文档图片的来源与许可见[图像说明](docs/images/README.md)。
-
-## 界面语言与翻译
-
-页面优先读取 Emby 宿主提供的界面语言；不可用时依次尝试页面 culture、页面语言和浏览器语言。简体中文区域显示简体，繁体中文（如 zh-Hant、台湾、香港和澳门）显示繁体，其他语言目前显示英文。每次进入页面时重新读取语言；修改 Emby 语言后可重新进入页面或刷新。部分客户端或宿主可能不提供该接口，回退语言未必与 Emby 设置一致。播放通知使用本账号上次成功打开此页面时的语言；多设备以服务器最后收到的保存为准，未保存时默认简体中文。新房间留空名称时按创建页面的语言生成并固定；邀请码建房使用接受页面语言，旧房间及自定义名称不会改名。保存失败时页面会提示并沿用此前语言。管理员自定义消息保留原文，插件更新的管理员广播仍为中文。
-
-欢迎贡献其他语言：请参阅[翻译说明](docs/translations.md)。

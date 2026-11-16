@@ -4,7 +4,7 @@
 
 Watch together with another person on the same Emby Server. Create a room, open the same video, and let the server coordinate playback and position. The plugin runs inside Emby Server and needs no separate synchronization service.
 
-[Install](#install) · [Get started](#get-started) · [Compatibility and help](#compatibility-and-help) · [Developer documentation](docs/README.md)
+[Choose a version](#choose-a-version) · [Install](#install) · [Get started](#get-started) · [Language](#interface-language-and-translations) · [Help](#compatibility-and-help)
 
 ![Illustration of the Watch Together room page](docs/images/watch-together-preview.png)
 
@@ -13,9 +13,9 @@ Watch together with another person on the same Emby Server. Create a room, open 
 | Channel | Current version | For whom |
 | --- | --- | --- |
 | Stable | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [notes](docs/releases/v1.7.3.0.md) | Users who prefer stable releases |
-| Beta | [v1.7.2.20](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20) · [notes](docs/releases/v1.7.2.20.md) | Users testing recent improvements |
+| Beta | [v1.7.3.1](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.1) · [notes](docs/releases/v1.7.3.1.md) | Users testing recent improvements |
 
-The beta adjusts the participant resync button and administrator settings text without changing permissions or synchronization. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
+The beta adds Simplified Chinese, Traditional Chinese, and English interfaces and saves playback-notification language per account. Playback notifications have not yet been accepted in real-client testing. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
 
 ## What it does
 
@@ -26,7 +26,7 @@ The beta adjusts the participant resync button and administrator settings text w
 
 ## Install
 
-1. Download `EmbyWatchTogether.zip` from the [latest stable release](https://github.com/hope140/EmbyWatchTogether/releases/latest), or choose the [beta release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20) for testing.
+1. Download `EmbyWatchTogether.zip` from the release page for the version chosen above.
 2. Stop Emby Server. Extract the archive and place `Emby.Plugins.WatchTogether.dll` directly in the server data directory's `plugins` folder, without an extra subfolder.
 3. Start Emby Server and check **Dashboard → Plugins → Watch Together** for the plugin and its settings page.
 
@@ -34,7 +34,15 @@ Back up the old DLL before upgrading so you can roll back. The package contains 
 
 ## Get started
 
-Open **Watch Together** from the Emby user menu. Administrators can use the room, creation/invitation, and settings pages; regular users can access rooms and invitations. Administrators can also enter from the plugin configuration page.
+Open **Watch Together** from the Emby user menu (on a Chinese-language server, the beta menu is named “同映”; actual display remains unconfirmed). Administrators can use three pages:
+
+| Page | Purpose |
+| --- | --- |
+| Rooms | View status, join or leave, control playback, resync, and view diagnostics. |
+| Create and invite | Create a room for two users and select a primary, or create and accept invitations. |
+| Settings | Configure stop behavior, notifications, and the update channel. |
+
+Regular users can access rooms and invitations. Administrators can also enter from the plugin configuration page.
 
 1. An administrator creates a room, or one user creates an invitation code and sends it promptly to the other user to accept.
 2. Both users sign in to the same server and open the same video on their clients. Join the room if needed.
@@ -48,6 +56,16 @@ Administrators can control whether stopping pauses the other participant, stop n
 
 Use **Dashboard → Scheduled Tasks → Watch Together → Update Plugin** to schedule, disable, or run updates. The `stable` channel uses GitHub Latest; `beta` selects the highest canonical version among public non-draft stable and prerelease releases. The plugin verifies the signature, size, hash, assembly name, and version before installation. Restart Emby when prompted. An optional GitHub token is used for beta Releases API queries; it is not displayed again, and anonymous queries also work.
 
+## Interface language and translations
+
+**Version 1.7.3.1 beta:** The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Simplified Chinese and Traditional Chinese locales use their respective scripts; other locales currently use English. The language is checked when the page is opened; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting.
+
+Playback notifications use the account’s language from the last successful page visit. Across devices, the last save received by the server wins; the default is Simplified Chinese. Custom administrator messages remain unchanged; administrator update broadcasts remain Chinese.
+
+An empty name is generated in the creating page’s language and remains fixed; an invitation creates the room in the accepting page’s language. Existing and custom room names are not renamed. If saving the language fails, the page reports it and the previous language remains in effect.
+
+Contributions for other languages are welcome; see the [translation guide](docs/translations.md).
+
 ## Compatibility and help
 
 - Each room has exactly two users on the same Emby Server. Multiple participants and cross-server synchronization are not supported.
@@ -58,9 +76,3 @@ Use **Dashboard → Scheduled Tasks → Watch Together → Update Plugin** to sc
 Developers and maintainers can start at the [documentation index](docs/README.md); build, API, and troubleshooting details are in the [technical documentation](docs/technical.md).
 
 The project is licensed under [Apache License 2.0](LICENSE). See the [image notes](docs/images/README.md) for image sources and rights.
-
-## Interface language and translations
-
-The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Simplified Chinese and Traditional Chinese locales use their respective scripts; other locales currently use English. The language is checked when the page is opened or resumed; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting. Playback notifications use the account’s language from the last successful page visit. Across devices, the last save received by the server wins; the default is Simplified Chinese. An empty name is generated in the creating page’s language and remains fixed; an invitation creates the room in the accepting page’s language. Existing and custom room names are not renamed. If saving fails, the page reports it and the previous language remains in effect. Custom administrator messages remain unchanged; administrator update broadcasts remain Chinese.
-
-Contributions for other languages are welcome; see the [translation guide](docs/translations.md).
