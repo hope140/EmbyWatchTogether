@@ -43,7 +43,7 @@ CI 记录 workflow、run/job 链接、实际受测 SHA、触发事件和结论�
 ```text
 结果与状态: <完成 | 部分完成/受阻；可观察结果>
 任务/边界: <本次授权范围；验收标准>
-执行设置: <实际 model / effort；Standard，Fast 关闭；未知项明确标注>
+执行设置: <按需记录实际可核实的模型、推理和服务模式；未知项明确标注>
 源码身份: <worktree、branch、固定 base SHA、HEAD SHA；staged/unstaged/untracked 状态>
 提交与远端: <本地 commit 授权及 SHA；push/PR/merge/发布是否执行>
 修改文件: <清单与原因>

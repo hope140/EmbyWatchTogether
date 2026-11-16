@@ -11,7 +11,7 @@ const source = 'a'.repeat(40), merge = 'b'.repeat(40), head = 'c'.repeat(40);
 const notes = Buffer.from('# 正式版\n\n中文发布说明：保持原文。\n');
 const requestPath = '.github/release-requests/v1.7.1.0.json';
 const request = { schema: 1, tag: 'v1.7.1.0', channel: 'stable', keyId: 'prod-2026-08',
-  sourceSha: source, ciRunId: 100, title: 'Watch Together v1.7.1.0 正式版',
+  sourceSha: source, ciRunId: 100, title: 'v1.7.1.0 正式版',
   notesPath: 'docs/releases/v1.7.1.0.md', notesSha256: sha256(notes) };
 const json = r => JSON.stringify(r, null, 2) + '\n';
 const run = { repository: repo, head_repository: repo, head_sha: source, head_branch: 'main',
@@ -99,6 +99,14 @@ for (const [field, value] of [['schema', 2], ['tag', 'v01.7.1.0'], ['tag', 'v1.7
   test(`invalid ${field}: ${JSON.stringify(value)}`, () => assert.throws(() =>
     parseRequest(json({ ...request, [field]: value }), requestPath)));
 }
+test('new request title exactly matches tag and channel', () => {
+  assert.equal(parseRequest(json(request), requestPath).title, 'v1.7.1.0 正式版');
+  const beta = { ...request, channel: 'beta', title: 'v1.7.1.0 测试版' };
+  assert.equal(parseRequest(json(beta), requestPath).title, beta.title);
+  for (const title of ['v1.7.1.0 测试版', 'v1.7.1.1 正式版', 'Watch Together v1.7.1.0 正式版', 'v1.7.1.0  正式版'])
+    assert.throws(() => parseRequest(json({ ...request, title }), requestPath), /title must match/);
+  assert.throws(() => parseRequest(json({ ...beta, title: request.title }), requestPath), /title must match/);
+});
 test('extra, duplicate JSON keys and unsafe request paths are rejected', () => {
   assert.throws(() => parseRequest(json({ ...request, command: 'run me' }), requestPath));
   assert.throws(() => parseRequest(json(request).replace('"schema": 1,', '"schema": 1,\n  "schema": 1,'), requestPath));
@@ -248,6 +256,14 @@ test('a unique retry must add a byte-identical request and cannot modify reviewe
   };
   const f = prepare();
   assert.equal((await validate(f.args)).path, retryPath);
+  const legacy = prepare();
+  const legacyBytes = Buffer.from(json({ ...request, title: 'Watch Together v1.7.1.0 正式版' })).toString('base64');
+  legacy.data[`/contents/${retryPath}?ref=${merge}`].content = legacyBytes;
+  legacy.data[`/contents/${requestPath}?ref=${'e'.repeat(40)}`].content = legacyBytes;
+  assert.equal((await validate(legacy.args)).request.title, 'Watch Together v1.7.1.0 正式版');
+  const forgedLegacy = prepare();
+  forgedLegacy.data[`/contents/${retryPath}?ref=${merge}`].content = legacyBytes;
+  await assert.rejects(validate(forgedLegacy.args), /byte-identical/);
   const changedCurrent = prepare();
   changedCurrent.data[`/contents/${requestPath}?ref=${merge}`].content = Buffer.from('Changed later on main').toString('base64');
   assert.equal((await validate(changedCurrent.args)).path, retryPath);
