@@ -37,3 +37,17 @@ name-preview3 本地源码 `283013f` 与 PR #63 `baa47ab` 文件树 `4d333907a87
 ## 如何补充证据
 
 记录操作时间及其时区、服务器/双方客户端版本、插件版本与源码或 DLL 哈希、操作步骤、预期和实际结果。优先附插件导出的脱敏诊断及截图，不上传 Token 或完整未脱敏日志。普通地址栏请求缺少页面认证头时的 401，不能替代已登录页面验收。连续观看的口述观察可保留，但缺少具体构建、媒体与时段时不扩展为全场景通过。
+
+## 长暂停与播放会话调查（2026-11-13，未解决）
+
+当时的决策是暂缓 EWT 通用保活；在没有可靠确认客户端仍处于同一媒体暂停状态的方式之前，不由 EWT 无限期伪造心跳。个人 Windows 客户端的上报方案单独处理，不作为 EWT 的通用依赖。本记录不表示问题已修复或全部客户端均有相同行为。
+
+原调查分支 `docs/pause-keepalive-investigation` 的 `e1a5073`、`a058c5c` 记录了下列观察；其中本地客户端和 SDK 分析原件本次未重新取得，版本范围及结论待复核：
+
+- 原记录称，对 Emby Windows 2.317.2.0 包的静态分析发现：满足服务器版本 4.8.0.56 条件时，暂停状态的定时进度上报被跳过；暂停操作本身可单独上报。这不是现场网络抓包，也不能推断其他客户端。
+- 原记录称，对 Emby Server SDK 4.9.0.52-beta 和 4.9.1.90 的 `MediaBrowser.Controller.dll` 静态分析发现，播放会话最后一次 Ping 超过约 60 秒后可能自动停止，`Ping(playSessionId)` 刷新已有播放会话而不重建会话；现场曾观察到暂停上报后约 60 秒被服务器清理。现场服务器程序集与所分析 SDK 是否完全一致尚未核实，不能将该阈值推广到其他版本。
+- 原记录中的用户反馈是：iOS Emby 作为控制端控制另一台播放设备，目标播放会话失活后官方远控失效；iOS 作为播放端长暂停的情况未测试，也未确定控制连接是否失效。
+
+当前项目代码可独立确认：[SessionSelector](../src/EmbyWatchTogether/SessionSelector.cs) 在提供当前时间时按 `LastActivityDate` 筛选过期设备会话，默认阈值为 60 秒；缺省时间戳不会按此规则排除。[SessionSnapshot](../src/EmbyWatchTogether/SessionSnapshot.cs) 从服务器会话读取媒体、暂停状态和活动时间。Emby 的公开 API 列出 [`SessionInfo.Ping(string)`](https://dev.emby.media/reference/pluginapi/MediaBrowser.Controller.Session.SessionInfo.html) 和 [`ISessionController.IsSessionActive`](https://dev.emby.media/reference/pluginapi/MediaBrowser.Controller.Session.ISessionController.html)，但其签名本身不足以证明播放会话、设备活动时间和远控连接的更新关系。保住播放记录也不能单独证明 EWT 能选中会话或远控可用。
+
+仍需确认暂停时是否存在其他上报通道、现场远控失效与播放会话和控制连接各自的关系，以及不同客户端和服务器版本的行为。后续调查应分别记录播放会话和控制连接，覆盖长暂停、恢复、停止、切集、断网、客户端退出或崩溃及重连，并保留版本、时间和脱敏证据；不要仅凭缺少 HTTP 请求断定没有 WebSocket 上报。
