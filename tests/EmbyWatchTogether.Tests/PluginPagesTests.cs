@@ -3,13 +3,60 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Configuration;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Drawing;
+using MediaBrowser.Model.Serialization;
+using Moq;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
 {
+    [Collection("Plugin singleton")]
     public class PluginPagesTests
     {
+        [Theory]
+        [InlineData("zh-CN", "同映")]
+        [InlineData("zh-Hant", "同映")]
+        [InlineData("zh-TW", "同映")]
+        [InlineData(" ZH-hk ", "同映")]
+        [InlineData("zh", "同映")]
+        [InlineData("en-US", "Watch Together")]
+        [InlineData("ja-JP", "Watch Together")]
+        [InlineData("zhfake", "Watch Together")]
+        [InlineData("", "Watch Together")]
+        [InlineData(null, "Watch Together")]
+        public void UserMenu_UsesServerCultureOnFirstRegistration(string culture, string expected)
+        {
+            var manager = new Mock<IServerConfigurationManager>();
+            manager.SetupGet(x => x.Configuration).Returns(new ServerConfiguration { UICulture = culture });
+            var plugin = new Plugin(Mock.Of<IApplicationPaths>(), Mock.Of<IXmlSerializer>(), manager.Object);
+            var pages = plugin.GetPages().ToList();
+
+            Assert.Equal(expected, pages.Single(p => p.EnableInUserMenu).DisplayName);
+            Assert.Equal("Watch Together", plugin.Name);
+            Assert.Equal(Plugin.PluginId, plugin.Id);
+            Assert.Equal("Watch Together", pages.Single(p => p.Name == "WatchTogetherInviteV30").DisplayName);
+            Assert.Equal("Watch Together", pages.Single(p => p.Name == "WatchTogetherSettingsV30").DisplayName);
+        }
+
+        [Fact]
+        public void UserMenu_RereadsServerCultureAndFallsBackWhenUnavailable()
+        {
+            var configuration = new ServerConfiguration { UICulture = "zh-CN" };
+            var manager = new Mock<IServerConfigurationManager>();
+            manager.SetupGet(x => x.Configuration).Returns(configuration);
+            var plugin = new Plugin(Mock.Of<IApplicationPaths>(), Mock.Of<IXmlSerializer>(), manager.Object);
+            Assert.Equal("同映", plugin.GetPages().Single(p => p.EnableInUserMenu).DisplayName);
+            configuration.UICulture = "en-US";
+            Assert.Equal("Watch Together", plugin.GetPages().Single(p => p.EnableInUserMenu).DisplayName);
+            manager.SetupGet(x => x.Configuration).Throws<System.InvalidOperationException>();
+            Assert.Equal("Watch Together", plugin.GetPages().Single(p => p.EnableInUserMenu).DisplayName);
+            var withoutManager = new Plugin(Mock.Of<IApplicationPaths>(), Mock.Of<IXmlSerializer>());
+            Assert.Equal("Watch Together", withoutManager.GetPages().Single(p => p.EnableInUserMenu).DisplayName);
+        }
+
         [Fact]
         public void PluginAssembly_EmbedsWatchTogetherPageAndController()
         {
