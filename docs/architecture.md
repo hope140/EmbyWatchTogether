@@ -47,6 +47,8 @@ Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用
 
 本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV30`、`WatchTogetherInviteV30`、`WatchTogetherSettingsV30`，共享 `WatchTogetherNativeV30.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
+用户菜单名在 `GetPages()` 注册时读取服务器配置 `UICulture`：中文显示“同映”，其他或不可读取时显示“Watch Together”。插件身份不变，页面和播放通知语言仍按用户语言处理。配置变更后宿主是否重新读取菜单注册尚未实机确认，可能需要重启；单元测试不能代替宿主验证。
+
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
 
 S124 已随 v1.7.0.1 发布，使用 V16 页面/控制器缓存键，去除 Dashboard 全局依赖并使用宿主相对路由链接；四个单选控件沿用 Madby 普通单选的宿主默认菜单模式。旧 Theater 的直属箭头按控件 grid 行居中，新版 Web 保留其包装层定位；变更证据和真实验收边界见经验记录第 31、32 节。
