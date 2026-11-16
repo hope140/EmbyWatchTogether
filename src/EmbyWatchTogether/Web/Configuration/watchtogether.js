@@ -289,7 +289,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "房间": "Rooms",
         "刷新": "Refresh",
         "通知语言未能保存，播放通知将继续使用之前的语言。": "Could not save the notification language. Playback notifications will continue using the previous language.",
-        "播放通知语言：本账号上次打开此页面时的语言。": "Playback notifications use this account’s language from the last time this page was opened.",
         "观看提示": "Viewing Tips",
         "创建房间并选择两名参与者。": "Create a room and select two participants.",
         "两人分别登录 Emby，打开同一视频。": "Both participants sign in to Emby and open the same video.",
@@ -739,7 +738,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "房间": "房間",
         "刷新": "重新整理",
         "通知语言未能保存，播放通知将继续使用之前的语言。": "通知語言未能儲存，播放通知將繼續使用之前的語言。",
-        "播放通知语言：本账号上次打开此页面时的语言。": "播放通知語言：本帳號上次開啟此頁面時的語言。",
         "观看提示": "觀看提示",
         "创建房间并选择两名参与者。": "建立房間並選擇兩名參與者。",
         "两人分别登录 Emby，打开同一视频。": "兩人分別登入 Emby，開啟同一影片。",
@@ -2241,9 +2239,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV29',
-        invite: 'WatchTogetherInviteV29',
-        settings: 'WatchTogetherSettingsV29'
+        rooms: 'WatchTogetherRoomsV30',
+        invite: 'WatchTogetherInviteV30',
+        settings: 'WatchTogetherSettingsV30'
     };
 
     function currentRoute(page) {
