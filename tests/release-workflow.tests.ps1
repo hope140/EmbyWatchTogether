@@ -299,7 +299,7 @@ Assert-Matches -Text $runText -Pattern '(?s)--notes-file.*\$releaseNotesPath' -M
 Assert-NotMatches -Text $runText -Pattern '--generate-notes' -Message 'The release creation command must not generate unreviewed notes.'
 Assert-NotMatches -Text $runText -Pattern '(?im)^\s*(?:Write-Output|Write-Host|echo)\b.*\$(?:releaseNotesText|releaseNotesBytes)\b' -Message 'The workflow must not echo release notes content.'
 Assert-Matches -Text $runText -Pattern '(?s)''--title''.*\$releaseTitle' -Message 'The release command must use the reviewed title.'
-Assert-Matches -Text $runText -Pattern '''Release '' \+ \$env:RELEASE_TAG' -Message 'The manual title fallback must remain.'
+Assert-Matches -Text $runText -Pattern '(?s)\$suffix\s*=\s*if\s*\(\$env:RELEASE_CHANNEL\s+-eq\s+''stable''\).*?''正式版''.*?''测试版''.*?\$env:RELEASE_TAG\s*\+\s*'' ''\s*\+\s*\$suffix' -Message 'The manual title must use the tag and Chinese channel suffix.'
 Assert-Matches -Text $runText -Pattern 'RELEASE_NOTES_SHA256' -Message 'Request notes must be bound to their reviewed hash.'
 $releaseRunBlocks = @($runBlocks | Where-Object { $_ -match 'gh\s+release\s+create' })
 Assert-Equal -Expected 1 -Actual $releaseRunBlocks.Count -Message 'The workflow must have exactly one release creation step.'

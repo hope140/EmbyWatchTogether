@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0)，当前 beta 测试线为 [v1.7.2.20](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20)。本次调整按钮与设置页文案，不修改同步引擎或权限规则；公开发布状态见版本链接，证据边界见[兼容性记录](client-compatibility.md)。
+当前公开正式版与测试版见[发布日志](releases/README.md)；本文描述本分支代码，可能包含测试版功能。真实客户端验收边界见[兼容性记录](client-compatibility.md)和相应版本说明。
 
 1.7.2.19 源自[可选房间名预览](maintenance/optional-room-name-preview.md)：空白名称在注册锁内从未占用的四位编号中随机选择并持久化，邀请只在接受创建时分配；已有名称不迁移。三页和控制器资源键为 V23。
 

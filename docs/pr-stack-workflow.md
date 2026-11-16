@@ -2,7 +2,7 @@
 
 ## 目的与适用条件
 
-本流程用于复杂、可拆分的软件变更，按 [`AGENTS.md`](../AGENTS.md) 的职责与门禁执行；worker 只执行已固化 contract 的窄任务。任务 Tier、模型建议和回退规则见 [`ai-model-policy.md`](ai-model-policy.md)，验证范围和报告格式见 [`validation-and-handoff.md`](validation-and-handoff.md)。低风险任务可由主线程单代理闭环，不为拆分而拆分。
+本流程用于复杂、可拆分的软件变更，按 [`AGENTS.md`](../AGENTS.md) 的职责与门禁执行；worker 只执行已固化 contract 的窄任务。任务 Tier 和执行选择原则见 [`ai-model-policy.md`](ai-model-policy.md)，验证范围和报告格式见 [`validation-and-handoff.md`](validation-and-handoff.md)。低风险任务可由主线程单代理闭环，不为拆分而拆分。
 
 PR Stack 是按依赖排列、可独立审核和回滚的分支/worktree/提交序列。创建 PR、push、合并、发布和部署仍须当前用户明确授权；派发模板中的“提交要求”必须明确写出是否允许本地 commit，不能由 worker 自授。
 
@@ -24,7 +24,7 @@ git log --oneline --decorate -10
 
 ## 阶段二：输出 Stack 计划
 
-复杂需求实现前必须逐项输出：
+小改动先说明范围与适用验证；涉及多任务依赖、共享资源或高风险等复杂需求，实现前必须逐项输出：
 
 ```text
 Stack: S<n> - <名称>
@@ -37,8 +37,8 @@ Stack: S<n> - <名称>
 文件所有权: <本 Stack 独占的文件/目录>
 实现边界: <要做与明确不做>
 任务 Tier: <Tier 1 | Tier 2 | Tier 3，附风险/不确定性/跨模块/Playback-Session 依据>
-模型建议: <仅作为候选，运行时核验后由主线程选择>
-执行设置: <已核实的 model / effort；Standard，Fast 关闭>
+执行选择: <按风险、用户偏好与运行时能力选择>
+执行设置: <按需记录实际可核实的模型、推理和服务模式；未知注明>
 验收标准: <可观察、可验证条件>
 测试命令: <可直接运行的命令>
 回滚方式: <revert 独立 commit 或移除补丁>
@@ -81,7 +81,7 @@ worktree/分支: <绝对路径> / <branch>
 禁止修改: <...>
 任务边界: <实现内容与不做内容>
 任务 Tier/原因: <Tier 1/2/3 及风险依据>
-执行设置: <实际 model / effort；Standard，Fast 关闭；不可用时返回主线程>
+执行设置: <按需记录实际可核实的模型、推理和服务模式；不可用时返回主线程>
 文件所有权: <本 Stack 独占文件>
 依赖/并行/回滚: <前置依赖、是否并行及回滚方式>
 上下文事实/假设: <分别列出>

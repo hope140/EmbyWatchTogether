@@ -753,7 +753,8 @@ jobs:
               }
           }
           $releaseTitle = if ([string]::IsNullOrEmpty($env:RELEASE_TITLE)) {
-              'Release ' + $env:RELEASE_TAG
+              $suffix = if ($env:RELEASE_CHANNEL -eq 'stable') { '正式版' } else { '测试版' }
+              $env:RELEASE_TAG + ' ' + $suffix
           } else { $env:RELEASE_TITLE }
 
           $releaseArguments = @(

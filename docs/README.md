@@ -18,5 +18,6 @@
 - [AGENTS](../AGENTS.md)、[PR Stack 工作流](pr-stack-workflow.md)、[模型与任务 Tier](ai-model-policy.md)。
 - [验证与交接](validation-and-handoff.md)、[浏览器测试](../tests/ui/README.md)、[诊断日志](handoff-diagnostics.md)。
 - [版本规则](versioning.md)、[审核式发布请求](release-requests.md)；构建和手动签名发布入口见[技术文档](technical.md)。
+- [协作与发布规则审视](maintenance/rules-review-2026-11.md)：规则来源、保留理由和待决建议。
 
 维护记录写清日期、源码和证据层次。已完成过程进入历史或维护索引；新决策更新路线图/ADR，真实验收更新兼容性记录。发布、部署和客户端验收分别记录，不以其中一项替代另一项。

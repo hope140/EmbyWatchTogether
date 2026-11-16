@@ -8,9 +8,11 @@
 
 ## 当前测试版
 
-- [v1.7.2.20 测试版说明](v1.7.2.20.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20)：重新同步按钮和管理员设置页文案。
+- [v1.7.3.1 测试版说明](v1.7.3.1.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.1)：多语言界面与按账号保存的播放通知语言；播放通知尚待真实客户端验收。
 
 ## 历史发布
+
+- [v1.7.2.20 测试版说明](v1.7.2.20.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20)：重新同步按钮和管理员设置页文案。
 
 - [v1.7.2.19 测试版说明](v1.7.2.19.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.19)：可选房间名称、随机四位编号与邀请复制反馈。
 
@@ -106,6 +108,8 @@
 - 新 tag 使用四段数字格式，例如 `v1.6.1.0`；不得添加 `-beta` 或 `-rc` 后缀。
 - 插件默认使用 `stable`；管理员可在配置页选择 `beta`，更新任务按所选通道获取并安装。
 - 静态测试、自动安装和维护者检查不等于真实客户端验收；Release Notes 只描述已有证据。
+
+新 Release 标题使用 `<tag> 正式版`（stable）或 `<tag> 测试版`（beta），tag 与后缀之间为一个半角空格；旧审核请求的重试沿用原始标题。
 
 每个新建的 stable 或 beta tag 必须对应一个 `docs/releases/v<version>.md` 文件。正文使用简体中文，面向普通用户说明用户可见变化、配置兼容性和升级注意事项，不包含内部协作过程、敏感信息或未经验证的夸大描述。历史公开 Release 若仓库没有对应本地文件，索引直接链接其 GitHub Release 页面；这不改变新版本 Release Notes 门禁。
 
