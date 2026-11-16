@@ -121,8 +121,39 @@ namespace Emby.Plugins.WatchTogether
 
         public bool IsParticipantResync { get; set; }
 
+        internal HandoffPrimaryHoldState PrimaryHold { get; set; }
+
         public ISet<string> SupersededTargetItemIds { get; } =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal sealed class HandoffPrimaryHoldState
+    {
+        public bool PrimaryPaused { get; set; }
+        public DateTimeOffset ObservedAtUtc { get; set; }
+        public long InitialPositionTicks { get; set; }
+        public string PrimaryMediaSourceId { get; set; }
+        public long PrimaryRunTimeTicks { get; set; }
+        public DateTimeOffset? PauseIssuedAtUtc { get; set; }
+        public int PauseAttempts { get; set; }
+        public bool Acknowledged { get; set; }
+        // After a hold ACK is resumed, the operation becomes observation-only.
+        public bool ResumeObserved { get; set; }
+        public SessionSnapshot PrimaryPlayback { get; set; }
+        public SessionSnapshot LastPrimary { get; set; }
+        public DateTimeOffset LastPrimaryAtUtc { get; set; }
+        public SessionSnapshot ParticipantPlayback { get; set; }
+        public SessionSnapshot LastParticipant { get; set; }
+        public DateTimeOffset LastParticipantAtUtc { get; set; }
+        public SessionSnapshot ResumePrimary { get; set; }
+        public SessionSnapshot ResumeParticipant { get; set; }
+        public DateTimeOffset? ResumePairObservedAtUtc { get; set; }
+        public long PausedPositionTicks { get; set; }
+        public string ParticipantSessionId { get; set; }
+        public DateTimeOffset? ParticipantObservedAtUtc { get; set; }
+        public long ParticipantInitialPositionTicks { get; set; }
+        public string ParticipantMediaSourceId { get; set; }
+        public long ParticipantRunTimeTicks { get; set; }
     }
 
     /// <summary>

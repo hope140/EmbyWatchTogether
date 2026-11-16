@@ -109,5 +109,9 @@ namespace Emby.Plugins.WatchTogether
         // next explicit resync to recover.
         public const double MediaHandoffTimeoutSeconds = 10.0;
 
+        // Observe coherent new-item playback before pausing a loading player.
+        // This is a server-side startup heuristic, not proof of a rendered frame.
+        public const double MediaHandoffStartupObservationSeconds = 1.0;
+
     }
 }

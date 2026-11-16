@@ -48,4 +48,13 @@ V12 新增 `page-actions.spec.js`，覆盖创建邀请码、接受邀请、管�
 
 S124 V14 候选将默认 fixture 对齐当前 Server Web，不提供旧的 `Dashboard` 全局；新增初始化、分页和离页回归，以及保留旧宿主全局情况下的下拉选项稳定性回归。导航解析 anchor pathname/query，复现宿主对相对链接的处理，避免把 `#!/` 链接直接赋给地址栏掩盖 emby-linkbutton 路由错误。刷新或编辑名称保留未变化的 option，修改参与者仍更新主用户选项与有效选择。当前总计 84 个浏览器用例；这些检查不代表已复现或验收真实客户端的临时卡住问题。
 
-当前 V16 的 `select-controls.spec.js` 包含五项检查：四个控件沿用 Madby 的宿主默认单选模式，以及 `select_host=legacy|modern` 下 390/1280px 的箭头中线定位。fixture 仅按已核对的两种宿主 DOM/CSS 建立几何夹具；长标签换行后仍要求箭头偏差小于 1px，不能用此证明真实菜单打开或客户端运行验收。当前合计 89 个浏览器用例。
+当前 V19 的 `select-controls.spec.js` 包含五项检查：四个控件沿用 Madby 的宿主默认单选模式，以及 `select_host=legacy|modern` 下 390/1280px 的箭头中线定位。fixture 仅按已核对的两种宿主 DOM/CSS 建立几何夹具；长标签换行后仍要求箭头偏差小于 1px，不能用此证明真实菜单打开或客户端运行验收。
+
+`create-feedback.spec.js` 覆盖当前创建页的可见成功结果、POST 成功后列表刷新失败、真正的 POST 失败、离页后的旧请求隔离及反馈清理。当前合计 96 个浏览器用例。
+
+`stop-recovery.spec.js` 覆盖停止后同视频大进度差的可见恢复指引、参与者重新同步可能切换视频的说明、未点击时不发送操作、点击后单次请求及新增换片/确认事件的脱敏导出。它不证明真实双端恢复或原现场根因。
+
+
+### 宿主确认兼容性
+
+`confirmation.spec.js` 使用 fixture 的异步 `confirm` 模块契约（确认 resolve、取消 reject），同时令 native `window.confirm` 抛错，以覆盖原生脚本对话框不可用的宿主。覆盖四类确认、加载失败、重复点击、账号/服务器/页面/房间状态失效和普通控制无额外确认。fixture 的简易对话框不是 Emby 真实组件，不能据此宣称宿主视觉/焦点/返回键验收；需另在 Web、新 Windows 客户端及旧客户端确认。

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Updates;
@@ -18,6 +19,11 @@ namespace Emby.Plugins.WatchTogether
     /// </summary>
     public sealed class PluginUpdateManager : IDisposable
     {
+        // Scheduled runs create fresh update managers. Keep one notification
+        // flight per server until its transport actually ends, even on timeout.
+        private static readonly ConditionalWeakTable<ISessionManager, BoundedSessionDispatch>
+            AdminNotificationDispatchers = new ConditionalWeakTable<ISessionManager, BoundedSessionDispatch>();
+
         private readonly object _stateLock = new object();
         private readonly SemaphoreSlim _operationGate = new SemaphoreSlim(1, 1);
         private readonly IPluginReleaseClient _releaseClient;
@@ -26,6 +32,7 @@ namespace Emby.Plugins.WatchTogether
         private readonly ISessionManager _sessionManager;
         private readonly Func<PluginConfiguration> _configurationAccessor;
         private readonly Action _saveConfiguration;
+        private readonly Action<string> _savePendingUpdateVersion;
         private readonly Func<Version> _currentVersionAccessor;
         private readonly ILogger _logger;
         private readonly CancellationTokenSource _lifetimeCancellation = new CancellationTokenSource();
@@ -56,6 +63,10 @@ namespace Emby.Plugins.WatchTogether
                 logManager,
                 sessionManager)
         {
+            if (_saveConfiguration != null)
+            {
+                _savePendingUpdateVersion = plugin.SavePendingUpdateVersion;
+            }
         }
 
         public PluginUpdateManager(
@@ -250,11 +261,13 @@ namespace Emby.Plugins.WatchTogether
                         }
                         else
                         {
-                            var configuration = ReadConfiguration();
-                            if (!string.IsNullOrWhiteSpace(configuration.PendingUpdateVersion) &&
-                                VersionsEqual(configuration.PendingUpdateVersion, _verifiedRelease.Release.Version))
+                            if (TryGetBlockingPendingVersion(_verifiedRelease.Release.Version, out var pendingVersion))
                             {
-                                var message = "该版本已等待重启生效。";
+                                lock (_stateLock)
+                                {
+                                    _status.UpdateAvailable = false;
+                                }
+                                var message = "版本 v" + pendingVersion + " 已等待重启生效。";
                                 SetError(message, null);
                                 await NotifyAdminAsync(message, linked.Token).ConfigureAwait(false);
                             }
@@ -350,11 +363,12 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 var release = verifiedRelease.Release;
+                var pendingBlocksUpdate = TryGetBlockingPendingVersion(release.Version, out var pendingVersion);
                 lock (_stateLock)
                 {
                     _status.LatestVersion = FormatVersion(release.Version);
                     _status.ReleaseUrl = release.HtmlUrl;
-                    _status.UpdateAvailable = IsNewer(release.Version, currentVersion);
+                    _status.UpdateAvailable = IsNewer(release.Version, currentVersion) && !pendingBlocksUpdate;
                     _verifiedRelease = verifiedRelease;
                 }
 
@@ -377,16 +391,14 @@ namespace Emby.Plugins.WatchTogether
                 // disabling or re-scheduling the task itself.
                 if (automatic)
                 {
-                    var configuration = ReadConfiguration();
-                    if (!string.IsNullOrWhiteSpace(configuration.PendingUpdateVersion) &&
-                        VersionsEqual(configuration.PendingUpdateVersion, release.Version))
+                    if (pendingBlocksUpdate)
                     {
                         lock (_stateLock)
                         {
                             _status.UpdateAvailable = false;
                         }
                         await NotifyAdminAsync(
-                            "版本 v" + FormatVersion(release.Version) + " 已等待重启生效。",
+                            "版本 v" + pendingVersion + " 已等待重启生效。",
                             cancellationToken).ConfigureAwait(false);
                     }
                     else
@@ -504,9 +516,8 @@ namespace Emby.Plugins.WatchTogether
                     new Progress<double>(),
                     cancellationToken).ConfigureAwait(false);
 
-                var configuration = ReadConfiguration();
-                configuration.PendingUpdateVersion = FormatVersion(release.Version);
-                var configurationSaved = SaveConfigurationSafely(configuration, out var saveException);
+                var pendingVersion = FormatVersion(release.Version);
+                var configurationSaved = SaveConfigurationSafely(pendingVersion, out var saveException);
                 Exception notificationException = null;
                 try
                 {
@@ -519,14 +530,19 @@ namespace Emby.Plugins.WatchTogether
                 }
                 lock (_stateLock)
                 {
-                    _status.PendingVersion = configuration.PendingUpdateVersion;
+                    _status.PendingVersion = pendingVersion;
                     _status.RestartRequired = true;
                     _status.UpdateAvailable = false;
                     _status.ReleaseUrl = release.HtmlUrl;
 
+                    if (_pendingVersionStatusOverride != null)
+                    {
+                        _pendingVersionStatusOverride = pendingVersion;
+                    }
+
                     if (!configurationSaved || notificationException != null)
                     {
-                        _pendingVersionStatusOverride = configuration.PendingUpdateVersion;
+                        _pendingVersionStatusOverride = pendingVersion;
                         _postInstallDiagnosticOverride = BuildPostInstallDiagnostic(
                             configurationSaved,
                             notificationException != null);
@@ -589,10 +605,16 @@ namespace Emby.Plugins.WatchTogether
                     message,
                     timeoutMs: 3000);
 
-                await _sessionManager.SendMessageToAdminSessions(
-                    "GeneralCommand",
-                    command,
-                    cancellationToken).ConfigureAwait(false);
+                var sessionManager = _sessionManager;
+                var dispatcher = AdminNotificationDispatchers.GetValue(sessionManager,
+                    _ => new BoundedSessionDispatch(TimeSpan.FromSeconds(5)));
+                // DisplayMessage.TimeoutMs controls presentation only. The
+                // existing dispatcher bounds both synchronous entry and Tasks
+                // that ignore cancellation; timeout remains best-effort here.
+                await Task.Run(() => dispatcher.Execute(
+                    "admin-update-notification",
+                    token => sessionManager.SendMessageToAdminSessions("GeneralCommand", command, token),
+                    cancellationToken), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -667,12 +689,21 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private bool SaveConfigurationSafely(PluginConfiguration configuration, out Exception exception)
+        private bool SaveConfigurationSafely(string pendingVersion, out Exception exception)
         {
             exception = null;
             try
             {
-                _saveConfiguration?.Invoke();
+                if (_savePendingUpdateVersion != null)
+                {
+                    _savePendingUpdateVersion(pendingVersion);
+                }
+                else
+                {
+                    ReadConfiguration().PendingUpdateVersion = pendingVersion;
+                    _saveConfiguration?.Invoke();
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -760,10 +791,14 @@ namespace Emby.Plugins.WatchTogether
             return persistentDiagnostic + "；" + currentDiagnostic;
         }
 
-        private static bool VersionsEqual(string pending, Version release)
+        private bool TryGetBlockingPendingVersion(Version candidate, out string pending)
         {
+            lock (_stateLock)
+            {
+                pending = _pendingVersionStatusOverride ?? ReadConfiguration().PendingUpdateVersion;
+            }
             return Version.TryParse(pending, out var pendingVersion) &&
-                CompareVersions(pendingVersion, release) == 0;
+                CompareVersions(pendingVersion, candidate) >= 0;
         }
 
         private static bool IsPendingRestartRequired(string pending, Version current)

@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V16"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V26"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -111,6 +111,9 @@ test('原生三页导航只显示当前区域并保留原生内容限宽', async
   await expect(page.locator('#wtSettingsSection')).toBeHidden();
   await selectView(page, 'settings');
   await expect(page.locator('#wtSettingsSection')).toBeVisible();
+  await expect(page.locator('#wtSettingsSection')).not.toContainText('这些设置对整台服务器生效。');
+  await expect(page.locator('#wtSettingsSection')).not.toContainText('仅管理员可修改。');
+  await expect(page.locator('#wtGitHubTokenSection')).toContainText('测试版更新检查遇到 GitHub 请求限制时可填写。');
   await expect(page.locator('input[is="emby-input"]')).toHaveCount(4);
   await expect(page.locator('select[is="emby-select"]')).toHaveCount(4);
   await expect(page.locator('input[is="emby-checkbox"]')).toHaveCount(3);
@@ -374,12 +377,12 @@ test('接受邀请网络失败只读回房间且不重发 POST', async ({ page }
   expect(requestLog.filter(x => x.method === 'GET' && x.path === 'WatchTogether/Rooms').length).toBeGreaterThanOrEqual(1);
 });
 
-test('原有 window.confirm 取消不发送请求', async ({ page }) => {
+test('宿主确认取消不发送请求', async ({ page }) => {
   await open(page);
   const leave = page.locator('.wt-roomCard button[data-act="leave"]');
-  page.once('dialog', dialog => dialog.dismiss());
   const before = await calls(page);
   await leave.click();
+  await page.locator('[data-confirm=cancel]').click();
   expect((await calls(page)).filter(x => x.method !== 'GET')).toEqual(before.filter(x => x.method !== 'GET'));
 });
 
@@ -419,7 +422,7 @@ test('设置保存失败后保留修改', async ({ page }) => {
   await expect(checkbox).not.toBeChecked();
   await expect(page.locator('#wtSaveConfig')).toBeEnabled();
   await page.locator('#wtSaveConfig').click();
-  await expect(page.locator('#wtConfigStatus')).toContainText('配置保存失败');
+  await expect(page.locator('#wtConfigStatus')).toContainText('配置提交请求失败，结果尚未确认，请重新读取检查。');
   await expect(checkbox).not.toBeChecked();
   await expect(checkbox).not.toBeChecked();
   await page.screenshot({ path: path.join(artifactDir, 'mobile-settings-390.png'), fullPage: true });
@@ -449,19 +452,20 @@ test('GitHub Token 设置使用原生控件并保留保存、清除和取消确�
 
   await page.locator('#wtGitHubToken').fill('ghp_fixture_secret');
   await page.locator('#wtSaveGitHubToken').click();
-  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已保存');
+  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已配置');
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.toasts.includes('Token 已保存'))).toBe(true);
   await expect(page.locator('#wtGitHubToken')).toHaveValue('');
   const saved = await calls(page);
   expect(saved.filter(x => x.method === 'POST' && x.path === 'WatchTogether/GitHubToken').at(-1).body.Token).toBe('ghp_fixture_secret');
 
-  await page.once('dialog', dialog => dialog.dismiss());
   const beforeCancel = await calls(page);
   await page.locator('#wtClearGitHubToken').click();
+  await page.locator('[data-confirm=cancel]').click();
   expect((await calls(page)).filter(x => x.method === 'DELETE' && x.path === 'WatchTogether/GitHubToken')).toHaveLength(0);
   expect((await calls(page)).filter(x => x.method !== 'GET')).toEqual(beforeCancel.filter(x => x.method !== 'GET'));
-  await page.once('dialog', dialog => dialog.accept());
   await page.locator('#wtClearGitHubToken').click();
-  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已清除');
+  await page.locator('[data-confirm=ok]').click();
+  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('尚未配置 Token');
 });
 
 test('设置页浅深主题主体背景与文字保持可读，并保留移动截图', async ({ page }) => {
@@ -487,9 +491,9 @@ test('Token 状态读取失败仍允许清除，保存失败清空草稿并保�
   await open(page, 'token-read-fail', 'light', 1024, 900);
   await expect(page.locator('#wtGitHubTokenStatus')).toContainText('可尝试清除');
   await expect(page.locator('#wtClearGitHubToken')).toBeEnabled();
-  await page.once('dialog', dialog => dialog.accept());
   await page.locator('#wtClearGitHubToken').click();
-  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('Token 已清除');
+  await page.locator('[data-confirm=ok]').click();
+  await expect(page.locator('#wtGitHubTokenStatus')).toContainText('尚未配置 Token');
 
   await open(page, 'token-save-fail', 'light', 1024, 900);
   await page.locator('#wtGitHubToken').fill('ghp_fixture_secret');
@@ -540,6 +544,43 @@ test('Recovering 状态只针对临时掉线参与者，主用户缺失仍显示
   await expect(page.locator('.wt-roomState')).not.toHaveClass(/wt-roomState-recovering/);
   const narrowMetrics = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   expect(narrowMetrics.width).toBeLessThanOrEqual(narrowMetrics.client + 1);
+});
+
+test('过期快照诊断保留精确标签和安全导出代码，未知值仍被清洗', async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => {
+    const original = window.ApiClient.getJSON;
+    window.ApiClient.getJSON = async path => {
+      const value = await original(path);
+      if (!path.endsWith('/Diagnostics')) return value;
+      return Object.assign({}, value, {
+        Events: [
+          { Type: 'observed', Result: 'observed' },
+          { Type: 'snapshot_ignored private-event-token', Result: 'older_activity private-result-token' },
+          { Type: 'snapshot_ignored', Result: 'older_activity', Alias: 'userB', AtUtc: '2026-10-31T00:00:00Z' }
+        ]
+      });
+    };
+  });
+  await page.locator('.wt-roomCard button[data-act="diagnostics"]').click();
+  const events = page.locator('.wt-diagnosticList li');
+  await expect(events).toHaveCount(3);
+  await expect(events.nth(0)).toContainText('忽略过期快照');
+  await expect(events.nth(0)).toContainText('活动时间较旧');
+  await expect(events.nth(1)).toContainText('观察事件');
+  await expect(events.nth(2)).toContainText('观察事件，已记录');
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('.wt-diagnosticToolbar button').click();
+  const stream = await (await downloadPromise).createReadStream();
+  let exported = '';
+  for await (const chunk of stream) exported += chunk.toString();
+  const diagnostic = JSON.parse(exported);
+  expect(diagnostic.events[0]).toMatchObject({ type: 'snapshot_ignored', result: 'older_activity', alias: 'userB' });
+  expect(diagnostic.events[1]).toMatchObject({ type: 'observed', result: null });
+  expect(diagnostic.events[2]).toMatchObject({ type: 'observed', result: 'observed' });
+  expect(await page.locator('.wt-diagnostics').innerText()).not.toContain('private-');
+  expect(exported).not.toContain('private-');
 });
 
 test('TransientRecovery 和 Drift 诊断清洗后展示并导出，390px 无溢出', async ({ page }) => {

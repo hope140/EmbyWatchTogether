@@ -4,38 +4,52 @@
 
 ## 当前正式版
 
-- [v1.7.1.0 发布说明](v1.7.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)：当前 Latest stable，原生分页与媒体展示进入正式版。
+- [v1.7.1.0 发布说明](v1.7.1.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)：原生分页与媒体展示进入 stable。
 
 ## 当前测试版
 
-- [v1.7.2.17 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.17/docs/releases/v1.7.2.17.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)：精简结束、删除和暂离等操作的确认与结果提示；文案预览已确认，故障分支由自动测试覆盖，发布不等于安装或真实客户端全量验收。
-
-`main` 与 `beta` 保持独立源码线。此索引记录公开发布状态；测试版说明链接到对应 tag，不表示 main 已包含该测试版实现。
+- [v1.7.2.20 测试版说明](v1.7.2.20.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20)：重新同步按钮和管理员设置页文案。
 
 ## 历史发布
 
-- [v1.7.2.16 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.16/docs/releases/v1.7.2.16.md)：成功通知、创建表单与配置保存阶段结果反馈；保存异常由自动测试覆盖。
-- [v1.7.2.15 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.15/docs/releases/v1.7.2.15.md)：页面文案、标题与列表刷新失败反馈。
-- [v1.7.2.14 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.14/docs/releases/v1.7.2.14.md)：宿主确认框与过期操作保护。
-- [v1.7.2.13 测试版说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.13/docs/releases/v1.7.2.13.md)：等待提示与提前继续后的自然对齐恢复；用户于 2026-11-11 宣布总体验收通过，并继续一周观察，逐项证据范围见[兼容性记录](../client-compatibility.md)。
-- [v1.7.2.12 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.12)。
-- [v1.7.2.11 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.11)。
-- [v1.7.2.10 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.10)。
-- [v1.7.2.9 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.9)。
-- [v1.7.2.8 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.8)。
-- [v1.7.2.7 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.7)。
-- [v1.7.2.6 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.6)。
-- [v1.7.2.5 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.5)。
-- [v1.7.2.4 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4)。
-- [v1.7.2.3 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)。
-- [v1.7.2.2 测试版](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.2)。
-- [v1.7.0.1 测试版说明](v1.7.0.1.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.1)：页面初始化、分页和下拉控件兼容修正；[签名发布与核验记录](../maintenance/v1.7.0.1-beta-publication.md)。
+- [v1.7.2.19 测试版说明](v1.7.2.19.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.19)：可选房间名称、随机四位编号与邀请复制反馈。
+
+- [v1.7.2.18 测试版说明](v1.7.2.18.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.18) · [发布核验](../maintenance/v1.7.2.18-beta-publication.md)：卡片图与双人图标、普通账号角色读取及 V21 缓存更新。
+
+- [v1.7.2.17 测试版说明](v1.7.2.17.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)：精简操作文案，区分结束与删除反馈；用户已确认文案预览，真实故障分支由自动测试覆盖。
+
+- [v1.7.2.16 测试版说明](v1.7.2.16.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.16) · [发布状态核查](../maintenance/v1.7.2.16-beta-publication.md)：成功通知、创建表单与配置保存阶段结果反馈；保存异常由自动测试覆盖。
+
+- [v1.7.2.15 测试版说明](v1.7.2.15.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.15)：页面文案与标题整理、列表刷新失败就近反馈；真实客户端继续日常观察。
+
+
+- [v1.7.2.14 测试版说明](v1.7.2.14.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.14)：宿主通用确认框与过期操作保护；用户已确认新版客户端弹窗可以显示，全量交互仍未验收。
+
+- [v1.7.2.13 测试版说明](v1.7.2.13.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.13) · [发布状态核查](../maintenance/v1.7.2.13-beta-publication.md)：自动等待提示与提前继续后的自然对齐恢复；用户于 2026-11-11 宣布总体验收通过，并继续一周观察，逐项证据边界见[兼容性记录](../client-compatibility.md)。
+
+- [v1.7.2.12 测试版说明](v1.7.2.12.md)：换集提示合并、失效复核与通知开关的逐条生效边界。
+- [v1.7.2.11 测试版说明](v1.7.2.11.md)：停止来源的排队命令撤销与 Theater 换集能力兼容。
+- [v1.7.2.10 测试版说明](v1.7.2.10.md)：停止后晚到换集历史与控制资格分离。
+- [v1.7.2.9 测试版说明](v1.7.2.9.md)、[v1.7.2.8 测试版说明](v1.7.2.8.md)：停止播放代次与旧快照保护。
+- [v1.7.2.7 测试版说明](v1.7.2.7.md) · [发布核验记录](../maintenance/v1.7.2.7-beta-publication.md)：换集暂停等待与停止后恢复确认。
+
+- [v1.7.2.6 测试版说明](v1.7.2.6.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.6) · [发布核验记录](../maintenance/v1.7.2.6-beta-publication.md)：创建表单显示明确成功与失败结果，列表刷新失败保留创建成功事实。
+
+- [v1.7.2.5 测试版说明](v1.7.2.5.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.5) · [发布核验记录](../maintenance/v1.7.2.5-beta-publication.md)：停止同步、提示发送和更新安装的边界保护，以及诊断提示与打包修正；真实服务器升级和双端播放验收尚待执行。
+
+- [v1.7.2.4 测试版说明](v1.7.2.4.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.4) · [发布核验记录](../maintenance/v1.7.2.4-beta-publication.md)：待生效更新版本保护与文档整理。
+
+- [v1.7.2.3 测试版说明](v1.7.2.3.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.3)：同步提示与快照保护改进。
+
+- [v1.7.2.2 测试版说明](v1.7.2.2.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.2)。
+- [v1.7.0.1](v1.7.0.1.md) 测试版说明 · [发布核验记录](../maintenance/v1.7.0.1-beta-publication.md)。
 
 - [v1.7.0.0 测试版说明](v1.7.0.0.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.0.0)：原生分页、视频信息与用户头像展示。
 
 ### Stable
 
 - [v1.6.1.0](v1.6.1.0.md)
+
 - [v1.5.0.0](v1.5.0.0.md)
 - [v1.4.5.0](v1.4.5.0.md)
 - [v1.4.4.0](v1.4.4.0.md)
@@ -78,14 +92,17 @@
 - [v1.2.0.13](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.13)
 - [v1.2.0.9](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.2.0.9)
 
-历史说明保留当时的版本事实，不代表当前实现或验收状态。
+历史说明保留当时的版本事实。
 
 `v1.5.0.4` 只对应一次失败的 tag 尝试，没有 GitHub Release 或发布资产，不能列为成功发布。
 
+## 测试候选记录
+
+- [v1.7.2.1](v1.7.2.1.md)、[v1.7.2.0](v1.7.2.0.md)：测试候选记录，并非公开 GitHub Release。
+
 ## 发布通道
 
-- `main` 对应 stable，正式 Release 由维护者手动运行发布 workflow 创建。
-- `beta` 对应 prerelease，测试版本从 `beta` 分支手动发布。
+- `main` 对应 stable，`beta` 对应 prerelease；维护者可手动运行发布 workflow，或通过[经审核的发布请求](../release-requests.md)按通道发布。
 - 新 tag 使用四段数字格式，例如 `v1.6.1.0`；不得添加 `-beta` 或 `-rc` 后缀。
 - 插件默认使用 `stable`；管理员可在配置页选择 `beta`，更新任务按所选通道获取并安装。
 - 静态测试、自动安装和维护者检查不等于真实客户端验收；Release Notes 只描述已有证据。
@@ -109,3 +126,7 @@
 
 - 重启、回滚或人工验收要求。
 ```
+
+## 待发布候选
+
+- [v1.7.3.0 说明](v1.7.3.0.md)：正式版候选，尚未发布。

@@ -99,7 +99,7 @@ test('State及Rooms读取失败清除当前媒体，保留可重试反馈', asyn
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   await page.evaluate(() => window.__wtFixture.setRoomsFailure(true));
   await page.locator('#wtRefresh').click();
-  await expect(page.locator('#wtStatus')).toContainText('房间加载失败');
+  await expect(page.locator('#wtRoomsStatus')).toContainText('当前列表可能不是最新');
   await expect(page.locator('.wt-roomMedia')).toBeHidden();
 });
 
@@ -185,7 +185,7 @@ test('切换三页保持单导航，状态未变时焦点与busy稳定', async (
   await open(page, 'admin-member');
   for (let i = 0; i < 3; i++) {
     for (const name of ['Invite', 'Settings', 'Rooms']) {
-      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V16"]').click();
+      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V26"]').click();
       await expect(page.locator('.tabs-viewmenubar a')).toHaveCount(3);
     }
   }

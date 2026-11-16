@@ -154,7 +154,7 @@ function page() {
     if (scenario !== 'recovering') diagnosticData = ${JSON.stringify(diagnostic('active'))};
     if (scenario === 'drift-positive') diagnosticData = ${JSON.stringify(diagnostic('drift-positive'))};
     var apiCalls = []; var accountId = scenario === 'admin-manage' ? 'admin-other' : 'user-a'; var tokenConfigured = false; var serverAddress = location.origin;
-    var stateOverride = null; var stateFailure = false; var roomsFailure = false;
+    var stateOverride = null; var stateFailure = false; var roomsFailure = params.get('rooms_failure') === 'true';
     var mediaOverrides = {}; var mediaFailure = 0; var mediaDelay = 0; var stateDelay = 0;
     var imageUrlOverride; var imageDelay = 0; var imageCalls = [];
     var avatarUrlOverride; var avatarCalls = []; var avatarStatuses = {};
@@ -233,7 +233,7 @@ function page() {
       }
       if (path === 'WatchTogether/Invitations' && method === 'POST') {
         var expiresAt = new Date(Date.now() + 900000).toISOString();
-        invitations = [{ InvitationId: 'inv-1', Name: body && JSON.parse(body).Name || '周末邀请', ExpiresAtUtc: expiresAt }];
+        invitations = [{ InvitationId: 'inv-1', Name: body && JSON.parse(body).Name || '', ExpiresAtUtc: expiresAt }];
         return delay({ Status: 'created', Created: true, InvitationId: 'inv-1', Code: 'ABCD12EFghI3J4KLMNopQR', ExpiresAtUtc: expiresAt });
       }
       if (path.indexOf('/Accept') >= 0) return delay({ Status: 'accepted', Accepted: true });
@@ -260,7 +260,7 @@ function page() {
         return handler(error);
       });
     };
-    window.ApiClient = { getUrl: function (path) { return path; }, serverAddress: function () { return serverAddress; }, serverId: function () { return serverAddress; }, getItem: item, getImageUrl: imageUrl, getUserImageUrl: userImageUrl, getCurrentUserId: function () { return accountId; }, getJSON: get, fetch: function (o) { return send(o.url, o.type, o.data); }, getPluginConfiguration: function () { apiCalls.push({ method: 'GET', path: 'configuration' }); return isAdminScenario() ? delay(JSON.parse(JSON.stringify(config))) : fail(403); }, updatePluginConfiguration: function (id, value) { apiCalls.push({ method: 'POST', path: 'configuration', body: value }); if (scenario === 'save-fail') return fail(500); config = JSON.parse(JSON.stringify(value)); return delay(JSON.parse(JSON.stringify(config))); } };
+    window.ApiClient = { getUrl: function (path) { return path; }, serverAddress: function () { return serverAddress; }, serverId: function () { return serverAddress; }, getItem: item, getImageUrl: imageUrl, getUserImageUrl: userImageUrl, getCurrentUserId: function () { return accountId; }, getCurrentUser: function () { apiCalls.push({ method: 'GET', path: 'current-user' }); return delay({ Id: accountId, Policy: { IsAdministrator: isAdminScenario() || scenario === 'users-fail' } }); }, getJSON: get, fetch: function (o) { return send(o.url, o.type, o.data); }, getPluginConfiguration: function () { apiCalls.push({ method: 'GET', path: 'configuration' }); return isAdminScenario() ? delay(JSON.parse(JSON.stringify(config))) : fail(403); }, updatePluginConfiguration: function (id, value) { apiCalls.push({ method: 'POST', path: 'configuration', body: value }); if (scenario === 'save-fail') return fail(500); config = JSON.parse(JSON.stringify(value)); return delay(JSON.parse(JSON.stringify(config))); } };
     function routeView(href) {
       var match = String(href || '').match(/name=([^&]+)/);
       return match ? decodeURIComponent(match[1]) : '';
@@ -310,6 +310,58 @@ function page() {
         middle.appendChild(menubar);
         return { tabsContainer: middle, replaced: true };
       }
+    };
+    // Mock the host module contract, not its actual rendering or native WebView.
+    // Native dialogs are deliberately disabled, matching the affected host.
+    window.confirm = function () { throw new Error('Native dialogs disabled'); };
+    window.__wtFixture.confirmations = [];
+    function hostConfirm(options) {
+      window.__wtFixture.confirmations.push(options);
+      if (params.get('confirm_mode') === 'throw') throw new Error('Mock display failure');
+      return new Promise(function (resolve, reject) {
+        var dialog = document.createElement('div');
+        dialog.setAttribute('role', 'alertdialog');
+        dialog.setAttribute('aria-label', options.title);
+        dialog.style.cssText = 'position:fixed;z-index:10000;inset:20% 10%;background:white;color:black;padding:24px;border:2px solid black';
+        var text = document.createElement('p'); text.textContent = options.text; dialog.appendChild(text);
+        function close(ok) { dialog.remove(); if (ok) resolve(); else reject('cancel'); }
+        window.__wtFixture.answerConfirmation = close;
+        ['cancel', 'ok'].forEach(function (id) {
+          var button = document.createElement('button');
+          button.textContent = id === 'ok' ? options.confirmText : '取消';
+          button.dataset.confirm = id;
+          button.onclick = function () { close(id === 'ok'); };
+          dialog.appendChild(button);
+        });
+        document.body.appendChild(dialog);
+      });
+    }
+    window.__wtFixture.toasts = [];
+    function hostToast(options) {
+      var mode = params.get('toast_mode');
+      if (mode === 'throw') throw new Error('Toast display failed');
+      if (mode === 'reject') return Promise.reject(new Error('Toast CSS failed'));
+      window.__wtFixture.toasts.push(options.text);
+      var output = document.createElement('output');
+      output.setAttribute('role', 'status'); output.className = 'fixture-toast';
+      output.textContent = options.text; document.body.appendChild(output);
+      return new Promise(function (resolve) { setTimeout(function () { output.remove(); resolve(); }, 1200); });
+    }
+    window.require = function (deps) {
+      if (deps[0] === 'toast') {
+        var toastMode = params.get('toast_mode');
+        if (toastMode === 'missing') return Promise.reject(new Error('Toast missing'));
+        return new Promise(function (resolve) {
+          var finish = function () { resolve([toastMode === 'default' ? { default: hostToast } : hostToast]); };
+          if (toastMode === 'slow') window.__wtFixture.finishToast = finish; else finish();
+        });
+      }
+      if (deps.length !== 1 || deps[0] !== 'confirm') return Promise.reject(new Error('Unknown mock module'));
+      var mode = params.get('confirm_mode');
+      if (mode === 'missing') return Promise.reject(new Error('Mock module load failure'));
+      return new Promise(function (resolve) { setTimeout(function () {
+        resolve([mode === 'default' ? { default: hostConfirm } : hostConfirm]);
+      }, mode === 'slow' ? 350 : 0); });
     };
     window.define = function (deps, factory) { var BaseView = function () { this.view = arguments[0] || null; }; BaseView.prototype.onResume = function () {}; BaseView.prototype.onPause = function () {}; window.__wtViewCtor = factory(BaseView, { addEventListener: function (el, name, fn) { if (el) el.addEventListener(name, fn); } }, { show: function () {}, hide: function () {} }, {}, {}, {}, {}, mainTabsManager); };
     var hostHeader = hasHostHeader ? '<header class="skinHeader" data-mock-host="true"><div class="headerLeft">emby</div><div class="headerMiddle headerSection sectionTabs"></div><div class="headerRight">mock host</div></header>' : '';

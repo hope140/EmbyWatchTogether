@@ -358,6 +358,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                     {
                         highestRelease,
                         lowerRelease,
+                        CreateApiRelease("v1.0", prerelease: false, draft: false),
                     },
                     out _);
 
@@ -365,6 +366,92 @@ namespace Emby.Plugins.WatchTogether.Tests
                     client.CheckForLatestAsync(CancellationToken.None));
 
                 Assert.Contains("缺少固定资产", exception.UserMessage);
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task BetaCheck_SkipsHistoricalAndInvalidTagsAndVerifiesHighestCanonicalRelease(bool reverse)
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                var releases = new List<GitHubReleaseApiDto>
+                {
+                    CreateApiRelease("v1.0", prerelease: false, draft: false),
+                    CreateApiRelease("v1.1", prerelease: false, draft: false),
+                    CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
+                    CreateApiRelease("v1.2", prerelease: false, draft: false),
+                    CreateApiRelease("invalid", prerelease: true, draft: false),
+                    CreateApiRelease("v99.0.0", prerelease: true, draft: true),
+                    CreateApiRelease("v1.2.0.1", prerelease: false, draft: false),
+                };
+                if (reverse)
+                {
+                    releases.Reverse();
+                }
+
+                var client = CreateBetaClient(fixture, releases, out _);
+                var verified = await client.CheckForLatestAsync(CancellationToken.None);
+
+                Assert.Equal(fixture.CurrentTag, verified.Release.TagName);
+                Assert.Equal(3, fixture.RequestedUrls.Count);
+                Assert.All(fixture.RequestedUrls, url =>
+                    Assert.StartsWith(GitHubReleaseClient.RepositoryUrl + "/releases/download/" + fixture.CurrentTag + "/", url));
+                fixture.AssertReturnedFilesAreClean();
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task BetaCheck_WithOnlyInvalidOrDraftReleasesFailsClosed(bool draft)
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                var releases = new List<GitHubReleaseApiDto>
+                {
+                    CreateApiRelease("v1.0", prerelease: false, draft: draft),
+                    CreateApiRelease("v1.1", prerelease: false, draft: draft),
+                    CreateApiRelease("v1.2", prerelease: false, draft: draft),
+                    CreateApiRelease("invalid", prerelease: true, draft: draft),
+                };
+                if (draft)
+                {
+                    releases.Add(CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: true));
+                }
+
+                var client = CreateBetaClient(fixture, releases, out _);
+                var exception = await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+
+                Assert.Equal(draft ? "没有可用的测试版发布。" : "测试版发布标签无效。", exception.UserMessage);
+                Assert.Empty(fixture.RequestedUrls);
+            }
+        }
+
+        [Fact]
+        public async Task BetaCheck_InvalidHighestSignatureDoesNotFallBackToLowerOrHistoricalReleases()
+        {
+            using (var fixture = SignedReleaseFixture.Create())
+            {
+                fixture.EnableBetaPaths();
+                fixture.Tamper("signature");
+                var client = CreateBetaClient(fixture, new List<GitHubReleaseApiDto>
+                {
+                    CreateApiRelease("v1.0", prerelease: false, draft: false),
+                    CreateApiRelease(fixture.CurrentTag, prerelease: true, draft: false),
+                    CreateApiRelease("v1.2.0.1", prerelease: false, draft: false),
+                }, out _);
+
+                await Assert.ThrowsAsync<ReleaseValidationException>(() =>
+                    client.CheckForLatestAsync(CancellationToken.None));
+
+                Assert.Equal(3, fixture.RequestedUrls.Count);
+                Assert.All(fixture.RequestedUrls, url =>
+                    Assert.StartsWith(GitHubReleaseClient.RepositoryUrl + "/releases/download/" + fixture.CurrentTag + "/", url));
                 fixture.AssertReturnedFilesAreClean();
             }
         }

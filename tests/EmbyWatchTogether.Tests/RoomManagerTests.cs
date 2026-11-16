@@ -257,6 +257,40 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Handoff, runtime.State);
         }
 
+        [Theory]
+        [InlineData("pause")]
+        [InlineData("resume")]
+        public void Action_PauseOrResume_HandoffConflictDoesNotIssueOrMutate(string action)
+        {
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "http://emby", "a", "admin-1", new[] { "u1", "u2" }, "u1");
+            var runtime = manager.GetRuntime(room.Id);
+            var handoff = (MediaHandoffState)typeof(RoomRuntime).GetMethod(
+                "BeginMediaHandoff",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(runtime, new object[] { "item-b", "item-a", DateTimeOffset.UtcNow, "u1", "s1", "u2", "s2" });
+            handoff.PlayItemPending = true;
+            runtime.State = RoomState.Handoff;
+            var issuer = new FakeIssuer();
+            var snapshots = new Dictionary<string, SessionSnapshot>
+            {
+                ["u1"] = TestSnapshots.Online("u1"),
+                ["u2"] = TestSnapshots.Online("u2"),
+            };
+
+            var result = manager.Action(room.Id, action, snapshots, issuer, DateTimeOffset.UtcNow);
+
+            Assert.Empty(result.Users);
+            Assert.Equal("manual action conflicts with active synchronization", result.Error);
+            Assert.Empty(issuer.Issued);
+            Assert.Same(handoff, runtime.Handoff);
+            Assert.Equal("item-b", runtime.Handoff.TargetItemId);
+            Assert.Equal("item-a", runtime.Handoff.SourceItemId);
+            Assert.True(runtime.Handoff.PlayItemPending);
+            Assert.Equal(RoomState.Handoff, runtime.State);
+            Assert.Empty(runtime.Pending);
+        }
+
         [Fact]
         public void ParticipantResync_RejectsNonMemberAndParticipantWhoLeft()
         {

@@ -23,6 +23,152 @@ namespace Emby.Plugins.WatchTogether.Tests
     public class WatchTogetherUpdateTaskTests
     {
         [Fact]
+        public async Task RunCheckAsync_WhenInitialConfigurationIsNullAttachesAndPersistsPendingState()
+        {
+            var serializer = new Mock<IXmlSerializer>();
+            var plugin = CreateInitializedPlugin(serializer, initializeStorage: true);
+            serializer.Setup(x => x.DeserializeFromFile(typeof(PluginConfiguration), It.IsAny<string>()))
+                .Returns((object)null);
+            Assert.Null(plugin.Configuration);
+            var settingsEvents = 0;
+            plugin.ConfigurationChanged += (_, __) => settingsEvents++;
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+
+            await WatchTogetherUpdateTask.RunCheckAsync(
+                plugin, releaseClient, installation, null, null, CancellationToken.None);
+            await WatchTogetherUpdateTask.RunCheckAsync(
+                plugin, releaseClient, installation, null, null, CancellationToken.None);
+
+            Assert.Equal("2.0.0", plugin.Configuration.PendingUpdateVersion);
+            Assert.Equal(0, settingsEvents);
+            serializer.Verify(x => x.SerializeToFile(
+                It.Is<object>(value => ((PluginConfiguration)value).PendingUpdateVersion == "2.0.0"),
+                It.IsAny<string>()), Times.Once);
+            installMock.Verify(x => x.InstallPackage(
+                It.IsAny<PackageVersionInfo>(), true,
+                It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Once);
+            using (var manager = new PluginUpdateManager(plugin, releaseClient, installation, null))
+            {
+                Assert.True(manager.GetStatus().RestartRequired);
+            }
+        }
+
+        [Fact]
+        public async Task RunCheckAsync_StaleSettingsSaveBetweenRunsDoesNotReinstallPendingRelease()
+        {
+            var serializer = new Mock<IXmlSerializer>();
+            var savedPendingVersions = new List<string>();
+            serializer.Setup(x => x.SerializeToFile(It.IsAny<object>(), It.IsAny<string>()))
+                .Callback<object, string>((configuration, _) =>
+                    savedPendingVersions.Add(((PluginConfiguration)configuration).PendingUpdateVersion));
+            var plugin = CreateInitializedPlugin(serializer, initializeStorage: true);
+            var staleSettings = new PluginConfiguration { PollIntervalSeconds = 1.5 };
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+
+            await WatchTogetherUpdateTask.RunCheckAsync(
+                plugin, releaseClient, installation, null, null, CancellationToken.None);
+            plugin.UpdateConfiguration(staleSettings);
+            await WatchTogetherUpdateTask.RunCheckAsync(
+                plugin, releaseClient, installation, null, null, CancellationToken.None);
+
+            installMock.Verify(x => x.InstallPackage(
+                It.IsAny<PackageVersionInfo>(), true,
+                It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Once);
+            Assert.Equal("2.0.0", plugin.Configuration.PendingUpdateVersion);
+            Assert.Equal(1.5, plugin.Configuration.PollIntervalSeconds);
+            Assert.Equal(new[] { "2.0.0", "2.0.0" }, savedPendingVersions);
+            using (var manager = new PluginUpdateManager(plugin, releaseClient, installation, null))
+            {
+                Assert.True(manager.GetStatus().RestartRequired);
+                Assert.Equal("2.0.0", manager.GetStatus().PendingVersion);
+            }
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void RunCheckAsync_PendingWriteAndSettingsSaveShareAtomicConfigurationBoundary(bool settingsFirst)
+        {
+            using var firstSaveEntered = new ManualResetEventSlim();
+            using var releaseFirstSave = new ManualResetEventSlim();
+            using var secondStarted = new ManualResetEventSlim();
+            using var secondCompleted = new ManualResetEventSlim();
+            var serializer = new Mock<IXmlSerializer>();
+            var saveCount = 0;
+            serializer.Setup(x => x.SerializeToFile(It.IsAny<object>(), It.IsAny<string>()))
+                .Callback<object, string>((_, __) =>
+                {
+                    if (Interlocked.Increment(ref saveCount) == 1)
+                    {
+                        firstSaveEntered.Set();
+                        if (!releaseFirstSave.Wait(TimeSpan.FromSeconds(10)))
+                        {
+                            throw new TimeoutException("The test did not release the first configuration save.");
+                        }
+                    }
+                });
+            var plugin = CreateInitializedPlugin(serializer, initializeStorage: true);
+            // Materialize the original configuration before either writer starts.
+            Assert.Null(plugin.Configuration.PendingUpdateVersion);
+            var releaseClient = new FakeReleaseClient(CreateRelease(2, 0, 0));
+            var installation = CreateInstallationManager(out var installMock);
+            Action install = () => WatchTogetherUpdateTask.RunCheckAsync(
+                plugin, releaseClient, installation, null, null, CancellationToken.None).GetAwaiter().GetResult();
+            Action saveSettings = () => plugin.UpdateConfiguration(
+                new PluginConfiguration { PollIntervalSeconds = 1.5 });
+            Exception firstError = null;
+            Exception secondError = null;
+            var first = new Thread(() =>
+            {
+                try { (settingsFirst ? saveSettings : install)(); }
+                catch (Exception ex) { firstError = ex; }
+            });
+            var second = new Thread(() =>
+            {
+                secondStarted.Set();
+                try { (settingsFirst ? install : saveSettings)(); }
+                catch (Exception ex) { secondError = ex; }
+                finally { secondCompleted.Set(); }
+            });
+
+            try
+            {
+                first.Start();
+                Assert.True(firstSaveEntered.Wait(TimeSpan.FromSeconds(5)));
+                second.Start();
+                Assert.True(secondStarted.Wait(TimeSpan.FromSeconds(5)));
+                Assert.True(SpinWait.SpinUntil(
+                    () => (second.ThreadState & ThreadState.WaitSleepJoin) != 0 || secondCompleted.IsSet,
+                    TimeSpan.FromSeconds(5)));
+                Assert.False(secondCompleted.IsSet);
+                // The blocked writer cannot replace or mutate the current
+                // configuration until the first writer finishes persistence.
+                Assert.Equal(settingsFirst ? null : "2.0.0", plugin.Configuration.PendingUpdateVersion);
+            }
+            finally
+            {
+                releaseFirstSave.Set();
+                var firstJoined = (first.ThreadState & ThreadState.Unstarted) != 0 ||
+                    first.Join(TimeSpan.FromSeconds(10));
+                var secondJoined = (second.ThreadState & ThreadState.Unstarted) != 0 ||
+                    second.Join(TimeSpan.FromSeconds(10));
+                Assert.True(firstJoined);
+                Assert.True(secondJoined);
+            }
+
+            Assert.Null(firstError);
+            Assert.Null(secondError);
+            Assert.Equal("2.0.0", plugin.Configuration.PendingUpdateVersion);
+            Assert.Equal(1.5, plugin.Configuration.PollIntervalSeconds);
+            Assert.Equal(2, saveCount);
+            installMock.Verify(x => x.InstallPackage(
+                It.IsAny<PackageVersionInfo>(), true,
+                It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
         public void HasSinglePublicConstructor_ForContainerDiscovery()
         {
             // Emby's container requires exactly one public constructor; two
@@ -269,15 +415,17 @@ namespace Emby.Plugins.WatchTogether.Tests
                 sessionManager: Mock.Of<ISessionManager>());
         }
 
-        private static Plugin CreateInitializedPlugin()
+        private static Plugin CreateInitializedPlugin(Mock<IXmlSerializer> serializer = null, bool initializeStorage = false)
         {
             var paths = new Mock<IApplicationPaths>();
             paths.SetupGet(x => x.PluginConfigurationsPath).Returns("C:\\watch-together-update-task-tests");
-            var serializer = new Mock<IXmlSerializer>();
+            serializer = serializer ?? new Mock<IXmlSerializer>();
+            serializer.Setup(x => x.DeserializeFromFile(typeof(PluginConfiguration), It.IsAny<string>()))
+                .Returns(new PluginConfiguration());
             var plugin = new Plugin(paths.Object, serializer.Object);
             plugin.SetAttributes(
                 "C:\\watch-together-update-task-tests\\Emby.Plugins.WatchTogether.dll",
-                null,
+                initializeStorage ? "C:\\watch-together-update-task-tests\\data" : null,
                 new Version(1, 0, 0, 0));
             plugin.SetStartupInfo(_ => { });
             SetPluginInstance(null);

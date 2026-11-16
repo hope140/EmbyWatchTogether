@@ -5,16 +5,21 @@
 ## 运行时行为与约束
 
 - 起播同步使用 `Barrier`：先暂停双方，以主用户位置为锚点对齐另一端，再恢复起播前的暂停/播放状态。进入恢复阶段前，双方都必须在固定 Seek 目标的容差内；Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的预算内有限重试。
+- 已满足且没有 Pending 的 Barrier 阶段在同轮继续推进，当前已满足的 Pause/Restore 不重复发送；实际发送命令后仍等待后续轮询确认。Watching 中明确的手动 Seek 当轮开始暂停对齐。
+- 同步提示使用每引擎单 worker、64 条等待消息的队列，排队超过 10 秒过期，发送前重新核验当前房间和会话身份。DisplayMessage 与播放控制分别占用会话传输槽，仍共享发送器 64 个未完成传输的总量限制；提示慢响应不占住播放控制槽。
 - `Watching` 阶段传播明确的暂停/继续和明显的手动 Seek；持续明显漂移满足 Phase E 的门槛时，以低频 Barrier 重新对齐。主用户同时操作时作为冲突裁决者；命令确认、抑制窗口以及 session identity、Item、设备会话绑定用于避免回环和旧会话误控制。
 - 已绑定的 `Watching` 会话若仅出现原始远控标志短暂丢失，而同一 Session/Item 的有效能力证据仍在、双方仍为同一有效媒体且没有 Pending 命令，则最多等待 8 秒恢复。窗口内不推进 `WatchingTick`、不发命令或提示；恢复后按保留的上一轮快照处理真实暂停或 Seek，超时及身份、Item、能力或 Pending 变化立即回到现有严格路径。
-- `Watching` 中主用户切换 Item 时进入独立的 `Handoff` 状态。插件通过 `SessionBridge` 的 `PlayItem` 抽象让非 Primary 参与者打开主用户当前 Item，收到当前用户、Session 和 ItemId 均匹配的快照确认后才进入 `Barrier`；参与者自行切换 Item 仍回到安全 `Waiting`，不会让主用户跟随。两人同时播放时按安全规则暂停活跃会话，单人播放受到保护。
-- `PlaybackStopped` 事件只用于立即唤醒轮询，不直接确认停止。`Watching` 开始后，停止、离线或缺失状态持续达到 2 秒才确认停止；原有 2 秒窗口用于区分主用户的 Stop A → Start B 媒体交接，窗口内出现新主用户 Item 时不执行普通停止副作用。若新主用户会话晚于该窗口出现，插件还会保留最长 10 秒的有界换集候选，满足房间成员、会话身份和目标 Item 条件后继续进入 Handoff；候选过期或条件变化时回到安全等待。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止并支持远程控制才算恢复。合法的 seek-to-zero 不单独视为停止。
-- Session snapshot provider 连续失败达到 2 秒后进入 `Waiting` 保护，清理不可信同步状态且不向旧 session 发命令；恢复需连续成功 2 秒后使用 fresh snapshot 重新同步，弱网抖动不会频繁触发 Barrier。管理页遇到 `snapshot_unavailable` 时仅提示快照不可用，不声称播放器已暂停。
+- 主用户停止后的晚到换片观察保持首次停止起算的 10 秒绝对期限。原参与者仅 raw 远控标志暂失且身份、媒体、时长与有效播放能力仍可信时保留候选，恢复后重新核验再跟随；不可控期间不发播放命令，已开始的 Handoff 不续期或消耗发送重试。真实停止、身份/能力变化或到期仍取消候选。
+- 确认停止后，双方在同视频但进度差超过 5 秒时返回 `stop_resume_confirmation_required`，保持 Waiting 并提示显式重新同步。现有成员/管理员请求按主用户当前进度恢复，保留其暂停/播放状态；不同视频时参与者请求可能通过 Handoff 切片，界面明确说明。新诊断记录候选等待/过期/失效及位置差，不输出原始身份；位置差写入 `DriftSeconds`，不混入命令确认延迟。
+- `Watching` 中主用户切换 Item 时进入独立的 `Handoff` 状态。插件通过 `SessionBridge` 的 `PlayItem` 抽象让非 Primary 参与者打开主用户当前 Item，收到当前用户、Session 和 ItemId 均匹配的快照确认后通常进入 `Barrier`；恢复播放并符合下述自然对齐条件时直接进入 `Watching`；参与者自行切换 Item 仍回到安全 `Waiting`，不会让主用户跟随。两人同时播放时按安全规则暂停活跃会话，单人播放受到保护。
+- 自动换集等待中，主用户真实 Pause ACK 后提示正在等待载入，原先已暂停不承诺自动继续。若主用户提前恢复播放，来源视为未知，本次转为无控制观察，不重新暂停或重发旧指令；被控通过原起播确认后，双方同会话/目标/媒体、有效权限与正常倍速、持续播放且差距不超过 2 秒再稳定至少 1 秒，才在原 10 秒期限内直接恢复 Watching。再次暂停、明显跳动、失效、超时或大差距要求在房间中手动重新同步。发送时失效的等待、成功或失败提示会丢弃，提示不保证客户端实际展示。
+- `PlaybackStopped` 事件只用于立即唤醒轮询，不直接确认停止。`Watching` 开始后，停止、离线或缺失状态持续达到 2 秒才确认停止；原有 2 秒窗口用于区分主用户的 Stop A → Start B 媒体交接，窗口内出现新主用户 Item 时不执行普通停止副作用。若新主用户会话晚于该窗口出现，插件还会保留最长 10 秒的有界换集候选，满足房间成员、会话身份和目标 Item 条件后继续进入 Handoff；候选过期或条件变化时回到安全等待。临时同用户替换的不同 `SessionId`（包括不可远控的快照）不能清除观察，只有原 `Previous SessionId` + `ItemId` 且在线、未停止才证明播放身份连续；raw 远控不足另由有限候选等待和严格命令入口处理，不能将其单独记为第二位用户停止。合法的 seek-to-zero 不单独视为停止。
+- Session snapshot provider 连续失败达到 2 秒后进入 `Waiting` 保护，清理不可信同步状态且不向旧 session 发命令；恢复需连续成功 2 秒后使用 fresh snapshot 重新同步，弱网抖动不会频繁触发 Barrier。管理页遇到 `snapshot_unavailable` 时仅提示快照不可用，不声称播放器已暂停。活跃自动 hold 例外：第一次快照读取异常即退休旧意图，快照恢复后仍需显式重新同步，不能重建旧 Barrier。
 - 多个共同 Item 候选使用对称 maximin 全局评分选出唯一共同 Item；完全同分时安全等待，不擅自选择。
 - 同一用户的多会话仅沿用唯一历史 `SessionId` + `ItemId` 关联；无历史或关联失效时保持 `Waiting`，不猜测新的会话。
 - 管理员手动 `pause`/`resume` 在 Barrier、Handoff 或任一参与者存在 Pending 时整次拒绝且不覆盖同步；成功操作不会把陈旧的运行时错误误报为本次失败。
 - 退出自动暂停返回稳定的 `Attempted`、`Succeeded`、`Failed` 汇总；群发消息按目标隔离异常并返回 `Sent`、`Failed`、`Skipped`。
-- 命令具备取消、超时和有限重试；起播失败会进入冷却并自动重试。`PlayItem` 由 `IPlayItemIssuer` / `SessionBridge` 封装为 Emby `SendPlayCommand`，发送成功只表示请求已发出，必须等快照实际变更确认；Handoff 最多进行有限尝试，失败后清理运行时并回到 `Waiting`。每个房间独立串行处理并隔离异常，不影响其他房间的轮询。
+- 命令具备取消、超时和有限重试；起播失败会进入冷却并自动重试。`PlayItem` 由 `IPlayItemIssuer` / `SessionBridge` 封装为 Emby `SendPlayCommand`，发送成功只表示请求已发出，必须等快照实际变更确认；Handoff 最多进行有限尝试，失败后清理运行时并回到 `Waiting`。房间逐个串行处理并隔离异常，慢播放传输仍可能在有界等待期间延后后续房间；同步提示通过独立队列发送。
 - `SessionInfo` 是服务器轮询快照，不是播放器内部时钟。明显位置跳变的阈值会根据已观测的命令确认延迟提高（普通情况下约 4 秒起），不保证每一帧一致，也不主动消除长期小幅漂移。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 是只读诊断接口，普通参与者和管理员可读取当前房间。接口在 room gate 内重新检查房间、成员和当前 `ServerId`，初始化未完成、房间不存在或服务器身份不匹配时沿用现有稳定错误语义；读取不会调用 `ICommandIssuer` 或消息发送器。返回字段采用白名单 DTO，`RoomRuntime` 保存最多 500 条连续去重事件、最近选中快照和最近动作，均为内存状态，删除房间或重启后清空；页面和导出只取最近 50 条，并按最新在前显示。快照位置、能力和命令确认延迟均表示服务端观察值，不代表客户端已实际执行。
 - 已加入的普通参与者可以通过 `POST /WatchTogether/Rooms/{Id}/Resync` 请求重新同步。请求在 room gate 内再次核验成员、加入状态、当前 `ServerId`、快照保护状态和运行中操作；`Barrier`、`Handoff` 或任意 Pending 存在时返回稳定的 busy 结果，不清理当前同步。受理后仅在内存中记录一次性请求，由轮询读取 Primary 当前 Item：参与者已在相同 Item 时直接进入原有 `Barrier`，Item 不同则通过 `PlayItem` Handoff 等待确认后再进入 Barrier。发送失败或确认超时会回到安全 `Waiting`，之后仍可在冷却结束后再次请求。响应的 `Status` 只使用 `accepted`、`busy`、`unavailable`，`Reason` 使用稳定原因码。
@@ -39,7 +44,7 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前公开正式版与测试版见[发布索引](releases/README.md)；本文仍描述 main 实现，不表示已包含 beta 的实现。历史版本整理不移动、重命名或重建已有 tag。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版与测试版状态见[发布日志索引](releases/README.md)。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
@@ -47,7 +52,7 @@
 
 ## 构建、测试和打包
 
-要求：PowerShell、可用的 .NET SDK，以及能够还原 `MediaBrowser.Server.Core` `4.9.0.52-beta` 的 NuGet 源。首次构建可先执行 `dotnet restore`，然后运行：
+要求：PowerShell、.NET 10 SDK（测试项目目标为 `net10.0`；插件目标为 `netstandard2.0`），以及能够还原 `MediaBrowser.Server.Core` `4.9.0.52-beta` 的 NuGet 源。验证环境与入口见[验证与交接](validation-and-handoff.md)。首次构建可先执行 `dotnet restore`，然后运行：
 
 ```powershell
 dotnet test tests/EmbyWatchTogether.Tests/EmbyWatchTogether.Tests.csproj -c Release --nologo -v minimal
@@ -67,15 +72,15 @@ dist/EmbyWatchTogether/Emby.Plugins.WatchTogether.dll
 dist/EmbyWatchTogether.zip
 ```
 
-ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装已构建插件)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。
+ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。自定义 `-OutputDirectory` 必须避开仓库源码、测试、脚本、文档、协作配置和 `.publish/`；输出与暂存路径及其祖先不得经过符号链接或 reparse point。可先加 `-ValidatePathsOnly` 只读验证路径；默认 `dist/` 和独立的仓库外物理目录仍受支持。
 
 ## 签名发布流程（维护者）
 
 - `scripts/release/New-ReleaseSigningKey.ps1`：在仓库外生成 RSA PKCS#8 私钥和 `RSAKeyValue` 公钥；私钥不得写入仓库。
 - `scripts/release/Sign-ReleaseManifest.ps1`：检查 DLL 名称、程序集名和版本，流式计算大小与 SHA-256，并生成 canonical manifest 与 detached signature。
 - `tests/release-signing.tests.ps1`：验证密钥生成、清单 canonical 规则、签名和 DLL 校验流程。
-- `tests/release-workflow.tests.ps1`：验证 workflow 只允许手动触发、channel 与分支门禁、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
-- `.github/workflows/release.yml`：只接受 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入；新 tag 必须是四段规范数字；`stable` 仅允许从 `main` 触发并通过 GitHub Releases API 检查最高正式版本，要求前三段至少一段变化，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配、版本门禁或签名失败时会安全失败。
+- `tests/release-workflow.tests.ps1`：验证手动与可复用发布入口、channel 与分支门禁、输入和固定资产、版本校验、签名步骤及 `--verify-tag`。
+- `.github/workflows/release.yml`：保留 `workflow_dispatch` 的 `tag`、`channel`、`key_id` 输入，也供[经审核的发布请求](release-requests.md)通过 `workflow_call` 复用；以下分支触发约束适用于手动入口，请求入口另核验固定源码 SHA、通道归属和 CI。新 tag 必须是四段规范数字；`stable` 仅允许从 `main` 触发并通过 GitHub Releases API 检查最高正式版本，要求前三段至少一段变化，`beta` 仅允许从 `beta` 触发；checkout 对应 tag，校验 `Version`、`FileVersion`、`AssemblyVersion`，构建并测试签名后发布四个固定资产。`beta` 创建 prerelease，`stable` 创建普通 Release，不部署服务器。匹配 Secret 缺失或错误、未知 key、未知 channel、分支错配、版本门禁或签名失败时会安全失败。
 
 ## 正式版更新实现约束
 
@@ -103,7 +108,7 @@ tests/EmbyWatchTogether.Tests/ 单元测试和同步边界回归测试
 scripts/build.ps1              构建、测试、发布 DLL 并生成 ZIP
 scripts/release/               生成签名密钥和发布清单
 tests/release-*.tests.ps1      签名与发布 workflow 静态/集成校验
-.github/workflows/release.yml  手动签名发布 workflow，不部署服务器
+.github/workflows/release.yml  手动/可复用签名发布 workflow，不部署服务器
 docs/                          当前实现说明、排错和协作流程
 ```
 
