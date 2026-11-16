@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "tag": "v1.7.3.0",
+  "channel": "stable",
+  "keyId": "prod-2026-08",
+  "sourceSha": "12911e35b674084e67aaef62ed2dec6c4da9d04d",
+  "ciRunId": 43816630870,
+  "title": "Watch Together v1.7.3.0 正式版",
+  "notesPath": "docs/releases/v1.7.3.0.md",
+  "notesSha256": "6444df19375b4f39ecb51861fe82cf6d169373a6e4e1dee7215a60caad6f29bc"
+}
