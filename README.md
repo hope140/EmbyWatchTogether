@@ -12,7 +12,7 @@
 
 | 通道 | 当前版本 | 适合谁 |
 | --- | --- | --- |
-| 正式版 | [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0) · [说明](docs/releases/v1.7.1.0.md) | 希望使用 stable 版本的用户 |
+| 正式版 | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [说明](docs/releases/v1.7.3.0.md) | 希望使用 stable 版本的用户 |
 | 测试版 | [v1.7.2.20](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20) · [说明](docs/releases/v1.7.2.20.md) | 愿意测试最新改进的用户 |
 
 v1.7.2.20 为 beta/prerelease，调整普通成员重新同步按钮和管理员设置页文案，不改变权限或同步逻辑。查看[全部版本说明](docs/releases/README.md)和[客户端验收范围](docs/client-compatibility.md)。
