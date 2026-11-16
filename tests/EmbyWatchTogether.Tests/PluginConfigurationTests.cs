@@ -7,8 +7,56 @@ using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
 {
+    [Collection("Plugin singleton")]
     public class PluginConfigurationTests
     {
+        [Theory]
+        [InlineData("2.0.0", null)]
+        [InlineData("2.0.0", "99.0.0")]
+        [InlineData(null, "99.0.0")]
+        public void UpdateConfiguration_PreservesInternalPendingVersionAndUpdatesUserSettings(
+            string pendingVersion,
+            string submittedPendingVersion)
+        {
+            var paths = new Mock<IApplicationPaths>();
+            paths.SetupGet(p => p.PluginConfigurationsPath).Returns(@"C:\watch-together-tests");
+            var serializer = new Mock<IXmlSerializer>();
+            serializer.Setup(x => x.DeserializeFromFile(typeof(PluginConfiguration), It.IsAny<string>()))
+                .Returns(new PluginConfiguration());
+            var plugin = new Plugin(paths.Object, serializer.Object);
+            plugin.SetAttributes(
+                @"C:\watch-together-tests\Emby.Plugins.WatchTogether.dll",
+                @"C:\watch-together-tests\data",
+                new Version(1, 0, 0, 0));
+            plugin.SetStartupInfo(_ => { });
+            plugin.Configuration.PendingUpdateVersion = pendingVersion;
+            PluginConfigurationChangedEventArgs received = null;
+            plugin.ConfigurationChanged += (_, args) => received = args;
+            var submitted = new PluginConfiguration
+            {
+                PendingUpdateVersion = submittedPendingVersion,
+                PollIntervalSeconds = 1.5,
+                PauseOtherOnPlaybackStop = false,
+            };
+
+            try
+            {
+                plugin.UpdateConfiguration(submitted);
+
+                Assert.Equal(pendingVersion, plugin.Configuration.PendingUpdateVersion);
+                Assert.Same(submitted, plugin.Configuration);
+                Assert.Equal(1.5, plugin.Configuration.PollIntervalSeconds);
+                Assert.False(plugin.Configuration.PauseOtherOnPlaybackStop);
+                Assert.NotNull(received);
+                submitted.PollIntervalSeconds = 2;
+                Assert.Equal(1.5, received.Options.PollIntervalSeconds);
+            }
+            finally
+            {
+                typeof(Plugin).GetProperty("Instance")?.GetSetMethod(true)?.Invoke(null, new object[] { null });
+            }
+        }
+
         [Fact]
         public void NotifyOtherOnPlaybackStop_DefaultsToEnabledAndIsIndependent()
         {

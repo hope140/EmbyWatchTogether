@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 330" role="img" aria-labelledby="title desc">
+  <title id="title">一起观看概念流程</title>
+  <desc id="desc">两位用户各自播放同一视频，通过 Emby Server 中的 Watch Together 房间协调播放状态和进度。</desc>
+  <rect width="900" height="330" rx="24" fill="#111c2c"/>
+  <text x="450" y="43" text-anchor="middle" fill="#e8f1fa" font-size="22" font-family="sans-serif">同一服务器 · 双人房间 · 同步观看</text>
+  <rect x="32" y="85" width="220" height="160" rx="18" fill="#20344a" stroke="#6a9cb3" stroke-width="2"/>
+  <circle cx="142" cy="128" r="22" fill="#8ed7da"/>
+  <text x="142" y="181" text-anchor="middle" fill="#fff" font-size="23" font-family="sans-serif">用户 A</text>
+  <text x="142" y="213" text-anchor="middle" fill="#c8dce6" font-size="16" font-family="sans-serif">播放同一视频</text>
+  <rect x="325" y="72" width="250" height="186" rx="18" fill="#24465a" stroke="#8ed7da" stroke-width="2"/>
+  <text x="450" y="126" text-anchor="middle" fill="#fff" font-size="23" font-family="sans-serif">Emby Server</text>
+  <text x="450" y="161" text-anchor="middle" fill="#8ed7da" font-size="19" font-family="sans-serif">Watch Together</text>
+  <text x="450" y="198" text-anchor="middle" fill="#e8f1fa" font-size="16" font-family="sans-serif">房间与播放状态协调</text>
+  <rect x="648" y="85" width="220" height="160" rx="18" fill="#20344a" stroke="#6a9cb3" stroke-width="2"/>
+  <circle cx="758" cy="128" r="22" fill="#8ed7da"/>
+  <text x="758" y="181" text-anchor="middle" fill="#fff" font-size="23" font-family="sans-serif">用户 B</text>
+  <text x="758" y="213" text-anchor="middle" fill="#c8dce6" font-size="16" font-family="sans-serif">播放同一视频</text>
+  <path d="M264 165h49m-9-8 9 8-9 8m-31-16-9 8 9 8M587 165h49m-9-8 9 8-9 8m-31-16-9 8 9 8" fill="none" stroke="#8ed7da" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="450" y="298" text-anchor="middle" fill="#c8dce6" font-size="16" font-family="sans-serif">通过会话状态协调暂停、继续与进度</text>
+</svg>

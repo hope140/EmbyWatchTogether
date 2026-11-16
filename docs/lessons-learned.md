@@ -2,6 +2,19 @@
 
 本文件只收录已验证、可复用且不属于单次任务日志的经验。写入前搜索去重；发现失效时直接更新当前事实并注明依据。
 
+## 主题导航
+
+以下导航只帮助定位；原章节、编号、结论和证据保持不变。当前状态见[排期](development-roadmap.md)，历史过程见[历史索引](history/README.md)。
+
+| 主题 | 优先阅读章节 |
+| --- | --- |
+| 身份、命令与停止代次 | [2](#2-命令确认必须绑定会话身份)、[6](#6-播放停止必须由持续快照确认)、[7](#7-seek-失败必须冻结原目标并有界重试)、[8](#8-房间副作用必须在-gate-内重新授权)、[11](#11-会话选择必须传入当前时间)、[12](#12-多会话选择诊断必须低噪声且来自同一决策管线)、[13](#13-多共同-item-必须全局一致评分并在同分时安全等待)、[14](#14-watching-同分会话只沿用唯一有效历史身份)、[34](#34-确认停止要显式终止旧-pending-序列)、[35](#35-展示读取也要避免可变字段的重复解引用)、[39](#39-waiting-pause-exhaustion-belongs-to-each-target-condition)、[40](#40-operation-bound-notices-and-provably-stale-control-snapshots) |
+| 换片、恢复与暂停意图 | [17](#17-缓存能力不能证明远控连接仍然可用)、[20](#20-参与者恢复不能抢占主用户停止与晚到换集)、[37](#37-barrier-可以省阶段等待不能省命令后的快照确认)、[43](#43-晚到换集观察与停止恢复提示须各自验证)、[44](#44-提前暂停等待必须绑定加载观察与恢复意图)、[45](#45-自动-hold-恢复播放的证据分离2026-11-10) |
+| 签名、更新与构建 | [3](#3-签名更新失败必须-fail-closed)、[4](#4-签名自动更新必须先完成可信引导)、[9](#9-启动和更新状态必须按已完成事实发布)、[36](#36-安装内部状态不能由旧设置回写覆盖)、[41](#41-构建输出清理必须避开源码与路径别名) |
+| 宿主界面、权限与缓存 | [10](#10-嵌入式插件页必须兼容宿主主题变量)、[18](#18-嵌入式页面更新时必须同步页面缓存键)、[19](#19-页面账号变化必须同步使读取和操作失效)、[21](#21-原生控件调整先核对现有声明与外观覆盖)、[22](#22-动态原生控件必须保留构造器添加的样式类)、[23](#23-原生宽度和按钮必须复用当前宿主实际定义的类)、[24](#24-原生-flex-按钮的文字居中与边界需要独立验证)、[25](#25-原生标签必须在权限确定后注册并核对所有权)、[26](#26-房间片名展示需要状态权限与新鲜度共同约束)、[27](#27-背景图片加载也必须绑定当前媒体与权限)、[28](#28-媒体区域的比例与最小高度会影响窄屏宽度)、[29](#29-房间头像使用成员身份与独立图片生命周期)、[30](#30-拒绝旧请求回调时必须同步清理静态操作按钮)、[31](#31-插件分页不能依赖旧宿主的-dashboard-全局)、[32](#32-原生单选模式与跨宿主箭头定位需要分别核对)、[42](#42-分页后的操作反馈必须位于当前可见页面)；文末管理员接口、确认框和列表反馈 |
+| 异步消息与操作结果 | [15](#15-房间副作用部分失败必须如实反馈)、[16](#16-管理结果和底层异常必须走不同反馈通道)、[33](#33-取消令牌与有界等待是两个约束)、[38](#38-异步提示需要有界资源持续过期校验和独立通道)、[40](#40-operation-bound-notices-and-provably-stale-control-snapshots)；文末成功通知与保存阶段 |
+
+
 ## 1. 不要把自然播放位移当成手动 Seek
 
 - 现象：轮询快照中的位置持续变化，若直接比较两次位置会产生误报。
@@ -29,6 +42,8 @@
 - 补充规则：beta 更新检查应先在 GitHub API 返回的非 draft stable 与 prerelease 中选择最高规范版本，再验证该版本的固定资产；历史低版本缺少 manifest 或 signature 不得阻断最高版本选择，但最高版本自身缺少固定资产仍必须 fail closed。当前 GitHub API 的 35 个 Release、早期 `v1.0`/`v1.1`/`v1.2` 资产情况，以及 `GitHubReleaseClientTests` 的两个选择/缺资产测试共同确认了这一边界。
 - 补充规则：Releases API 查询与固定资产下载使用不同的有界超时；固定资产（DLL、manifest、signature）应允许 60 秒，Releases API 仍为 20 秒。该边界由服务器日志、pinned `MediaBrowser.Common` 反射确认的默认 `TimeoutMs=20000`、NAS 上官方 DLL 下载耗时 28.34 秒，以及 S5 候选实际运行更新检查任务完成共同验证；签名、哈希、来源/身份校验和失败清理仍必须保持不变。
 
+- 补充规则：beta 枚举应跳过历史非规范 tag，再选择最高规范非 draft 版本；只含非法或 draft 候选时仍拒绝更新。最终最高候选缺资产或签名错误不能回退低版本，规范 tag 和固定下载地址的校验规则不变。验证：GitHubReleaseClientTests 的历史标签混合/反序、全非法或 draft、最高签名失败及最高资产缺失用例。
+
 ## 4. 签名自动更新必须先完成可信引导
 
 - 现象：验签程序随待安装版本一起分发时，该版本无法仅凭自身证明内置公钥可信。
@@ -53,7 +68,9 @@
 - 规则：任何新增停止信号或未选中的候选会话都不得绕过当前会话选择与确认窗口；位置归零仍按正常 Seek 处理。确认停止后，暂停和通知副作用只执行一次。迟到换片候选必须绑定房间成员、用户/session identity、原 Item 和远控能力；参与者换 Item/会话、能力不可信、房间生命周期改变或候选超过 10 秒时立即失效。
 - 验证：真实 Emby Theater 与 embyToLocalPlayer 日志复现了短暂停止后恢复，以及旧 stopped Session 与当前播放并存导致的误判；`SyncEngineTests` 覆盖同用户同 Item 的旧 stopped Session、短暂 stopped/缺失恢复、持续异常确认、seek-to-zero，以及主用户换片在 2 秒同轮、停止确认后 4/7 秒恢复和 10 秒过期。
 - 补充验证：`StoppedPlaybackTests` 直接使用 SDK 的播放删除/重建对象及实际 Bridge → Provider → SyncEngine，覆盖 Stop 后同 ID 迟到进度、明确 Start、重复 Start、不同 ID/会话、缺失身份和发送途中撤销。测试需遵循目标分支的 Barrier 推进时序：beta 在条件满足时同轮推进，Stop 注入必须早于 Restore 发送；负例必须配合实际发送的正例，避免空跑。Stop 之前的异常跳变仍可能被同步；这些测试不是初始 EOF 根因证明或真实双客户端验收。同 ID 且无法鉴别的 Start/Stop 乱序边界见 architecture。
-- 服务端契约回归：Emby 4.10 Stop 在事件前替换 `PlayState`；只直接 Raise Stop 的夹具漏掉了已捕获旧快照未撤销的问题。按真实顺序清媒体、替换状态再 Raise Stop，旧实现会在命令间 Stop 后发出两条 Unpause。过滤器须按播放对象保留本生命周期的全部快照标记，并区分同 ID 的新对象。Start 的测试也应恢复 `NowPlayingItem`，SDK GetOrAdd 对已有对象仅更新播放状态，不等于完整 SessionManager Start。测试包含先采样后首次 Progress、状态多次替换、同对象新 Start 后再次 Stop、旧对象迟到 Progress/Stop、目标排队后 Stop/Start 与并发采样；来源排队窗口、首次身份观察前的旧快照以及不可辨别的同对象乱序仍是明确边界，不能把这些隔离断言写成真实宿主验收。
+- 服务端契约回归：Emby 4.10 Stop 在事件前替换 `PlayState`；只直接 Raise Stop 的夹具漏掉了已捕获旧快照未撤销的问题。按真实顺序清媒体、替换状态再 Raise Stop，旧实现会在命令间 Stop 后发出两条 Unpause。过滤器须按播放对象保留本生命周期的全部快照标记，并区分同 ID 的新对象。Start 的测试也应恢复 `NowPlayingItem`，SDK GetOrAdd 对已有对象仅更新播放状态，不等于完整 SessionManager Start。测试包含先采样后首次 Progress、状态多次替换、同对象新 Start 后再次 Stop、旧对象迟到 Progress/Stop、目标排队后 Stop/Start 与并发采样；来源排队窗口现由房间 gate 内捕获的来源快照数组与发送前停止标记复查覆盖，不能改为发送时按 SessionId 查找，否则同 ID 新 Start 会放行旧命令；Pause 保持只检查目标。`StoppedPlaybackTests.QueuedSourceStop_PreventsTransport` 和 `SourceBoundDispatch_StopBoundary` 覆盖来源/目标 Stop、同 ID Start、Pause 例外及进入传输后的边界。首次身份观察前的旧快照、不可辨别的同对象乱序和已进入底层的发送仍是明确边界，不能把这些隔离断言写成真实宿主验收。
+
+- 历史与命令资格分离：1.7.2.9 的共享撤销标记也会使 `Previous.Online` 变为 false，不能再用它判断“停止前曾播放哪个 Item”。换集识别使用采样时冻结的在线事实；当前命令仍使用可撤销的 Online/Stopped。桥接路径停止后的新 Item 必须有明确 Start，单独的新/旧 ID Progress 不构成重开证据；迟到候选同时绑定参与者原播放撤销标记，同 ID Stop/Start 也使候选失效。快速路径在 Stop/Start 跨轮询时同样核对原参与者。`BridgeTransition_*` 通过真实 Bridge、SDK SessionInfo、SyncEngine、CommandIssuer 到模拟 ISessionManager 发送边界，覆盖状态替换、2.635/3.3 秒、快速换集及禁止发送边界；这仍不是 NAS 双端播放验收。
 
 ## 7. Seek 失败必须冻结原目标并有界重试
 
@@ -130,7 +147,7 @@
 ## 17. 缓存能力不能证明远控连接仍然可用
 
 - 现象：已进入 `Watching` 的 embyToLocalPlayer 会话在远控 WebSocket 被重置后，原始 `SupportsRemoteControl` 先变为 `false`，缓存命令列表仍让有效能力报告为 `true`；普通 HTTP 进度继续上报，但 Pause 在重连前无法送达，插件立即暂停另一端会造成短暂分叉。
-- 结论：缓存能力只证明该会话曾声明远控命令，不能证明当前 WebSocket 可用；全局资格和初始 Barrier 继续使用严格规则。只有身份连续、同一有效媒体、没有 Pending 且仍有有效能力证据的既有 `Watching` 会话可以等待最多 8 秒恢复，窗口内不发送命令。
+- 结论：缓存能力只证明该会话曾声明远控命令，不能证明当前 WebSocket 可用；全局资格和初始 Barrier 继续使用严格规则。身份连续、同一有效媒体、没有 Pending 且仍有有效能力证据的既有 `Watching` 会话可以等待最多 8 秒恢复。主用户停止后的换片另受首次停止起算的 10 秒候选期限约束，已开始的 Handoff 保留原期限；这些等待均不授权向 raw=false 目标发送命令。
 - 规则：恢复窗口必须绑定 SessionId、ItemId 和受影响用户集合，不得刷新同一故障的起始时间；身份、Item、有效能力、Pending 或用户集合变化立即退出，超时仍执行现有安全暂停。窗口内真实暂停或 Seek 在能力恢复后按保留快照最多处理一次。
 - 验证：两次真实 ETLP/Emby 日志均显示 HTTP 进度正常、WebSocket `ConnectionResetError`、重连后重新声明能力并恢复命令；`SyncEngineTests` 覆盖短暂恢复、8 秒超时、初始 Waiting、Session/Item 变化、Pending、有效能力消失、恢复后的 Pause/Seek 以及重置清理。真实测试版客户端验收仍待执行。
 
@@ -139,6 +156,8 @@
 - 现象：只替换嵌入式 HTML 或 JavaScript 资源时，Emby Web 可能继续使用旧缓存，导致新界面与旧控制器不匹配。
 - 结论：修改嵌入式管理页时，同时递增 `Plugin.GetPages()` 中 HTML 页面和 JavaScript 控制器的 `Name`，并让 HTML 的 `data-controller` 使用新的控制器键；对应页面测试必须检查三者一致。
 - 验证：GitHub Token 管理区加入后，页面键和控制器键同步更新为 `WatchTogetherDiagnosticsV2` / `WatchTogetherDiagnosticsV2.js`，`PluginPagesTests` 检查嵌入资源与控制器声明。
+
+- 2026-11-12 补充：普通账号角色修复更新服务器 JS 后，新版 Windows 客户端完全重启仍报旧错误；页面/控制器沿用 V20，资源可缓存且条件请求为 304。一起升级三页、控制器、HTML 与路由引用至 V21 后，用户确认问题解决。服务器已返回新字节不等于客户端已执行新模块；未抓取客户端网络时不把 SDK 离线回退判为根因。`RoleFix_RetiresCachedV20PageAndControllerKeysTogether` 与三页/多宿主浏览器回归锁定资源契约。
 
 ## 19. 页面账号变化必须同步使读取和操作失效
 
@@ -232,6 +251,130 @@
 - 箭头差异：当前 Web 在独立 `.emby-select-wrapper` 内用 top/bottom 与 flex 居中；旧 Theater 把 label、select、带隐藏占位的 `.selectArrowContainer` 放在同一父节点，依赖顶部偏移和 margin-top。客户端 GenericEdit 适配层已有基于控件 grid 行的修正，但其作用域不覆盖本插件页面。
 - 修正：V16 四个 select 与 Madby 普通单选一样使用 `is="emby-select"`，菜单由宿主默认规则选择。插件自己的 `.wt-selectField` 仅将旧版直属 label、select、说明与原有箭头放到对应 grid 行，隐藏旧箭头占位并清除其 margin-top；新版 wrapper 内的箭头继续由宿主管理，不绘制第二个箭头，不改客户端安装文件。V15 曾错误地强制 custom，现已按用户最终参考撤回。
 - 验证：菜单模式与旧版 390px 长标签几何回归修正前失败，后者偏差约 64.88px；修正后旧/新两种 DOM、390/1280px 与四个控件的中线偏差小于 1px。完整浏览器 89/89、.NET 545/545，构建打包通过。fixture 只模拟两种实际结构及定位规则，不模拟真实菜单运行；真实 Web 和客户端证据必须单独记录。
-- 测试切页就绪：切页后须等待目标面板及预期控件可见，不能把旧房间容器残留的 `aria-busy=false` 当作目标路由已就绪。管理员权限重新读取期间，Settings 会暂时回退到 rooms；[main 文档合并后的 Windows CI](https://github.com/hope140/EmbyWatchTogether/actions/runs/42963190088/attempts/1) 在这个窗口读到零个 select，而失败截图中 Settings 控件已正常出现。同一源码重跑通过不代表竞态消失；本次仅回移 [beta 已有的测试等待修复](https://github.com/hope140/EmbyWatchTogether/commit/880c57bf5bd4b469bf58b74e689dcc8f7d86fcff)，保留 main 的 V16 路由、箭头中线及右边距断言，不改产品代码或将 fixture 结果当成真实客户端验收。
+- 浏览器测试切页后须等待目标面板及其预期控件可见，不能把旧房间容器残留的 `aria-busy=false` 当作目标路由已就绪。管理员权限重新读取期间，Settings 会暂时回退到 rooms；Windows CI 曾在这个窗口读到零个 select。挂起 Settings 的 Users 响应可稳定复现，改为目标面板和控件数量等待后通过，原箭头中线及右边距断言保留。
 - 真实 Web 对照：神医与 Madby 的表单由 `genericui / GenericEdit` 生成。神医“搜索范围”为 multiple select，展开的是带复选框的虚拟滚动 actionSheet；Madby“元数据语言 / 图片语言 / 国家地区”为普通单选，未指定 custom，沿用系统单选菜单。不能用前者的多选展开形态定义全部原生单选的默认外观。V15 一起看显式 custom 的单选使用同一宿主 actionSheet 的单选形态；其闭合态实测高度约 34.615px、字号 14.424px、内边距与 Madby 单选相同，Web 箭头偏差约 0.0052px。这些测量只证明相应几何与组件事实，最终外观反馈见下条。
 - 最终反馈：用户在 V16 部署后确认“可以了，进行下一步”。本轮最终普通单选外观与箭头方案据此记为用户确认；该反馈不扩大为原始客户端临时卡住已复现、真实双端播放已验收或公开发布授权。后续本地 1.7.0.1 包和已部署的 1.7.0.0/V16 候选保持身份区分。
+
+## 33. 取消令牌与有界等待是两个约束
+
+- 现象：底层返回不完成的 Task，或在返回 Task 前同步阻塞时，仅 CancelAfter 不能释放调用方。
+- 管理员更新提示的 `DisplayMessage.TimeoutMs` 只控制展示时间，不是传输截止时间。自动更新在安装前会等待提示，因此也要复用有界发送；未完成传输的占位按 `ISessionManager` 共享，不能随每次计划任务新建的更新管理器丢弃。`PluginUpdateManagerTests.AutomaticCheck_StalledNotificationIsBoundedAcrossManagersAndLateFailureIsIgnored` 与取消用例覆盖同步阻塞、未完成 Task、跨管理器占位和迟到失败；提示失败不改变安装及待重启事实。
+- 结论：内置发送器使用独立有界等待，工厂在实际开始前核对已用时间与取消状态；计时不完全依赖线程池回调。
+- 规则：不响应取消的传输保留对应会话通道槽位并限制总量；播放控制与 PlayItem 共用通道，DisplayMessage 独立占位，两类通道共享 issuer 的 64 个未完成传输上限。迟到成功或失败只清理资源、观察异常，不回写房间状态。Task 完成发布与 continuation 清理不是原子操作，下一次准入要依据 Task.IsCompleted；旧清理不能删除后续传输的新槽位。
+- 验证：SessionBridgeCommandIssuerTests 的不协作 Task、同步阻塞、排队过期、容量和清理竞争用例，以及 SyncEngineTests.PollOnce_UncooperativeTransportTimesOutAndNextRoomStillRuns。
+- 引擎停止还必须覆盖正在执行的轮询：先发布停止状态，再在独立任务中取消传输令牌；每房间及命令入口重查停止状态，返回后的迟到结果不得建立 Pending 或推进 Handoff。取消回调不能在引擎锁内执行，取消源在回调完成后释放。关联取消源的 `Dispose()` 也可能同步等待父取消回调，因此正常释放与停止启动需在同一锁下串行；停止期间未完成的命令取消源由现有取消任务在回调结束后统一释放，轮询不得持有房间锁等待它。`SyncEngineTests` 的 `Shutdown*` 与 `PollOnce_AfterShutdownDoesNotIssueCommands` 用例覆盖快照阻塞、播放/换片发送、迟到成功和阻塞取消回调；已进入底层的物理发送仍不可强制撤回。
+
+## 34. 确认停止要显式终止旧 Pending 序列
+
+- 现象：主用户继续后立即停止，停止观察窗口跳过普通 Pending 确认，已执行的 Unpause 仍可能挡住停止后的 Pause。
+- 结论：只有确认停止的终态转换先清除旧 Pending，再执行停止副作用；其他同步路径继续保留原有 Pending 冲突保护。
+- 验证：SyncEngineTests.ConfirmedStop_AcknowledgedUnpauseDuringDebounceDoesNotSuppressPeerPause，以及 Pause/Seek、选项关闭、替换会话与单次副作用用例。
+
+## 35. 展示读取也要避免可变字段的重复解引用
+
+- 约束：Rooms 和 State 允许非原子展示读取，但一次状态原因计算应只捕获一次 Error，再使用局部值判空和分类。判空后重新读共享属性可能遇到同步线程清空，产生空引用异常。
+- 验证：WatchTogetherServiceRoomTests.StatusReason_ConcurrentErrorChangesDoNotThrowForRoomsOrState 实际覆盖两个 API 入口并枚举房间响应；既有稳定原因映射用例保持有效。
+- 相关边界：Handoff 的 PlayItemPending 独立于普通 Pending。手动 pause/resume 的同步冲突检查应包括 Handoff 对象；RoomManagerTests.Action_PauseOrResume_HandoffConflictDoesNotIssueOrMutate 验证零发送、稳定错误和运行时不变。
+
+## 36. 安装内部状态不能由旧设置回写覆盖
+
+- 现象：设置页读取配置后，安装器写入待重启版本，迟到的设置 POST 又清掉 pending，下一轮任务重复安装同一版本。
+- 规则：设置替换和 pending 持久化共用配置锁；设置请求只更新用户设置，保留当前内部 pending。安装器在锁内取得当前对象并保存，不持有旧配置对象跨越替换边界；初始配置为空时先建立 BasePlugin 所持有的配置对象。
+- 验证：PluginConfigurationTests 的保留/伪造 pending 与不可变事件测试，WatchTogetherUpdateTaskTests 的旧设置重放、双向屏障交错及初始空配置用例。对应核心回归在原基线失败、修复后通过。补充第 9 节的已完成事实约束，无需新增 ADR。
+
+- 待重启版本也是更新下限：候选必须同时高于运行中版本和有效的已安装待重启版本，三段与四段的尾零版本视为相等，避免切换通道后用较低版本覆盖已安装 DLL。保存失败时以内存 pending override 为准；后续更高版本安装成功后，该 override 也必须前进，已有安装诊断仍保留。
+- 验证：`PluginUpdateManagerTests.PendingVersion_*` 覆盖手动/自动检查与安装、尾零等价、保存失败后的重复/降级拒绝及更高版本安装后的状态刷新；新增 13 项中 11 项在旧实现失败，修复后全部通过。此证据来自安装器 mock，不等同于真实 Emby 更新验收。
+
+## 37. Barrier 可以省阶段等待，不能省命令后的快照确认
+
+- 事实：原正常快路在 Pause 确认后和 Seek 满足后各等待一轮才执行下一阶段。改为有界的 Pause → Seek → Restore 同轮推进后，理想下一轮确认的双端播放夹具由 5/6 轮缩短为 3/4 轮；已暂停且对齐时一轮即可进入 Watching，无需发送重复 Pause。
+- 约束：仅当前快照已满足且无 Pending 时跳过命令；实际发送后结束本轮阶段推进，保持后续快照确认、身份绑定、暂停后重新锚定、固定 Seek 目标和绝对重试预算。手动 Seek 在检测当轮启动 BarrierTick，仍不能用本轮旧快照确认刚发出的 Pause。
+- 验证：SyncEnginePerformanceTests 的阶段轮数、已暂停快路、未确认 Pause/Seek 和当轮手动 Seek 用例；新增三条阶段回归在逻辑修复基线失败。既有 Seek 失败测试需在 Pause 确认前注入失败，否则会错过提前后的发送轮次。
+- 证据边界：轮数来自确定性夹具，周期轮询与事件唤醒、客户端上报和网络耗时会共同影响实际速度，不能直接换算成真实客户端收益。
+
+## 38. 异步提示需要有界资源、持续过期校验和独立通道
+
+- 规则：每引擎一个提示 worker、64 条等待消息；队满丢弃新提示，超过 10 秒寿命丢弃。寿命使用单调时间，并在出队后、等待 room gate 后和网络发送前重查；墙上时钟跳变不应改变排队寿命，当前时间仍用于会话过期选择。
+- 规则：排队时的身份只能作为目标绑定，发送前重新选取当前会话并核验原房间引用、服务器、joined 成员、Session/Item、能力、快照保护、通知设置和停止状态；消息网络发送在 gate 外执行。停止清空等待队列，取消在途工作而不等待不协作传输或取消回调。
+- 当前会话快照必须在取得房间 gate 后采样，不能使用等待 gate 前的结果。服务端批量消息也要在每个尚未发送的目标前重新核验：前一条网络发送期间可能发生暂离、房间删除、服务器或会话变化，失效目标应计为跳过。`SyncEnginePerformanceTests.DequeuedNotice_*` 与 `WatchTogetherServiceRoomTests.Message_BlockingIssuerDoesNotHoldRoomGate_AndRevalidatesLaterTargets` 覆盖这些交错，网络发送仍在 gate 外。
+- 集成约束：仅移出轮询线程仍不够；若 DisplayMessage 与播放控制占同一会话槽，慢提示仍可能使 Pause/Seek 被误判为超时。内部通道前缀隔离占位，Emby 接收原 SessionId，总未完成传输容量继续受限。
+- 验证：SyncNotificationDispatcherTests、SyncEnginePerformanceTests 的容量、异常恢复、边界过期、等待 gate、身份失效与 Stop/Dispose 用例，以及 SessionBridgeCommandIssuerTests 的双向通道隔离、容量和迟到清理用例。取舍见 [ADR-005](adr/005-sync-notification-dispatch.md)。
+
+## 39. Waiting Pause exhaustion belongs to each target condition
+
+- Same-item snapshots alone do not prove remote-control eligibility recovered. Clear the exhausted Waiting cycle only when the complete pair is eligible for a new Barrier.
+- Waiting stale commands are already discarded individually. A whole-runtime reset on one stale Session/Item must not renew an unchanged peer's exhausted budget; retain per-target identity/capability pruning.
+- Evidence: SyncEngineTests.WaitingPauseRetryLimit_SameItemRemoteFailureRemainsBounded covers immediate failure, accepted/no ACK, repeated polls, late paused status and full recovery. OnlyChangedTargetGetsNewBudget covers Session/Item/capability changes with immediate failure and unacknowledged transport success. The original same-item loop and stale Pending reset both fail their corresponding regressions before the guards.
+- Explicit user resync is an intentional new cycle. These deterministic tests do not establish the network/client root cause or continuous playback after Unpause. No architecture or ADR update is needed.
+- CI fixture isolation: SyncEngineTests and SessionBridgeCommandIssuerTests deliberately block ThreadPool work while asserting 100ms deadlines. Place them in a nonparallel Transport timing collection so other test classes cannot expire transport work before its entered signal. Keep the existing deadlines and assertions; this does not alter production scheduling.
+
+## 40. Operation-bound notices and provably stale control snapshots
+
+- Routine seek/pause/resume stages do not each need a toast. Report one completed alignment per participant; bound retry attempts by the alignment operation and discard queued notices after operation or stage changes. Already dispatched transport cannot be recalled.
+- 停止和不同视频文字也要在发送前复核原因，不能仅验证接收端 Session/Item；另一端已恢复或换片而接收端尚未改变时，旧提醒仍可能通过身份检查。停止文字的 0.5 秒合并只属于通知调度，不延迟真实 Pause，不延长 2 秒停止判定或 10 秒换集候选窗。
+- 停止确认中的 reset 会退休 alignment 通知 token，不能直接用它绑定该次延迟停止提醒。独立停止通知代次跨重复 stopped poll 保留，在真实新停止时换代，Handoff/Barrier/一般 reset 退休；发送时仍检查停止方缺失。完成提示复核当前双端条件，并仅在 FromMediaHandoff 明确提示跟随完成。没有新增阶段 toast。
+- 服务端批次通知也要逐条读取当前 `NotifyOnSyncActions`：首条传输阻塞时，用户可能已关闭自动通知。`WatchTogetherServiceRoomTests.Message_BlockingIssuerDoesNotHoldRoomGate_AndRevalidatesLaterTargets` 覆盖暂停、继续和重新同步的中途关闭；管理员主动 Message 明确不受自动通知开关限制。已进入传输的首条不能撤回，后续目标仍复查房间、身份与能力。
+- `HandoffNotificationTests` 及 `StoppedPlaybackTests.TheaterNotifications_*` 覆盖停止确认后 12 毫秒到达新 Start、迟到换片、陈旧双端状态、连续换片、暂停意图和通知开关，核对通知开启/关闭的播放命令序列一致；`SyncNotificationDispatcherTests` 覆盖单 Timer、ready 消息不受延迟项阻塞、64 条共享容量、0.5 秒及 10 秒边界和 Stop 清理。直接快照夹具、Bridge/SDK 事件链和真实客户端显示是不同证据层。
+- LastActivityDateUtc is not a playback sequence. Only reject strictly older activity in an eligible, complete, identity-stable Watching pair with no Pending. Never let this guard hide missing/stopped users, identity changes, eligibility loss or Pending deadlines. Equal/new timestamps keep real user controls, including the unavoidable fresh-timestamp replay ambiguity.
+- SyncToastTests and SyncToastReplayTests cover normal seek, pause-drag-resume, repeated polls, delayed confirmation, operation/stage retirement, older/equal/new timestamps and identity/capability negative cases. These fixtures are not evidence of the user's real network/client cause.
+- 诊断事件代码要同时进入服务端脱敏白名单与浏览器标签映射。`snapshot_ignored` / `older_activity` 在两层均保留后，才能显示及导出忽略旧快照的准确原因；未知或混入额外文本的值仍按原规则清洗。`SyncDiagnosticsTests.ExportPreservesSafeIgnoredSnapshotCodesOnly` 与浏览器诊断导出用例验证这条链路；页面/控制器/路由缓存键同步递增为 V17。
+
+## 41. 构建输出清理必须避开源码与路径别名
+
+- 现象：只拒绝仓库根目录及其祖先仍不够；`-OutputDirectory src` 会让待清理的插件输出目录指向 `src/EmbyWatchTogether`。旧实现的 `-ValidatePathsOnly` 实际接受该路径，后续递归删除会危及源码。
+- 规则：构建前及清理前拒绝输出与源码、测试、脚本、文档、协作配置目录或 `.publish` 暂存目录重叠；检查输出、归档、暂存路径及其祖先，遇到符号链接或 reparse point 直接拒绝。默认 `dist` 与独立仓库外物理输出目录保持可用；路径验证不创建、删除或改写文件。
+- 验证：`tests/build-path-guard.tests.ps1` 覆盖受保护目录及子目录、`..` 别名、暂存冲突、目录链接和安全输出；Linux 下修复后全部通过，正常 Release 构建、.NET 测试和单 DLL/ZIP 打包已在本地验证。[Windows CI 的 Validate job](https://github.com/hope140/EmbyWatchTogether/actions/runs/41171129653/job/124449125528)通过 25 项受保护路径、4 项别名（含 junction）和 5 项安全输出检查；该 run 的独立浏览器 job 失败，不能据此将整次 CI 标为通过。构建验证不代表发布或部署。
+
+## 42. 分页后的操作反馈必须位于当前可见页面
+
+- 现象：管理员创建成功文字原来显示在单页的房间卡片内。`192ea7b` 引入分页后，创建操作留在“创建与邀请”，房间卡被隐藏；成功后表单只剩“请输入房间名称”，顶部只显示列表刷新结果。手动切页又会清掉房间卡反馈。这一遗漏已包含在 v1.7.0.0，并非 v1.7.2.5 新引入。
+- 规则：创建表单单独显示 POST 结果，不依赖隐藏房间卡或容易被输入校验覆盖的文案。POST 已成功时，后续列表刷新失败不能否定创建事实；真正的 POST 失败保留输入并提示重试。离页清理及旧代次回调隔离继续生效。
+- 验证：浏览器实际完成删除与重建后，旧实现确有成功文字但其元素不可见。`create-feedback.spec.js` 的五项回归修复前四项失败、一项通过，修复后全部通过。该证据不代表 ETE 原生下拉菜单卡住的触发过程已经复现；程序化选值、几何与原生菜单展开须分别验证。
+
+## 43. 晚到换集观察与停止恢复提示须各自验证
+
+- 可复现路径：主用户暂缺时，原参与者 raw 远控标志变为 false，会使旧实现清除晚到换片候选；停止确认再清空 Previous 后，能力恢复也不能补跟随。离线回归证明这条路径存在；原现场未记录该标志，不能据此认定现场根因。
+- 规则：仅完整有效能力、在线未停止、原 User/Session/Item/时长连续且正常倍速的参与者可保留候选。10 秒从首次停止观察起算，不能因反复断连延期。原始远控不足只允许观察，不授权 Pause、Seek、Unpause 或 PlayItem；已开始的 Handoff 保持原期限并在恢复时复核身份。首次接受 raw=false 就记录一次等待事实，不能依赖下一轮仍异常才留下诊断。
+- 停止后同视频进度差大于 5 秒仍需要显式重新同步。位置归零、LastActivity 和 PlaybackStart 接收时间不能证明用户持续意图；命令 Pause 确认也不能排除其间用户操作。本次复用原有主用户锚点 Barrier，不增加自动 Seek。当前双端条件失效时必须撤回“双方同视频”的确认指引，条件恢复后才重新显示。
+- 验证：`SyncEngineTests.MediaHandoff_RawControlFlap_*` 覆盖首轮/后续 raw 波动、0.5/3.3/7 秒返回、9.999/10/10.1 秒边界、身份/权限/媒体/停止/生命周期失效及零不可控发送。`StoppedPositionRecoveryTests` 验证 0/16 秒等待、成员/管理员显式对齐和暂停意图、陌生用户拒绝、不同视频无自动切换，以及会话缺失/停止/能力丢失后提示降级和恢复。
+- 诊断字段也需验证语义：位置差写入 `DriftSeconds`，命令确认耗时写入 `LatencySeconds`，两者不可混用。服务端与浏览器仅放行固定事件码，混入额外文本仍清洗；raw 条件不足应称“远控条件恢复”，不能直接写成连接故障。
+
+- Theater 能力兼容：实际 35 项 GeneralCommands 未列 Pause/Unpause/Seek，严格 `CanControlPlayback` 会让迟到换集候选缺失，即使普通控制可正常派发。候选保留、被控检查和主控等待暂停三处必须采用同一发送器兼容谓词，同时保留 effective 标记和各自 raw/身份/时长/倍速门槛。只更改第一处会在后续阶段再次失败；把纯能力检查替换为整体有效播放检查则会误伤 runtime=0 的启动等待。`TheaterCapabilities_*` 用实际清单覆盖三类事件注册顺序及 3.736/4.587/5.339 秒延迟直到 Watching，验证有偏移时一次 Seek、已对齐时零 Seek，以及能力丢失、raw 拒绝、成员/身份/Start/10 秒边界。省略 Playstate 命令名不再被当作能力丢失，raw=false 仍只允许等待；这些 Bridge/SDK/模拟传输回归不是实机验收。
+
+## 44. 提前暂停等待必须绑定加载观察与恢复意图
+
+- Item 出现不等于播放器首帧就绪；正的起播位置也可能只是固定的起播参数。自动换片先正常发出参与者 PlayItem，主用户同目标有效快照至少观察 1 秒且进度推进后才请求 Pause。参与者目标也独立观察，不能复用主用户或 Handoff 的计时。
+- Pause 传输成功不能当作暂停 ACK，必须由后续相同身份的暂停快照确认；暂停等待阶段不能覆盖原来的播放意图。原已暂停或插件请求前手动暂停保留 true，成功后显式交给 Barrier，不能把插件造成的 IsPaused=true 误认为原始暂停意图。不可观察的同值本地 Pause 仍无法与插件保持暂停区分。
+- 成功判断必须排在绝对期限检查之后，晚到 Item/ACK 不能绕过 10 秒截止。主用户恢复播放退休旧恢复意图，改为原期限内无控制观察；明显 Seek、再次暂停、身份/媒体/权限变化和失败则要求显式重同步。后续普通 Waiting Pause、自动 Barrier 或新 Handoff 不能复活已失败操作。失败锁定跨通用 reset 保留，仅在管理员或成员 resync 真正获接受后显式清除。
+- `HandoffPrimaryHoldTests` 验证零/固定正位置、并行加载、Pause ACK 与尝试上限、原始/请求前手动暂停、等待中继续/Seek/Session/MediaSource/时长/权限变化、目标迟到和显式恢复。旧 Handoff 回归保留断言，并补真实的进度和 Pause ACK；长时间夹具新增快照必须使用当前时间，默认历史时间戳不能用于证明暖机条件。
+- 身份失效检查必须先于目标替换和 rebind。只测 Session 或 Item 单独变化不足以发现分支优先级绕过，必须覆盖 Session 与 Item 同时变化，确认不重建旧意图、不新增 PlayItem，也不重置期限。
+
+## 45. 自动 hold 恢复播放的证据分离（2026-11-10）
+
+- SDK 没有恢复来源，不能将恢复播放命名为用户点击。首次 playing 样本与 raw-control 波动同轮出现时也须先退休旧意图，防止后续 paused 样本进入旧 Restore。
+- 稳定观察基线与前一轮样本是不同证据。双方进度差必须持续在 2 秒容差内，且相邻样本不出现可观察的大幅跳动或时间戳回退；最终一组对齐位置不能抹掉中间 seek。原 10 秒截止优先于成功判断。
+- 主控和被控目标快照保留可撤销播放标记。`StoppedPlaybackTests.TheaterHoldResume_*` 通过真实 SessionBridge/SDK 的 PlayState 替换、Stop、同 ID Start 证明旧 hold 不复活，并验证恢复 Watching 后 Pause/Unpause/Seek 正常处理。其证据是模拟传输，不是实机显示验收。
+- 等待与成功文字都需发送时复核双端语义，不只核对通知 token。原先暂停不能收到“自动继续”承诺；已恢复、停止、换会话/媒体、失去能力或关闭通知的排队消息必须退出。首次快照异常也退休 hold，避免保护恢复后自动重建旧意图。
+
+
+## 列表刷新反馈与操作结果分开管理
+
+- 列表刷新不能共用全局或房间操作消息区，否则自动刷新会覆盖失败、部分成功或创建成功事实。成功刷新保持安静，错误使用列表旁独立区域，相同错误不重复改写 live region；恢复只清理自身错误。
+- 列表读取失败时仍须撤销当前有效列表和媒体状态。保留旧卡片用于展示时，展示缓存不能参与表单冲突或异步确认的资格校验；离页清除缓存和错误。`rooms-feedback.spec.js` 覆盖首次失败、旧列表、重试、实际轮询和操作消息隔离。
+
+## 宿主确认对话框不能依赖原生 script dialog
+
+- EWT 原生 `window.confirm` 返回 false 会在暂离、结束/删除、管理员重新同步与清 Token 的 API 请求前直接返回。桌面 WebView 可以关闭默认 script dialog，因此浏览器中原生确认通过不代表桌面宿主可用。
+- 已只读核对 Emby Web 4.10.0.40 的重启确认链和 Windows 2.317.2.0 的确认模块：使用宿主 `confirm`，传入普通 `text`、`title`、`confirmText` 和 `primary: 'cancel'`；确认 resolve（可为 undefined），取消 reject，不应按返回值真伪判断。确认组件和服务器重启的执行组件不是同一层，不应调用重启组件来实现一般确认。
+- 异步确认必须限定原页面 generation、账号/服务器、路由与房间成员权限状态；取消或过期不发请求，重复点击不叠加确认。模块加载失败要显示错误，不能回退为无确认执行。普通暂停、继续和诊断不应因此新增弹窗。
+- UI fixture 模拟宿主模块契约并禁止 native confirm，覆盖确认/取消、重复点击及生命周期失效；它不是实际宿主的视觉或交互验收。真实新版客户端与旧版客户端仍须单独验证。
+
+## 成功通知与保存阶段结果
+
+- Emby Web 4.10.0.40 与 Windows 2.317.2.0 的 toast 模块接受 text 并返回 Promise，使用 status 语义；模块导出兼容 function/default。宿主将 text 作为 HTML 渲染，因此当前适配层只传固定可信文案。通知失败须与已完成的业务 Promise 分离，既不能误报业务失败，也不能重发请求；保留独立可访问备用区域。
+- 配置保存的读取、提交和回读必须分别标识结果。提交拒绝或网络断开不能证明服务器未写入；提交成功后回读失败也不能再称保存失败。`config-save-stages.spec.js` 用实际夹具写入后拒绝响应覆盖不确定结果，并覆盖生命周期失效；这些自动测试不是服务器人工故障验收。
+
+## 管理员接口失败不能用于普通用户角色探测（2026-11-12）
+
+- Emby 4.10.0.40 实际把 `RequireAdmin` 的 `UnauthorizedAccessException` 映射为 HTTP 500；mock 的 403 不能证明宿主行为。先读取匹配当前身份且含明确布尔策略的用户信息，仅管理员调用用户目录；失败不默认管理员，也不吞掉真实 500。
+- 服务端权限仍是边界；页面请求须受账号、服务器与页面代次保护。固定 SDK 不包含完整 HTTP 映射实现时，不猜测替代异常类型。证据与限制见[调查记录](maintenance/nonadmin-role-access.md)。

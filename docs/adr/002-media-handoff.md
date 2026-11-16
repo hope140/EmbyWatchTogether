@@ -2,6 +2,7 @@
 
 - 状态: accepted
 - 日期: 2026-09-14
+- 决策补充: 2026-10-31，自动换片时先正常加载，再保持主用户暂停等待并传递原播放意图。
 - 相关组件: SessionBridge、IPlayItemIssuer、SyncEngine、RoomRuntime、Barrier、Participant Resync
 
 ## 背景
@@ -23,6 +24,10 @@ Watch Together 的 `Barrier` 已负责双方位于同一 Item 后的 Pause → S
 选择方案 3。`SessionBridge` 使用 Emby 的 `SendPlayCommand` 封装 `SendPlayItemAsync`，通过 additive public `IPlayItemIssuer` 提供给同步引擎。`RoomRuntime` 保存临时 `MediaHandoffState`，绑定目标 Item、Primary/participant Session identity 和 generation。只有当前 participant 用户、Session 和 `SessionSnapshot.ItemId` 均确认目标 Item 后，才清除 Handoff 并进入 Barrier。
 
 主用户的 Item 变化触发 Handoff；participant 自行换片仍进入安全 Waiting。显式 Participant Resync 只作用于非 Primary participant，即使请求由 Primary 发起也不会向 Primary 发送 PlayItem。PlayItem 发送使用取消和 5 秒外部超时，确认等待与重试有界；目标或 Session identity 变化会使旧 generation 失效，最终失败回到 Waiting。
+
+自动换片且参与者尚未位于目标时，PlayItem 仍先正常发出。主用户目标媒体在相同 User/Session/Item/MediaSource、完整播放能力与有效时长下至少观察 1 秒且位置推进后，才请求 Pause；Item 出现或固定正起播位置均不足以授权提前暂停。主用户已经暂停，或插件请求前已自行暂停时保留暂停意图。发送成功不是 ACK，必须等待后续同身份暂停快照，最多两次请求，分别采用既有 3 秒与末次额外 1 秒确认宽限，总流程不超过 Handoff 原 10 秒期限。
+
+参与者目标媒体也独立观察至少 1 秒；播放中必须有位置推进，已暂停则不另发 Pause。其后复用 Barrier，将本次主用户原暂停/播放意图显式传递到 Restore。服务器观察不能证明首帧呈现，不保证零秒同时起跑。暂停 ACK 后观察到主用户继续时，不推断是用户还是播放器发起，而是退休旧意图并进入无控制观察。原 PlayItem 可以完成，但不重试，也不再发送 Pause、Seek 或 Unpause。仅当双方仍绑定同一 User/Session/目标 Item/MediaSource、原播放未被 Stop 撤销、有效权限与正常倍速成立，被控满足原至少 1 秒起播确认，且双方持续播放、进度差不超过既有 2 秒容差再保持至少 1 秒时，直接进入 Watching。稳定观察沿用原 10 秒截止，不重新计时或通过 Barrier 自动追赶。明显拖动、再次暂停、断连/快照失败、Session/媒体/能力变化、超时或过大进度差会取消，不能以旧意图重新暂停或恢复。自动 hold 失败后，内存 `HandoffRequiresResync` 阻止后续自动命令，通用 reset 不清除此标记，仅获接受的管理员或参与者 resync 显式解除；删除房间或重建进程自然清空运行时。已有显式 Participant Resync 不引入这套提前暂停策略。
 
 ## 选择原因
 
@@ -48,4 +53,11 @@ Watch Together 的 `Barrier` 已负责双方位于同一 Item 后的 Pause → S
 - [RoomState.cs](../../src/EmbyWatchTogether/RoomState.cs)
 - [SyncEngine.cs](../../src/EmbyWatchTogether/SyncEngine.cs)
 - [SyncEngineTests.cs](../../tests/EmbyWatchTogether.Tests/SyncEngineTests.cs)
+- [HandoffPrimaryHoldTests.cs](../../tests/EmbyWatchTogether.Tests/HandoffPrimaryHoldTests.cs)
 - [SyncDiagnosticsTests.cs](../../tests/EmbyWatchTogether.Tests/SyncDiagnosticsTests.cs)
+
+## 2026-11-10：恢复播放后的自然对齐
+
+稳定窗口起点与相邻样本连续性分别保存。不能只用相对初始位置的位移判断连续性，否则前进后回退可能被误收为就绪。首次恢复播放恰逢 raw 远控丢失时也必须先退休旧意图，不能落入旧权限恢复分支后重新 Unpause。主控、被控目标的原快照保留 Stop 撤销标记；真实 SDK PlayState 替换、同 ID Stop/Start 均不能复活旧 hold。
+
+新目标仍建立新的 Handoff 代次；已失败的旧操作必须显式 resync。服务器观测无法识别未上报的操作、同值暂停或容差内小幅 seek，也不能证明首帧或恢复来源。本次不新增 ETE 专用协议、不提前切集。`HandoffPrimaryHoldTests`、`HandoffNotificationTests`、`StoppedPlaybackTests.TheaterHoldResume_*` 覆盖状态、通知与 SDK 传输；真实双端播放和提示显示仍需现场验收。

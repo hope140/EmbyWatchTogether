@@ -37,6 +37,7 @@ namespace Emby.Plugins.WatchTogether
             Capabilities = capabilities ?? new SessionCapabilityReport(false, Array.Empty<string>());
             SupportsRemoteControl = supportsRemoteControl;
             LastActivityDateUtc = lastActivityDateUtc;
+            WasOnlineWhenObserved = Online;
         }
 
         public string SessionId { get; }
@@ -68,6 +69,11 @@ namespace Emby.Plugins.WatchTogether
         public DateTimeOffset LastActivityDateUtc { get; }
 
         public bool Online => !string.IsNullOrEmpty(SessionId) && !Stopped;
+
+        // Historical evidence only; never use this to authorize a command.
+        // Revoking the playback must not erase a previously observed item.
+        internal bool WasOnlineWhenObserved { get; private set; }
+        internal bool HasExplicitPlaybackStart => Termination == null || Termination.HasStarted;
 
         public double PositionSeconds => PositionTicks / (double)TicksPerSecond;
 
@@ -120,6 +126,7 @@ namespace Emby.Plugins.WatchTogether
                 capabilities,
                 session.LastActivityDate);
             snapshot.Termination = termination;
+            snapshot.WasOnlineWhenObserved = snapshot.Online;
             return snapshot;
         }
     }

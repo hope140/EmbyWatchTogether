@@ -16,6 +16,10 @@ namespace Emby.Plugins.WatchTogether
 
         public string ParticipantSessionId { get; set; }
 
+        public long ParticipantRunTimeTicks { get; set; }
+        internal PlaybackTermination ParticipantTermination { get; set; }
+        public bool ControlWaitReported { get; set; }
+
     }
 
     /// <summary>
@@ -130,7 +134,16 @@ namespace Emby.Plugins.WatchTogether
 
         public MediaHandoffState Handoff { get; private set; }
 
+        internal SessionSnapshot HandoffControlRecoveryParticipant { get; set; }
+
+        // Survives generic recovery/reset. Only an explicit room resync clears it.
+        internal bool HandoffRequiresResync { get; set; }
+
         public BarrierState Barrier { get; set; }
+        internal object NotificationOperation { get; set; } = new object();
+        internal bool RetryNotificationSent { get; set; }
+        // A confirmed stop resets alignment; its separate notice survives that reset and later polls.
+        internal object StopNotificationOperation { get; set; }
 
         public DateTimeOffset? BarrierRetryAtUtc { get; set; }
 
@@ -314,6 +327,7 @@ namespace Emby.Plugins.WatchTogether
             SyncItemId = null;
             BarrierRetryAtUtc = null;
             Handoff = null;
+            HandoffControlRecoveryParticipant = null;
             ClearPrimaryItemTransitionCandidate();
             ParticipantResyncRequestedUserId = null;
             ClearTransientSessionRecovery();
@@ -357,6 +371,9 @@ namespace Emby.Plugins.WatchTogether
 
         private void ResetToWaitingCore(bool preservePrimaryItemTransitionCandidate)
         {
+            NotificationOperation = new object();
+            if (!preservePrimaryItemTransitionCandidate) StopNotificationOperation = null;
+            RetryNotificationSent = false;
             bool preserveStopIdentity = MissingSessionSinceUtc.HasValue;
             bool preserveAutoRepairHistory = Barrier?.FromAutomaticDriftRepair == true;
             State = RoomState.Waiting;
@@ -379,6 +396,7 @@ namespace Emby.Plugins.WatchTogether
             }
             BarrierRetryAtUtc = null;
             Handoff = null;
+            HandoffControlRecoveryParticipant = null;
             if (!preservePrimaryItemTransitionCandidate)
             {
                 ClearPrimaryItemTransitionCandidate();
@@ -399,6 +417,7 @@ namespace Emby.Plugins.WatchTogether
             string participantSessionId)
         {
             var previous = Handoff;
+            HandoffControlRecoveryParticipant = null;
             long generation = (previous?.Generation ?? 0) + 1;
             Handoff = new MediaHandoffState
             {
@@ -429,6 +448,7 @@ namespace Emby.Plugins.WatchTogether
         internal void ClearMediaHandoff()
         {
             Handoff = null;
+            HandoffControlRecoveryParticipant = null;
         }
 
         internal void BeginPrimaryItemTransitionCandidate(
@@ -436,7 +456,8 @@ namespace Emby.Plugins.WatchTogether
             string primaryUserId,
             string sourceItemId,
             string participantUserId,
-            string participantSessionId)
+            string participantSessionId,
+            long participantRunTimeTicks)
         {
             PrimaryItemTransitionCandidate = new PrimaryItemTransitionCandidate
             {
@@ -445,6 +466,7 @@ namespace Emby.Plugins.WatchTogether
                 SourceItemId = sourceItemId,
                 ParticipantUserId = participantUserId,
                 ParticipantSessionId = participantSessionId,
+                ParticipantRunTimeTicks = participantRunTimeTicks,
             };
         }
 

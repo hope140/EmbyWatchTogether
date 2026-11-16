@@ -11,7 +11,6 @@ $hostExecutable = (Get-Process -Id $PID).Path
 
 function Invoke-PathValidation {
     param(
-        [Parameter(Mandatory)]
         [string]$OutputDirectory
     )
 
@@ -21,10 +20,11 @@ function Invoke-PathValidation {
         '-NonInteractive',
         '-File',
         $scriptPath,
-        '-OutputDirectory',
-        $OutputDirectory,
         '-ValidatePathsOnly'
     )
+    if (-not [string]::IsNullOrEmpty($OutputDirectory)) {
+        $arguments += @('-OutputDirectory', $OutputDirectory)
+    }
     $output = & $hostExecutable @arguments 2>&1
 
     return [pscustomobject]@{
@@ -72,6 +72,11 @@ while (-not [string]::IsNullOrEmpty($ancestor)) {
 
 $rejectedPaths.Add((Join-Path $repositoryRoot 'scripts\..'))
 $rejectedPaths.Add((Join-Path $repositoryRoot '.\'))
+$rejectedPaths.Add((Join-Path $repositoryRoot 'scripts\..\src'))
+foreach ($directoryName in @('src', 'tests', 'scripts', 'docs', '.github', '.git', '.codex', '.agents', '.publish')) {
+    $rejectedPaths.Add((Join-Path $repositoryRoot $directoryName))
+    $rejectedPaths.Add((Join-Path $repositoryRoot "$directoryName/build-output"))
+}
 
 $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($path in $rejectedPaths) {
@@ -86,4 +91,60 @@ Assert-True -Condition ($safeResult.ExitCode -eq 0) -Message "Expected safe outp
 Assert-True -Condition ($safeResult.Output -match 'Path validation passed') -Message "Expected a successful validation message for '$safeOutputDirectory'. Output: $($safeResult.Output)"
 Assert-True -Condition (-not (Test-Path -LiteralPath $safeOutputDirectory)) -Message "Path-only validation created '$safeOutputDirectory'."
 
-Write-Output "Build path guard tests passed for $($seen.Count) rejected paths and one safe path."
+$safePaths = @(
+    (Join-Path $repositoryRoot 'dist'),
+    (Join-Path $repositoryRoot 'src-output'),
+    (Join-Path $repositoryRoot '.publish-output')
+)
+foreach ($path in $safePaths) {
+    $existedBefore = Test-Path -LiteralPath $path
+    $result = Invoke-PathValidation -OutputDirectory $path
+    Assert-True -Condition ($result.ExitCode -eq 0) -Message "Expected safe output '$path' to pass. Output: $($result.Output)"
+    Assert-True -Condition ((Test-Path -LiteralPath $path) -eq $existedBefore) -Message "Path-only validation changed '$path'."
+}
+$defaultResult = Invoke-PathValidation
+Assert-True -Condition ($defaultResult.ExitCode -eq 0) -Message "Expected default dist output to pass. Output: $($defaultResult.Output)"
+
+# All alias checks use validation-only mode. Links are created outside the
+# repository and removed directly before the fixture directory is cleaned up.
+$fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('EmbyWatchTogether-build-alias-' + [System.Guid]::NewGuid().ToString('N'))
+$createdLinks = [System.Collections.Generic.List[string]]::new()
+$originalScriptPath = $scriptPath
+$linkType = if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }
+try {
+    New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+    $sourceAlias = Join-Path $fixtureRoot 'source-alias'
+    New-Item -ItemType $linkType -Path $sourceAlias -Target (Join-Path $repositoryRoot 'src') -ErrorAction Stop | Out-Null
+    $createdLinks.Add($sourceAlias)
+    Assert-PathRejected -Path $sourceAlias
+    Assert-PathRejected -Path (Join-Path $sourceAlias 'not-created')
+
+    $externalOutput = Join-Path $fixtureRoot 'output'
+    New-Item -ItemType Directory -Path $externalOutput -Force | Out-Null
+    $pluginAlias = Join-Path $externalOutput 'EmbyWatchTogether'
+    New-Item -ItemType $linkType -Path $pluginAlias -Target (Join-Path $repositoryRoot 'src/EmbyWatchTogether') -ErrorAction Stop | Out-Null
+    $createdLinks.Add($pluginAlias)
+    Assert-PathRejected -Path $externalOutput
+
+    # A staging alias must also be rejected when the chosen output is safe.
+    $fixtureScripts = Join-Path $fixtureRoot 'scripts'
+    New-Item -ItemType Directory -Path $fixtureScripts -Force | Out-Null
+    $scriptPath = Join-Path $fixtureScripts 'build.ps1'
+    Copy-Item -LiteralPath $originalScriptPath -Destination $scriptPath
+    $stagingAlias = Join-Path $fixtureRoot '.publish'
+    New-Item -ItemType $linkType -Path $stagingAlias -Target (Join-Path $repositoryRoot 'src') -ErrorAction Stop | Out-Null
+    $createdLinks.Add($stagingAlias)
+    Assert-PathRejected -Path (Join-Path $fixtureRoot 'dist')
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot 'dist'))) -Message 'Path-only validation created fixture output.'
+}
+finally {
+    $scriptPath = $originalScriptPath
+    foreach ($link in $createdLinks) {
+        [System.IO.Directory]::Delete($link)
+    }
+    if (Test-Path -LiteralPath $fixtureRoot) {
+        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+    }
+}
+
+Write-Output "Build path guard tests passed for $($seen.Count) protected paths, four alias cases, and five safe outputs."

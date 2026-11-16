@@ -644,7 +644,7 @@ namespace Emby.Plugins.WatchTogether
                     }
 
                     messages.Add(new DisplayMessageTarget(
-                        room.Id,
+                        room,
                         room.AdminUserId,
                         userId,
                         snapshot,
@@ -656,9 +656,14 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var message in messages)
             {
-                if (TrySendDisplayMessage(plugin, message))
+                var result = TrySendDisplayMessage(plugin, message);
+                if (result == DisplayMessageResult.Sent)
                 {
                     sent++;
+                }
+                else if (result == DisplayMessageResult.Skipped)
+                {
+                    skipped++;
                 }
                 else
                 {
@@ -767,7 +772,7 @@ namespace Emby.Plugins.WatchTogether
                         continue;
                     }
                     messages.Add(new DisplayMessageTarget(
-                        room.Id,
+                        room,
                         room.AdminUserId,
                         userId,
                         snapshot,
@@ -779,7 +784,7 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var message in messages)
             {
-                TrySendDisplayMessage(plugin, message);
+                TrySendDisplayMessage(plugin, message, requireSyncNotifications: true);
             }
         }
 
@@ -811,7 +816,7 @@ namespace Emby.Plugins.WatchTogether
                         continue;
                     }
                     messages.Add(new DisplayMessageTarget(
-                        room.Id,
+                        room,
                         room.AdminUserId,
                         userId,
                         snapshot,
@@ -823,14 +828,47 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var message in messages)
             {
-                TrySendDisplayMessage(plugin, message);
+                TrySendDisplayMessage(plugin, message, requireSyncNotifications: true);
             }
         }
 
-        private static bool TrySendDisplayMessage(Plugin plugin, DisplayMessageTarget message)
+        private static DisplayMessageResult TrySendDisplayMessage(Plugin plugin, DisplayMessageTarget message,
+            bool requireSyncNotifications = false)
         {
             try
             {
+                SessionSnapshot snapshot;
+                var rooms = plugin.Rooms;
+                using (var access = rooms?.TryEnterRoom(message.RoomId))
+                {
+                    if (access == null || !ReferenceEquals(access.Room, message.Room) ||
+                        !ReferenceEquals(plugin.Rooms, rooms) || plugin.Bridge == null ||
+                        (requireSyncNotifications && !IsSyncNotificationsEnabled(plugin)) ||
+                        !access.Room.IsJoined(message.UserId) ||
+                        !IsSameServer(message.ServerId, plugin.ResolveServerId()))
+                    {
+                        return DisplayMessageResult.Skipped;
+                    }
+
+                    var snapshots = BuildSnapshots(plugin, access.Room);
+                    if (!snapshots.TryGetValue(message.UserId, out snapshot) ||
+                        snapshot == null || !snapshot.Online ||
+                        snapshot.Capabilities?.CanDisplayMessage != true ||
+                        !HasSameSessionIdentity(message.Snapshot, snapshot) ||
+                        !ReferenceEquals(plugin.Rooms, rooms) || !rooms.IsCurrentRoom(message.Room) ||
+                        !access.Room.IsJoined(message.UserId) ||
+                        !IsSameServer(message.ServerId, plugin.ResolveServerId()))
+                    {
+                        return DisplayMessageResult.Skipped;
+                    }
+                }
+
+                // A preceding send can block while membership or session identity
+                // changes. Revalidate each unsent target, but keep transport outside
+                // the gate so it cannot prevent those lifecycle transitions.
+                // Explicit administrator messages remain independent of automatic notices.
+                if (requireSyncNotifications && !IsSyncNotificationsEnabled(plugin))
+                    return DisplayMessageResult.Skipped;
                 var messageIssuer = plugin.Issuer as IMessageIssuer;
                 if (messageIssuer != null)
                 {
@@ -838,30 +876,30 @@ namespace Emby.Plugins.WatchTogether
                         message.RoomId,
                         message.ControllingUserId,
                         message.UserId,
-                        message.Snapshot,
+                        snapshot,
                         message.Header,
                         message.Text,
                         message.TimeoutMs,
                         DateTimeOffset.UtcNow,
-                        out _);
+                        out _) ? DisplayMessageResult.Sent : DisplayMessageResult.Failed;
                 }
 
                 using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
                 {
                     plugin.Bridge.SendDisplayMessageAsync(
                             message.ControllingUserId,
-                            message.Snapshot.SessionId,
+                            snapshot.SessionId,
                             message.Header,
                             message.Text,
                             message.TimeoutMs,
                             timeout.Token)
                         .GetAwaiter().GetResult();
-                    return true;
+                    return DisplayMessageResult.Sent;
                 }
             }
             catch
             {
-                return false;
+                return DisplayMessageResult.Failed;
             }
         }
 
@@ -875,10 +913,17 @@ namespace Emby.Plugins.WatchTogether
             NotifyMembershipChange(plugin, roomId, requesterUserId, "参与者已请求重新同步，请稍候");
         }
 
+        private enum DisplayMessageResult
+        {
+            Sent,
+            Failed,
+            Skipped,
+        }
+
         private sealed class DisplayMessageTarget
         {
             public DisplayMessageTarget(
-                string roomId,
+                Room room,
                 string controllingUserId,
                 string userId,
                 SessionSnapshot snapshot,
@@ -886,7 +931,8 @@ namespace Emby.Plugins.WatchTogether
                 string text,
                 int timeoutMs)
             {
-                RoomId = roomId;
+                Room = room;
+                ServerId = room.ServerId;
                 ControllingUserId = controllingUserId;
                 UserId = userId;
                 Snapshot = snapshot;
@@ -895,7 +941,11 @@ namespace Emby.Plugins.WatchTogether
                 TimeoutMs = timeoutMs;
             }
 
-            public string RoomId { get; }
+            public Room Room { get; }
+
+            public string RoomId => Room.Id;
+
+            public string ServerId { get; }
 
             public string ControllingUserId { get; }
 
@@ -931,11 +981,13 @@ namespace Emby.Plugins.WatchTogether
             if (runtime.SnapshotUnavailable) return "snapshot_unavailable";
             if (runtime.State == RoomState.Handoff) return "media_handoff";
             if (runtime.State == RoomState.Recovering) return "transient_recovery";
-            if (string.Equals(runtime.Error, "两位参与者打开了不同视频，暂不发送同步指令", StringComparison.Ordinal)) return "different_video";
-            if (string.Equals(runtime.Error, "播放已停止，等待双方重新打开同一视频", StringComparison.Ordinal)) return "playback_stopped";
-            if (runtime.Error != null && runtime.Error.StartsWith("media handoff ", StringComparison.Ordinal)) return "handoff_failed";
-            if (runtime.Error != null && runtime.Error.StartsWith("participant resync ", StringComparison.Ordinal)) return "participant_resync_failed";
-            if (!string.IsNullOrEmpty(runtime.Error)) return "command_failed";
+            var error = runtime.Error;
+            if (string.Equals(error, "停止后播放位置相差较大，请使用重新同步确认恢复", StringComparison.Ordinal)) return "stop_resume_confirmation_required";
+            if (string.Equals(error, "两位参与者打开了不同视频，暂不发送同步指令", StringComparison.Ordinal)) return "different_video";
+            if (string.Equals(error, "播放已停止，等待双方重新打开同一视频", StringComparison.Ordinal)) return "playback_stopped";
+            if (error != null && error.StartsWith("media handoff ", StringComparison.Ordinal)) return "handoff_failed";
+            if (error != null && error.StartsWith("participant resync ", StringComparison.Ordinal)) return "participant_resync_failed";
+            if (!string.IsNullOrEmpty(error)) return "command_failed";
             if (room.JoinedParticipantUserIds.Count < room.ParticipantUserIds.Count) return "member_left";
             if (runtime.State == RoomState.Barrier) return "aligning";
             if (runtime.State == RoomState.Watching) return "watching";

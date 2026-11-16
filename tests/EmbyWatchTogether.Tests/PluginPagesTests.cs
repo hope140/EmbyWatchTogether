@@ -21,9 +21,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV16");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV16");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV16");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV26");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV26");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV26");
             Assert.Equal(4, pages.Count);
             Assert.Single(pages, page => page.EnableInUserMenu);
             Assert.All(pages.Where(page => !page.Name.EndsWith(".js")), page =>
@@ -31,12 +31,12 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV7");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV16.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV26.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
         [Fact]
-        public void Plugin_ExposesValidPngThumbnailAndSyncMenuIcon()
+        public void Plugin_ExposesValidPngThumbnailAndPeopleMenuIcon()
         {
 #pragma warning disable SYSLIB0050
             var plugin = (Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin));
@@ -53,15 +53,37 @@ namespace Emby.Plugins.WatchTogether.Tests
                     Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, reader.ReadBytes(8));
                     Assert.Equal(13, ReadBigEndianInt32(reader.ReadBytes(4)));
                     Assert.Equal(new byte[] { 73, 72, 68, 82 }, reader.ReadBytes(4));
-                    Assert.Equal(1280, ReadBigEndianInt32(reader.ReadBytes(4)));
-                    Assert.Equal(720, ReadBigEndianInt32(reader.ReadBytes(4)));
+                    Assert.Equal(640, ReadBigEndianInt32(reader.ReadBytes(4)));
+                    Assert.Equal(360, ReadBigEndianInt32(reader.ReadBytes(4)));
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV16");
-            Assert.Equal("sync", page.MenuIcon);
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV26");
+            Assert.Equal("people", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
+        }
+
+        [Fact]
+        public void SettingsCopy_RetiresPreviousPageAndControllerKeysTogether()
+        {
+#pragma warning disable SYSLIB0050
+            var plugin = (Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin));
+#pragma warning restore SYSLIB0050
+            var names = plugin.GetPages().Select(page => page.Name).ToArray();
+            var html = ReadResource(typeof(Plugin).Assembly, "Emby.Plugins.WatchTogether.Configuration.watchtogether.html");
+            var script = ReadResource(typeof(Plugin).Assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
+            foreach (var route in new[] { "Rooms", "Invite", "Settings", "Native" })
+            {
+                var name = "WatchTogether" + route + "V26" + (route == "Native" ? ".js" : "");
+                Assert.Contains(name, names);
+                Assert.DoesNotContain("WatchTogether" + route + "V22", html);
+                Assert.DoesNotContain("WatchTogether" + route + "V22", script);
+                Assert.Contains(name, route == "Native" ? html : script);
+            }
+            Assert.DoesNotContain(names, name => name.Contains("V22") || name.Contains("V23") || name.Contains("V24") || name.Contains("V25"));
+            Assert.DoesNotContain("V25", html);
+            Assert.DoesNotContain("V25", script);
         }
 
         private static int ReadBigEndianInt32(byte[] bytes)
@@ -78,7 +100,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV16.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV26.js\"", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", javascript);
             Assert.DoesNotContain("WatchTogetherSettingsV5", html);
@@ -89,11 +111,15 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("wtPauseOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOtherOnPlaybackStop", html);
             Assert.Contains("wtNotifyOnSyncActions", html);
-            Assert.Contains("同步操作时向播放端发送文字提示", html);
+            Assert.Contains("同步操作时发送文字提示", html);
+            Assert.Contains("显示房间操作与同步结果提示；停止提示单独设置。", html);
+            Assert.Contains("安装后重启 Emby 生效。", html);
+            Assert.DoesNotContain("这些设置对整台服务器生效。", html);
+            Assert.DoesNotContain("仅管理员可修改。", html);
             Assert.Contains("wtUpdateChannel", html);
             Assert.Contains("value=\"stable\"", html);
             Assert.Contains("value=\"beta\"", html);
-            Assert.Contains("beta 可接收 stable 与 prerelease 中的更高版本", html);
+            Assert.Contains("自动检查并安装所选通道的新版本；测试版通道也接收正式版。", html);
             Assert.Contains("aria-live=\"polite\"", html);
             Assert.Contains("wtSaveConfig", html);
             Assert.Contains("wtGitHubToken", html);
@@ -165,24 +191,24 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("remote_control_unavailable", javascript);
             Assert.Contains("_wtRoomFeedback", javascript);
             Assert.Contains("_wtRoomBusy", javascript);
-            Assert.Contains("暂离不会解除成员关系，并将尝试暂停仍在房间的一方。", javascript);
-            Assert.Contains("已暂离房间，但仍在房间的一方暂停失败，请检查客户端；成员关系仍保留。", javascript);
-            Assert.Contains("已暂离房间，仍在房间的一方已暂停；成员关系仍保留。", javascript);
-            Assert.Contains("已暂离房间，自动同步已停止；成员关系仍保留。", javascript);
+            Assert.Contains("可重新加入，并尝试暂停对方。", javascript);
+            Assert.Contains("已暂离，对方暂停失败，请检查客户端。", javascript);
+            Assert.Contains("已暂离，对方已暂停，可重新加入。", javascript);
+            Assert.Contains("已暂离，自动同步已停止；对方暂停未确认。", javascript);
             Assert.Contains("暂离房间", javascript);
-            Assert.Contains("暂离不会解除成员关系", javascript);
-            Assert.Contains("结束房间会解除双方成员关系", javascript);
+            Assert.Contains("暂离可重新加入", javascript);
+            Assert.Contains("解除双方成员关系", javascript);
             Assert.DoesNotContain("仍在房间的一方会暂停", javascript);
-            Assert.Contains("只删除同步关系，不删除媒体", javascript);
-            Assert.Contains("会暂时暂停双方并重新对齐，确认继续吗", javascript);
-            Assert.Contains("重新同步已开始，播放可能暂时暂停，请等待同步完成", javascript);
+            Assert.Contains("仅移除同播关系，不删除媒体", javascript);
+            Assert.Contains("暂时暂停双方并重新对齐，继续吗", javascript);
+            Assert.Contains("重新同步已开始，可能暂停播放，请稍候", javascript);
             Assert.Contains("clearAllRoomFeedback", javascript);
             Assert.Contains("_wtStatusTimer", javascript);
             Assert.DoesNotContain("正在处理此房间，请稍候", javascript);
-            Assert.Contains("房间“' + roomName + '”已结束；双方成员关系已解除，媒体未删除", javascript);
+            Assert.Contains("ending ? '房间已结束'", javascript);
             var deleteFunctionIndex = javascript.IndexOf("function deleteRoom", System.StringComparison.Ordinal);
             var deleteFeedbackIndex = javascript.IndexOf("clearRoomFeedback(page, room.RoomId)", deleteFunctionIndex, System.StringComparison.Ordinal);
-            var deleteStatusIndex = javascript.IndexOf("setTransientStatus(page, ending", deleteFunctionIndex, System.StringComparison.Ordinal);
+            var deleteStatusIndex = javascript.IndexOf("notifySuccess(page, ending", deleteFunctionIndex, System.StringComparison.Ordinal);
             Assert.True(deleteFeedbackIndex >= 0 && deleteStatusIndex > deleteFeedbackIndex);
             Assert.DoesNotContain("room.Error", javascript);
             Assert.Contains("getPluginConfiguration", javascript);
@@ -275,7 +301,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("creator_cannot_accept", javascript);
             Assert.Contains("rate_limited", javascript);
             Assert.Contains("room_unavailable", javascript);
-            Assert.Contains("复制失败，请手动选择并复制邀请码。", javascript);
+            Assert.Contains("自动复制失败，请手动复制邀请码。", javascript);
             Assert.DoesNotContain("room.IsSelfService && room.CanEnd", javascript);
             Assert.Contains("else if (room.CanEnd)", javascript);
             Assert.Contains("CanEnd", javascript);

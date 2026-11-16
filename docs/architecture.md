@@ -2,11 +2,9 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前 Latest stable 为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta/prerelease 为 [v1.7.2.17](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.17)，见[发布索引](releases/README.md)。本文以 `main` 源码为准；beta 的实现说明见[对应 tag 架构文档](https://github.com/hope140/EmbyWatchTogether/blob/v1.7.2.17/docs/architecture.md)，不能视为已合入 main。
+当前正式版为 [v1.7.1.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)，当前 beta 测试线为 [v1.7.2.20](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20)。本次调整按钮与设置页文案，不修改同步引擎或权限规则；公开发布状态见版本链接，证据边界见[兼容性记录](client-compatibility.md)。
 
-历史发布记录：2026-10-18 的正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)。用户于 2026-10-18 确认本轮验收通过，签名资产、tag 与 Latest 已独立核验；操作证据见[发布维护记录](maintenance/v1.6.1.0-publication.md)。
-
-2026-10-19 的公开 beta 为 `1.7.0.1`，保留原生分页、媒体与头像展示，并修正页面初始化、路由与客户端下拉箭头。用户已确认 V16 界面方案，签名资产和源码身份已独立核验，见[测试版发布记录](maintenance/v1.7.0.1-beta-publication.md)。当时的正式版资产保持原有内容。
+1.7.2.19 源自[可选房间名预览](maintenance/optional-room-name-preview.md)：空白名称在注册锁内从未占用的四位编号中随机选择并持久化，邀请只在接受创建时分配；已有名称不迁移。三页和控制器资源键为 V23。
 
 ## 运行时边界
 
@@ -31,13 +29,21 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 - `SessionSelector` 为参与者选择有效会话并绑定 session identity，初始绑定优先选择原始远控标志满足 `RoomEligibility` 的会话；只有已进入 `Watching` 的绑定身份才允许使用短时远控恢复，避免旧会话确认新设备命令。
 - `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息目标和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份，消息网络发送在退出 gate 后通过 5 秒有界 issuer 执行；`RoomStore` 只持久化房间元数据。房间保留 `CreatorUserId` 和 `IsSelfService`，旧 JSON 缺失字段时回退到旧管理员创建语义。
 - `RoomInvitationManager` 保存运行时邀请码的校验值、创建者、名称和有效期，不保存明文邀请码或独立持久化文件。接受操作在其串行边界内调用 `RoomManager` 原子创建完整双人房间，创建成功后清除该创建者的全部待接受邀请；重启会丢弃未接受邀请。
-- `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching`、`Recovering`、`Unavailable`。`Handoff` 只负责让参与者打开主用户当前 Item，确认后再转入由 `Barrier` 负责的时间轴对齐；`Recovering` 只等待非 Primary 参与者原 User、原 SessionId 和原 ItemId 的短暂恢复，Primary 缺失继续走停止 debounce 和晚到换集候选。
-- `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后创建者或管理员可按房间权限结束自助房间。
+- `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching`、`Recovering`、`Unavailable`。`Handoff` 让参与者打开主用户当前 Item，通常确认后再转入由 `Barrier` 负责的时间轴对齐；主用户恢复播放后仅观察自然对齐，满足完整条件时无控制地进入 `Watching`；`Recovering` 只等待非 Primary 参与者原 User、原 SessionId 和原 ItemId 的短暂恢复，Primary 缺失继续走停止 debounce 和晚到换集候选。
+- `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后当前房间的任一参与者或管理员可按房间权限结束房间。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 在当前房间 gate 内重新校验房间、成员和服务器身份，返回只读、有界、脱敏的同步诊断 DTO。诊断事件环、当前选中快照、Pending、Handoff、Barrier、Recovery 和 drift telemetry 仅驻留 `RoomRuntime` 内存，房间删除或运行时重建时丢弃，不写入 `rooms.json`；导出使用 `userA`/`userB` 别名、短 hash 和稳定错误分类，不包含用户名、GUID、Token、路径或异常文本。
+
+内置 SessionBridgeCommandIssuer 通过 BoundedSessionDispatch 执行播放、PlayItem 和消息传输。独立的 5 秒有界等待涵盖同步调用入口和不响应取消的 Task；同一 Session 的播放控制与 PlayItem 共用 `playback:` 槽位，DisplayMessage 使用独立的 `message:` 槽位，两类请求仍共享每个 issuer 最多 64 个未完成传输的总量限制。发送器在超时返回后不会以迟到结果回写 RoomRuntime；旧传输实际完成后释放槽位，准入同时依据 Task 的完成状态清理已完成项，避免清理回调稍晚而误拒绝下一条正常命令。已进入底层的物理发送不能强制撤回，取消令牌仍传入下层，同一 Session 同一通道在未完成期间拒绝叠加请求。
+
+同步引擎的提示通过 `SyncNotificationDispatcher` 发送，每个引擎最多一个发送 worker 和一个按需唤醒 Timer、64 条等待消息；队满丢弃新提示，排队超过 10 秒的提示按单调时钟过期。发送前重新选择当前会话，并在房间 gate 内核对原房间引用、当前服务器、成员加入状态、Session/Item 身份、快照保护和通知设置，网络发送在退出 gate 后执行。停止时清空等待队列并取消在途提示；底层忽略取消或取消回调阻塞时，停止调用不等待其完成。停止文字独立保留本次停止通知代次；不同视频及完成提示发送前复核当前双端语义。服务端加入/退出、重新同步和管理员暂停/继续通知逐条复核通知开关，管理员主动 Message 不受该开关限制。提示发送不修改同步状态，取舍见 [ADR-005](adr/005-sync-notification-dispatch.md)。
+
+Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。 更新提示通过按 `ISessionManager` 共享的有界发送槽位执行，最多等待 5 秒；不响应取消的传输继续占位直到实际完成，后续计划任务不会叠加发送。提示超时或失败不阻止安装、不改写已安装事实，调用方真实取消仍向上传播。
 
 ## 嵌入式 UI
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV16`、`WatchTogetherInviteV16`、`WatchTogetherSettingsV16`，共享 `WatchTogetherNativeV16.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
+页面先通过宿主 getCurrentUser({enableCache:false}) 核对当前用户 ID 和明确的 Policy.IsAdministrator，仅管理员读取 WatchTogether/Users；普通用户读取自己的房间与邀请。角色读取失败不授予管理权限，身份或页面代次失效时旧结果无效。服务端独立执行权限与房间过滤；宿主 SDK 离线用户回退保持原样，未证明它导致本次问题。
+
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV26`、`WatchTogetherInviteV26`、`WatchTogetherSettingsV26`，共享 `WatchTogetherNativeV26.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
 
@@ -49,21 +55,35 @@ S124 已随 v1.7.0.1 发布，使用 V16 页面/控制器缓存键，去除 Dash
 
 邀请、房间操作、确认、配置保存和按需诊断沿用既有业务。Token 不回显，离页清空敏感输入；所有旧代次回调与操作入口都核对页面身份。清理页面时也恢复三个静态创建/接受按钮的 busy 和文字，管理员创建按钮随后按权限与当前表单重新判定可用性；旧请求不能解锁新代次操作。详细候选边界和验证见 [S122 契约](native-pages-media-plan.md)；此前原生控件验证保留在 `native-controls-plan.md`。
 
+管理员创建房间在 POST 成功后重置表单并显示宿主 toast“房间已创建”；输入校验、操作失败与列表读取失败分别反馈，后续列表刷新不能抹掉创建成功事实。成功通知只传固定可信文案，与业务 Promise 分离；toast 失败使用独立备用提示，不重发业务请求，迟到结果仍受页面身份与路由保护。配置保存区分读取、提交和回读：提交请求失败不能断言未写入，提交成功但回读失败保留“已提交、待确认”的结果；自动测试边界见[1.7.2.16 发布说明](releases/v1.7.2.16.md)。
+
 ## 状态与持久化
 
 起播 `Barrier` 按 Pause → Seek（仅非锚点用户）→ Restore 执行，远程命令等待会话快照确认；进入 Restore 前，锚点和另一端都必须在固定 Seek 目标的容差内。Seek 未确认时保留原目标和原播放意图，并在同一 Barrier 的绝对预算内重试；只有检测到锚点有当前远程命令无法解释的明显新位置操作时，才显式重建 Barrier。正常 `Watching` 期间传播明确暂停/继续和明显手动 Seek，持续明显漂移满足门槛时触发低频 Barrier；同一 Session/Item 的原始远控标志短暂丢失且仍有有效能力证据、没有 Pending 命令时，使用绑定身份和受影响用户集合的 8 秒内存恢复窗口，期间不发送命令，恢复后继续观察，超时或条件变化仍进入严格等待。
 
+Barrier 在当前快照已满足条件且没有待确认命令时，同轮继续推进下一阶段，最多经过 Pause → Seek → Restore；已满足的 Pause/Restore 不重复发送。发出需要改变状态的命令后立即结束本轮阶段推进，继续等待后续轮询的快照确认。Watching 检测到明确手动 Seek 时，当轮启动 Barrier 的暂停阶段。以上变化缩短调度等待，不能强制客户端更快执行或上报。
+
 主用户在 `Watching` 中从 Item A 切换到 Item B 时，`SyncEngine` 先记录主用户 Item 变化并进入独立的 `Handoff` runtime。该 runtime 绑定目标 Item、主用户 Session identity、参与者 Session identity 和 generation。参与者尚未位于 B 时，通过 `IPlayItemIssuer` 发起一次有界的 `PlayItem(B)`，随后只接受当前参与者用户、当前 Session 和 `SessionSnapshot.ItemId == B` 的确认；目标变化会使旧 generation 失效。参与者已经位于 B 时跳过 PlayItem，直接进入 `Barrier`，由 Barrier 重新暂停、定位和恢复播放意图。PlayItem 请求本身的成功不等于播放器完成打开，确认超时或有限重试失败会清理 Handoff 并回到安全的 `Waiting`。
+
+Handoff 的候选保留、被控能力检查和主控等待暂停使用与内置发送器一致的播放命令兼容判断，并保留 effective 远控证据。Theater 的 GeneralCommands 列表不必显式包含 Pause、Unpause、Seek；命令列表不是媒体控制权限本身，实际发送仍要求当前 raw 远控标记，身份、播放代次、时长、倍速及截止时间条件不变。主控启动时 runtime 为零仍进入原有观察分支，不因能力判断而提前失败。
+
+自动 Handoff 需要等待参与者加载时，主用户在同一目标/会话/媒体、完整有效能力与时长下至少观察 1 秒且位置推进后请求暂停，避免只看 Item 就立刻暂停加载。参与者先正常收到 PlayItem，并独立等待至少 1 秒有效目标观察；playing 必须有位置推进，已暂停不另发 Pause。主用户暂停需后续快照 ACK，最多两次，期限仍为 Handoff 原 10 秒；完成后向 Barrier 传递原暂停意图，已有或请求前自行暂停保持暂停。真实暂停 ACK 后，向主用户排队发送等待载入提示，发送时复核当前双端状态；原先已暂停不承诺自动继续。ACK 后观察到主用户恢复播放时不推断来源，退休旧恢复意图，只在原 10 秒内观察，不再 Pause、Seek、Unpause 或重试 PlayItem。参与者仍需满足原 1 秒起播确认；同一会话/目标/媒体、有效权限、正常倍速、双方播放且进度差不超过 2 秒后，再观察至少 1 秒持续推进，才无额外控制地进入 Watching。再次暂停、明显 Seek、身份/媒体/权限变化、快照失败、超时或过大进度差进入要求手动重新同步的 Waiting，并排队发送失败提示。失败标记阻止所有自动命令，只有获接受的显式 resync 清除。该标记跨通用 reset 保留但不持久化；见 [ADR-002](adr/002-media-handoff.md)。服务器观察不能证明首帧已显示。
 
 `SessionBridge` 在转发 `PlaybackStopped`、唤醒轮询前，按实际 `SessionInfo` 对象和有效 `PlaySessionId` 记录停止，令该播放的迟到进度快照保持 stopped。Emby 删除播放对象后，旧 ID 的进度可能重建对象，因此过滤同时保留 ID 记录和可撤销的快照标记。明确且能解析为当前播放对象的 Start 可以重新使用 ID；重复的有效 Start 不丢弃仍存活的快照标记。发送 Seek、Unpause 或 Handoff Play 前复查本轮已选快照的停止标记；已越过发送检查的在途命令无法撤回。身份缺失或冲突时不猜测整台设备/同一 Item 已停止。
 
 Emby 4.10 在发 Stop 事件前会清空媒体并替换 `PlayState`。过滤器通过有效 Start/Progress 建立 `PlaySessionInfo` 对象归属，在该对象的一次生命周期内收集所有已观测状态的快照标记；首次身份事件也收编此前采样已创建的标记。已知 ID 的后续采样核对当前播放对象及状态引用，Stop 同时撤销该对象的历史标记和事件中的新状态。不同对象的迟到 Stop 不污染同 ID 新 Start；停止后同对象 Start 建立新标记集合，旧快照始终失效。归属索引和标记集合由每服务器会话 gate 串行维护，标记终止只单向发生。
 
-内置命令发送器在实际调用 Emby 前再次检查目标快照（beta 的排队发送器在工作项中复查），覆盖 Pause、Seek、Unpause 和 PlayItem；新 Start 不能恢复已排队旧快照的发送资格。整组来源检查仍位于 SyncEngine 调用发送器前：来源端在此后停止而目标端仍活跃的排队窗口不受目标检查覆盖，也不保证检查与外部调用之间原子化。Stop 前没有任何有效 Start/Progress 身份观察、且状态已被替换时，公开 SDK 无法将旧状态安全关联到该播放对象，不能猜测撤销整台设备；之后按已停止 ID 新采样仍会被过滤。
+内置命令发送器在排队工作实际调用 Emby 前再次检查目标快照，覆盖 Pause、Seek、Unpause 和 PlayItem。Seek、Unpause 和 Handoff PlayItem 还复查 SyncEngine 在房间 gate 内捕获的本轮来源快照数组；数组保留原播放代次的停止标记，不在异步发送时重新读取房间状态或按 SessionId 查找。来源端排队期间 Stop 后，即使同 ID Start 也不能恢复旧命令的发送资格；新 Start 的新快照仍可授权新命令。Pause 不依赖来源标记，保留停止后暂停另一端的行为。检查与外部调用不保证原子化，已进入底层传输的发送仍无法撤回。Stop 前没有任何有效 Start/Progress 身份观察、且状态已被替换时，公开 SDK 无法将旧状态安全关联到该播放对象，不能猜测撤销整台设备；之后按已停止 ID 新采样仍会被过滤。
 
 过滤不判断片尾，不等待后续 progress 确认普通 Seek，也不修改远控资格。其记录仅存内存、随实际服务器会话对象回收；停止 ID 与 Start/Progress 索引的字符串键可能随该会话播放次数增长，采样扫描已知播放 ID 和历史停止 ID，不能将弱引用误认为有界缓存。每播放代次的标记集合随该对象的状态替换次数增长，直到播放对象回收或明确 Start 替换已停止集合；集合不持有历史状态对象。同 ID、同播放对象重用且事件乱序，或新播放没有明确 Start 时，协议无法可靠区分新旧代次：前者仍可能误同步/误过滤，后者保持已停止状态；不同 ID 或新的服务器会话对象不会继承旧标记。
 
-停止后的暂停、通知仍走原有 2 秒 debounce，它同时作为有限的媒体切换观察窗口；窗口内选中 B 时识别为 Handoff，不执行普通停止副作用。窗口结束仍无新 Item 时继续原有 Stop 行为，但从首次缺失开始保留最多 10 秒的仅内存、身份绑定候选，停止确认后若主用户以可信会话打开 B 且参与者仍以原可信会话停留在 A，仍可恢复到同一 Handoff；候选过期、参与者换 Item/会话、能力不可信或房间成员改变时清除。参与者自行切换 Item 不触发主用户跟随；只有显式 Participant Resync 请求才会让非 Primary 参与者通过同一 Handoff/Barrier 流程回到主用户当前 Item。运行时快照、Pending 命令、Handoff、恢复窗口和 Barrier 阶段不写入 `rooms.json`；房间文件采用候选文件替换并保留备份，损坏时报告错误而不静默覆盖。
+换集判断将历史事实与命令资格分开：`WasOnlineWhenObserved` 仅冻结采样时的在线事实，不随 Stop 撤销改变，也不用于发送授权。快速与迟到换集仍检查当前主用户的有效播放；桥接快照在 Stop 后必须具有明确 Start 证据，Progress 不代替 Start。迟到候选保留原参与者的播放撤销标记，参与者 Stop 后即使同 ID 重开也不会继承候选。快速 Stop/Start 跨轮询时同样核对原参与者的播放与身份。旧快照的 `Online`/`Stopped`、命令前校验及排队撤销保持原有语义。
+
+停止后的实际暂停仍走原有 2 秒 debounce；仅停止文字在确认后增加 0.5 秒合并窗并发送前复核，合并窗不保证送达期限。原 2 秒 debounce 同时作为有限的媒体切换观察窗口；窗口内选中 B 时识别为 Handoff，不执行普通停止副作用。窗口结束仍无新 Item 时继续原有 Stop 行为，但从首次缺失开始保留最多 10 秒的仅内存、身份绑定候选，停止确认后若主用户以可信会话打开 B 且参与者仍以原可信会话停留在 A，仍可恢复到同一 Handoff；候选过期、参与者换 Item/会话、能力不可信或房间成员改变时清除。参与者自行切换 Item 不触发主用户跟随；只有显式 Participant Resync 请求才会让非 Primary 参与者通过同一 Handoff/Barrier 流程回到主用户当前 Item。运行时快照、Pending 命令、Handoff、恢复窗口和 Barrier 阶段不写入 `rooms.json`；房间文件采用候选文件替换并保留备份，损坏时报告错误而不静默覆盖。
+
+迟到换片候选允许原参与者仅原始远控标志短暂为 false，前提是仍在线、未停止、原 User/Session/Item 和时长连续、完整有效能力与正常倍速仍成立。此时只等待，原 10 秒期限不延期；远控恢复后按新快照重新核验，再进入 Handoff。已开始的 Handoff 同样冻结原期限并复核绑定身份，不消耗不可控期间的发送重试。播放命令和停止副作用 Pause 的入口均拒绝 raw=false 目标，缓存能力不能授权发送。候选创建、首次远控等待、过期和失效使用有界脱敏诊断事件记录。
+
+确认停止后，双方重新打开同一视频但位置差超过 5 秒时，保持安全 Waiting，给出 `stop_resume_confirmation_required` 原因和房间内重新同步指引；当前快照不再完整或失去资格时撤回该指引。成员或管理员显式重新同步复用主用户锚点 Barrier，保留主用户当前暂停/播放意图；参与者请求在视频不同的情况下仍可能通过既有 Handoff 切换视频，按钮旁明确说明。位置、活动时间和 PlaybackStart 接收时间都不足以证明持续用户意图，因此本次没有增加自动 Seek 恢复。
 
 Phase E 在现有 `Watching` 逻辑旁增加独立的 `Recovering` runtime。仅非 Primary 参与者从选中快照中短暂消失时最多等待 10 秒；缺失会话按原 User、原 SessionId 和原 ItemId 恢复时重新执行一次现有 Barrier。Primary 缺失、停止、Session 或 Item 变化会先退出 Recovery，再由既有停止 debounce 或晚到换集 Handoff 处理；参与者替换 SessionId 或其他不受控的 Item 变化会回到 `Waiting`，不自动换绑设备。双方 actively playing 且无 Pending/Handoff/Barrier/Recovering 时记录 `Participant.PositionTicks - Primary.PositionTicks` 的 signed drift；绝对 drift 至少 3 秒并持续 5 秒才触发一次 Barrier，自动纠偏之间冷却 120 秒，不执行连续追帧式 Seek。
 
@@ -83,3 +103,7 @@ checkout；普通 main 提交不发布。请求和手动入口共用串行签名
 ## 证据与维护
 
 上述结论来自 `src/EmbyWatchTogether` 的入口、房间、会话、同步和发布信任实现，以及对应 `tests/EmbyWatchTogether.Tests` 测试。新增跨组件约束时先补测试或文档证据，再更新本文；稳定决策另建 ADR。
+
+## 1.7.3.0 候选边界
+
+候选沿用 beta 1.7.2.20 的产品实现，不新增同步策略或改变 60 秒会话筛选。参见[整合记录](maintenance/v1.7.3.0-integration.md)。

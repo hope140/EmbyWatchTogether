@@ -26,6 +26,7 @@ namespace Emby.Plugins.WatchTogether
         public static Plugin Instance { get; private set; }
 
         private GitHubTokenStore _githubTokenStore;
+        private readonly object _configurationLock = new object();
 
         /// <summary>
         /// Raised only after BasePlugin has accepted the persisted
@@ -80,10 +81,36 @@ namespace Emby.Plugins.WatchTogether
                 throw new ArgumentException("invalid Watch Together plugin configuration", nameof(configuration));
             }
 
-            base.UpdateConfiguration(pluginConfiguration);
+            SyncEngineOptions options;
+            lock (_configurationLock)
+            {
+                // Settings may have been read before an installation completed.
+                // Pending update state belongs only to the installer.
+                pluginConfiguration.PendingUpdateVersion = Configuration?.PendingUpdateVersion;
+                base.UpdateConfiguration(pluginConfiguration);
+                options = SyncEngineOptions.From(pluginConfiguration);
+            }
+
             ConfigurationChanged?.Invoke(
                 this,
-                new PluginConfigurationChangedEventArgs(SyncEngineOptions.From(pluginConfiguration)));
+                new PluginConfigurationChangedEventArgs(options));
+        }
+
+        internal void SavePendingUpdateVersion(string version)
+        {
+            lock (_configurationLock)
+            {
+                var configuration = Configuration;
+                if (configuration == null)
+                {
+                    base.UpdateConfiguration(new PluginConfiguration { PendingUpdateVersion = version });
+                }
+                else
+                {
+                    configuration.PendingUpdateVersion = version;
+                    SaveConfiguration();
+                }
+            }
         }
 
         /// <summary>
@@ -144,23 +171,23 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Change the page key together with the controller key so
                     // Emby Web refreshes the embedded HTML cache as well.
-                    Name = "WatchTogetherRoomsV16",
+                    Name = "WatchTogetherRoomsV26",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
                     EnableInUserMenu = true,
                     MenuSection = "server",
-                    MenuIcon = "sync",
+                    MenuIcon = "people",
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherInviteV16",
+                    Name = "WatchTogetherInviteV26",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherSettingsV16",
+                    Name = "WatchTogetherSettingsV26",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
@@ -171,7 +198,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Use a new controller name so Emby Web does not reuse a
                     // cached copy of the previous embedded module.
-                    Name = "WatchTogetherNativeV16.js",
+                    Name = "WatchTogetherNativeV26.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };
