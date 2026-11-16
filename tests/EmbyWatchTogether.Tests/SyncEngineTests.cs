@@ -6071,7 +6071,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             bool notifyOtherOnPlaybackStop = true,
             bool notifyOnSyncActions = false,
             IMessageIssuer messageIssuer = null,
-            ILogManager logManager = null)
+            ILogManager logManager = null,
+            Func<string, string> notificationLanguage = null)
         {
             var engine = new SyncEngine(
                 _rooms, _provider, _issuer, () => serverId, () => _clock.Now,
@@ -6080,7 +6081,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 notifyOtherOnPlaybackStop: notifyOtherOnPlaybackStop,
                 notifyOnSyncActions: notifyOnSyncActions,
                 messageIssuer: messageIssuer ?? _messageIssuer,
-                logManager: logManager);
+                logManager: logManager, notificationLanguage: notificationLanguage);
             if ((messageIssuer ?? _messageIssuer) is RecordingMessageIssuer recording)
                 recording.WaitForIdle = () => WaitForNotifications(engine);
             return engine;
@@ -6248,6 +6249,21 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             engine.PollOnce(_clock.Now);
             Assert.Equal(2, _messageIssuer.Issued.Count);
+        }
+
+        [Fact]
+        public void DifferentVideoNotice_UsesEachRecipientsLanguage()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine(notifyOnSyncActions: true, notificationLanguage: id => id == "u1" ? "en" : "zh");
+            SetCandidates(Snapshot("s1", "u1", paused: false, position: 0, itemId: "a"),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "b"));
+            engine.PollOnce(_clock.Now);
+            var messages = _messageIssuer.Issued;
+            Assert.Equal(2, messages.Count);
+            Assert.Equal("Watch Together", messages.Single(m => m.userId == "u1").header);
+            Assert.Contains("Different videos", messages.Single(m => m.userId == "u1").text);
+            Assert.Equal("双方打开了不同视频，已暂停同步；请打开同一视频", messages.Single(m => m.userId == "u2").text);
         }
 
         [Fact]

@@ -95,6 +95,12 @@ namespace Emby.Plugins.WatchTogether
         public string Text { get; set; }
     }
 
+    [Route("/WatchTogether/NotificationLanguage", "POST")]
+    public class SetNotificationLanguageRequest
+    {
+        public string Language { get; set; }
+    }
+
     [Route("/WatchTogether/Users", "GET")]
     public class GetUsersRequest { }
 
@@ -121,6 +127,18 @@ namespace Emby.Plugins.WatchTogether
     public class WatchTogetherService : BaseApiService, IService
     {
         internal Plugin RuntimePlugin { get; set; }
+
+        public object Post(SetNotificationLanguageRequest request)
+        {
+            var userId = CurrentUserId();
+            if (string.IsNullOrWhiteSpace(userId)) throw new UnauthorizedAccessException("authenticated user required");
+            if (request == null || (request.Language != "zh" && request.Language != "en"))
+                throw new ArgumentException("unsupported language");
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
+            if (plugin.NotificationLanguages == null) throw new ServiceUnavailableException("notification language storage unavailable");
+            plugin.NotificationLanguages.SetLanguage(userId, request.Language);
+            return new { Language = request.Language };
+        }
 
         public object Get(GetRoomsRequest request)
         {
@@ -869,6 +887,10 @@ namespace Emby.Plugins.WatchTogether
                 // Explicit administrator messages remain independent of automatic notices.
                 if (requireSyncNotifications && !IsSyncNotificationsEnabled(plugin))
                     return DisplayMessageResult.Skipped;
+                // Custom administrator messages are sent verbatim.
+                var language = requireSyncNotifications ? NotificationText.LanguageFor(message.UserId, plugin.GetNotificationLanguage) : "zh";
+                string header = requireSyncNotifications ? NotificationText.Translate(message.Header, message.UserId, _ => language) : message.Header;
+                string text = requireSyncNotifications ? NotificationText.Translate(message.Text, message.UserId, _ => language) : message.Text;
                 var messageIssuer = plugin.Issuer as IMessageIssuer;
                 if (messageIssuer != null)
                 {
@@ -877,8 +899,8 @@ namespace Emby.Plugins.WatchTogether
                         message.ControllingUserId,
                         message.UserId,
                         snapshot,
-                        message.Header,
-                        message.Text,
+                        header,
+                        text,
                         message.TimeoutMs,
                         DateTimeOffset.UtcNow,
                         out _) ? DisplayMessageResult.Sent : DisplayMessageResult.Failed;
@@ -889,8 +911,8 @@ namespace Emby.Plugins.WatchTogether
                     plugin.Bridge.SendDisplayMessageAsync(
                             message.ControllingUserId,
                             snapshot.SessionId,
-                            message.Header,
-                            message.Text,
+                            header,
+                            text,
                             message.TimeoutMs,
                             timeout.Token)
                         .GetAwaiter().GetResult();

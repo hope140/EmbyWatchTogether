@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V27"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V28"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -742,4 +742,21 @@ test('leaving during a pending invitation restores the label in the new language
   await page.evaluate(() => { window.__wtFixture.view.onPause(); window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onResume(); });
   await expect(page.locator('#wtCreateInvitation')).toHaveText('Create invitation code');
   await expect(page.locator('#wtCreateInvitation')).toBeEnabled();
+});
+
+test('page reports its language for the authenticated account and changes it on resume', async ({ page }) => {
+  await page.goto('/?scenario=empty&locale=zh-CN');
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.languageCalls)).toEqual([{ userId: 'user-a', language: 'zh' }]);
+  await expect(page.locator('#wtHelpSection')).toContainText('播放通知使用您上次打开此页面时的语言');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.languageCalls.at(-1))).toEqual({ userId: 'user-a', language: 'en' });
+  await expect(page.locator('#wtHelpSection')).toContainText('Playback notifications use the language');
+});
+
+test('a language preference request failure does not prevent the room page loading', async ({ page }) => {
+  await page.goto('/?scenario=language-fail&locale=en-US');
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.wt-roomCard')).toBeVisible();
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+  await expect(page.locator('#wtLanguageStatus')).toContainText('Could not save the notification language');
 });

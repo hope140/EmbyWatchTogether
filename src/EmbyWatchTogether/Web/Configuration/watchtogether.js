@@ -288,6 +288,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "输入对方发来的邀请码": "Enter the invitation code sent by the other participant",
         "房间": "Rooms",
         "刷新": "Refresh",
+        "通知语言未能保存，播放通知将继续使用之前的语言。": "Could not save the notification language. Playback notifications will continue using the previous language.",
+        "播放通知使用您上次打开此页面时的语言。同一账号在不同设备使用时，以最后打开的页面为准。": "Playback notifications use the language from the last time you opened this page. For the same account on multiple devices, the last page opened determines the language.",
         "观看提示": "Viewing Tips",
         "创建房间并选择两名参与者。": "Create a room and select two participants.",
         "两人分别登录 Emby，打开同一视频。": "Both participants sign in to Emby and open the same video.",
@@ -1784,9 +1786,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV27',
-        invite: 'WatchTogetherInviteV27',
-        settings: 'WatchTogetherSettingsV27'
+        rooms: 'WatchTogetherRoomsV28',
+        invite: 'WatchTogetherInviteV28',
+        settings: 'WatchTogetherSettingsV28'
     };
 
     function currentRoute(page) {
@@ -3441,6 +3443,15 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         applyRoute(page);
         bindPageEvents(page);
         syncForm(page);
+        // Best effort: preference failure must not interrupt the room UI.
+        var languageStatus = page.querySelector('#wtLanguageStatus');
+        if (languageStatus) { languageStatus.textContent = ''; languageStatus.hidden = true; }
+        apiSend(page, 'WatchTogether/NotificationLanguage', 'POST', { Language: locale }).catch(function () {
+            if (languageStatus && pageActionAllowed(page)) {
+                languageStatus.textContent = t('通知语言未能保存，播放通知将继续使用之前的语言。');
+                languageStatus.hidden = false;
+            }
+        });
         loading.show();
 
         loadUsers(page).then(function () {

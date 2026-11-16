@@ -28,6 +28,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData(typeof(JoinRoomRequest), "/WatchTogether/Rooms/{Id}/Join", "POST")]
         [InlineData(typeof(LeaveRoomRequest), "/WatchTogether/Rooms/{Id}/Leave", "POST")]
         [InlineData(typeof(SendRoomMessageRequest), "/WatchTogether/Rooms/{Id}/Message", "POST")]
+        [InlineData(typeof(SetNotificationLanguageRequest), "/WatchTogether/NotificationLanguage", "POST")]
         [InlineData(typeof(GetUsersRequest), "/WatchTogether/Users", "GET")]
         [InlineData(typeof(GetPluginInfoRequest), "/WatchTogether/Info", "GET")]
         [InlineData(typeof(GetGitHubTokenRequest), "/WatchTogether/GitHubToken", "GET")]

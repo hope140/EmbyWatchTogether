@@ -495,6 +495,37 @@ namespace Emby.Plugins.WatchTogether.Tests
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
+        [Fact]
+        public void AdministratorControlUsesRecipientLanguagesButCustomMessageIsVerbatim()
+        {
+            var u1 = Guid.NewGuid().ToString("N"); var u2 = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", "admin-1", new[] { u1, u2 }, u1);
+            var sm = new Mock<ISessionManager>();
+            sm.Setup(s => s.Sessions).Returns(new[] { NewSession(sm, "s1", u1), NewSession(sm, "s2", u2) });
+            sm.Setup(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            using var bridge = new SessionBridge(sm.Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var serializer = new Mock<MediaBrowser.Model.Serialization.IJsonSerializer>();
+            serializer.Setup(x => x.SerializeToString(It.IsAny<object>())).Returns<object>(x => System.Text.Json.JsonSerializer.Serialize(x));
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wt-pref-" + Guid.NewGuid().ToString("N"), "language.json");
+            try
+            {
+                var languages = new NotificationLanguageStore(path, serializer.Object);
+                languages.SetLanguage(u1, "en");
+                SetPluginProperty(plugin, "NotificationLanguages", languages);
+                var service = NewService(u1, true);
+                WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "pause" }));
+                sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Text == "An administrator paused room playback."), It.IsAny<CancellationToken>()), Times.Once);
+                sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.Is<MessageCommand>(m => m.Text == "管理员已暂停房间播放"), It.IsAny<CancellationToken>()), Times.Once);
+                sm.Invocations.Clear();
+                const string custom = "管理员已暂停房间播放";
+                WithPlugin(plugin, () => service.Post(new SendRoomMessageRequest { Id = room.Id, Text = custom }));
+                sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), It.IsAny<string>(), It.Is<MessageCommand>(m => m.Text == custom), It.IsAny<CancellationToken>()), Times.Exactly(2));
+            }
+            finally { var directory = System.IO.Path.GetDirectoryName(path); if (System.IO.Directory.Exists(directory)) System.IO.Directory.Delete(directory, true); }
+        }
+
         [Theory]
         [InlineData("pause", "管理员已暂停房间播放")]
         [InlineData("resume", "管理员已继续房间播放")]

@@ -41,6 +41,14 @@ namespace Emby.Plugins.WatchTogether
             Instance = this;
         }
 
+        internal NotificationLanguageStore NotificationLanguages { get; set; }
+
+        internal string GetNotificationLanguage(string userId)
+        {
+            try { return NotificationLanguages?.GetLanguage(userId) ?? "zh"; }
+            catch { return "zh"; }
+        }
+
         public RoomStore Store { get; internal set; }
 
         public RoomManager Rooms { get; internal set; }
@@ -171,7 +179,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Change the page key together with the controller key so
                     // Emby Web refreshes the embedded HTML cache as well.
-                    Name = "WatchTogetherRoomsV27",
+                    Name = "WatchTogetherRoomsV28",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
@@ -181,13 +189,13 @@ namespace Emby.Plugins.WatchTogether
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherInviteV27",
+                    Name = "WatchTogetherInviteV28",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherSettingsV27",
+                    Name = "WatchTogetherSettingsV28",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
@@ -198,7 +206,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Use a new controller name so Emby Web does not reuse a
                     // cached copy of the previous embedded module.
-                    Name = "WatchTogetherNativeV27.js",
+                    Name = "WatchTogetherNativeV28.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };

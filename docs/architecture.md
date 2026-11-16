@@ -39,6 +39,8 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。 更新提示通过按 `ISessionManager` 共享的有界发送槽位执行，最多等待 5 秒；不响应取消的传输继续占位直到实际完成，后续计划任务不会叠加发送。提示超时或失败不阻止安装、不改写已安装事实，调用方真实取消仍向上传播。
 
+页面打开时向认证接口提交实际选用的中英文，独立的 `notification-languages.json` 按账号持久化偏好；无记录或存储不可读时自动通知默认中文。播放通知在原有身份及新鲜度校验后按接收者选择固定文案，自定义管理员消息保留原文；不同设备共用账号，以服务器最后成功保存为准。更新管理员广播仍走独立路径。
+
 ## 嵌入式 UI
 
 页面先通过宿主 getCurrentUser({enableCache:false}) 核对当前用户 ID 和明确的 Policy.IsAdministrator，仅管理员读取 WatchTogether/Users；普通用户读取自己的房间与邀请。角色读取失败不授予管理权限，身份或页面代次失效时旧结果无效。服务端独立执行权限与房间过滤；宿主 SDK 离线用户回退保持原样，未证明它导致本次问题。
