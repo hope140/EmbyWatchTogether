@@ -13,8 +13,6 @@
 
 ## 历史发布
 
-- [v1.8.0.0 已撤回](v1.8.0.0.md)，由 v1.7.3.3 接续。
-
 - [v1.7.3.1 测试版说明](v1.7.3.1.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.1)，多语言界面及按账号保存的播放通知语言。
 
 - [v1.7.2.20 测试版说明](v1.7.2.20.md) · [GitHub 发布状态与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20)：重新同步按钮和管理员设置页文案。
