@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
-for(const [scenario,verb,warning] of [['admin-member','结束','双方将退出房间。'],['admin-manage','删除','双方将退出房间。']])test(verb+'的确认、进行中与失败文字一致',async({page})=>{
- await page.goto('/?scenario='+scenario);await expect(page.locator('[data-act=delete]')).toBeVisible();
+for(const [scenario,verb,warning] of [['admin-member','结束','双方将退出房间。'],['admin-manage','结束','双方将退出房间。']])test(scenario+verb+'的确认、进行中与失败文字一致',async({page})=>{
+ await page.goto('/?scenario='+scenario+(scenario==='admin-manage'?'#!configurationpage?name=WatchTogetherAdminV33':''));await expect(page.locator('[data-act=delete]')).toBeVisible();
  await page.evaluate(()=>{const original=ApiClient.fetch;ApiClient.fetch=o=>o.type==='DELETE'?new Promise((resolve,reject)=>{window.__failDelete=()=>reject({status:503});}):original(o);});
  await page.locator('[data-act=delete]').click();
  await expect(page.getByRole('alertdialog')).toContainText(warning);
@@ -22,5 +22,5 @@ for(const [result,copy,failure] of [
  else await expect.poll(()=>page.evaluate(()=>window.__wtFixture.toasts)).toEqual([copy]);
 });
 test('管理员删除成功短提示',async({page})=>{
- await page.goto('/?scenario=admin-manage');await page.locator('[data-act=delete]').click();await page.locator('[data-confirm=ok]').click();await expect.poll(()=>page.evaluate(()=>window.__wtFixture.toasts)).toEqual(['房间已删除']);
+ await page.goto('/?scenario=admin-manage#!configurationpage?name=WatchTogetherAdminV33');await page.locator('[data-act=delete]').click();await page.locator('[data-confirm=ok]').click();await expect.poll(()=>page.evaluate(()=>window.__wtFixture.toasts)).toEqual(['房间已结束']);
 });

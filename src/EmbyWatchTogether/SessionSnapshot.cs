@@ -48,6 +48,11 @@ namespace Emby.Plugins.WatchTogether
 
         public string MediaSourceId { get; }
 
+        // Presentation metadata only. Preserve the engine's existing scalar defaults.
+        internal DateTimeOffset ObservedAtUtc { get; } = DateTimeOffset.UtcNow;
+        internal bool HasPlayState { get; private set; } = true;
+        internal bool HasPosition { get; private set; } = true;
+
         public long PositionTicks { get; }
 
         public long RunTimeTicks { get; }
@@ -125,6 +130,8 @@ namespace Emby.Plugins.WatchTogether
                 session.SupportsRemoteControl,
                 capabilities,
                 session.LastActivityDate);
+            snapshot.HasPlayState = playState != null;
+            snapshot.HasPosition = playState?.PositionTicks >= 0;
             snapshot.Termination = termination;
             snapshot.WasOnlineWhenObserved = snapshot.Online;
             return snapshot;

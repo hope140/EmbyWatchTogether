@@ -10,7 +10,11 @@ using MediaBrowser.Model.Services;
 namespace Emby.Plugins.WatchTogether
 {
     [Route("/WatchTogether/Rooms", "GET")]
-    public class GetRoomsRequest { }
+    public class GetRoomsRequest
+    {
+        public string Scope { get; set; }
+        public bool IncludePlayback { get; set; }
+    }
 
     [Route("/WatchTogether/Rooms", "POST")]
     public class CreateRoomRequest
@@ -150,13 +154,25 @@ namespace Emby.Plugins.WatchTogether
 
             string currentUserId = CurrentUserId();
             bool admin = IsAdmin();
+            var scope = request?.Scope;
+            if (!string.IsNullOrEmpty(scope) && scope != "mine" && scope != "all")
+                throw new ArgumentException("unsupported room scope");
+            if (scope == "all" && !admin)
+                throw new UnauthorizedAccessException("administrator required");
+            bool cards = request?.IncludePlayback == true;
+            if (cards && (!admin || scope != "all"))
+                throw new UnauthorizedAccessException("administrator overview required");
+            bool mine = scope == "mine" || !admin;
             return plugin.Rooms.ListRooms().Select(r =>
             {
-                if (!admin && !r.HasParticipant(currentUserId)) return null;
-                var runtime = plugin.Rooms.GetRuntime(r.Id);
+                if (mine && !r.HasParticipant(currentUserId)) return null;
+                // Read the selected pair and the room phase from the same engine cycle.
+                using var access = cards ? plugin.Rooms.TryEnterRoom(r.Id) : null;
+                var runtime = cards ? access?.Runtime : plugin.Rooms.GetRuntime(r.Id);
                 if (runtime == null) return null;
                 return new
                 {
+                    Playback = cards ? CardPlayback(r, runtime, GetStatusReason(plugin, r, runtime)) : null,
                     RoomId = r.Id,
                     Name = r.Name,
                     State = runtime.State.ToString(),
@@ -174,6 +190,40 @@ namespace Emby.Plugins.WatchTogether
                     CreatedAtUtc = r.CreatedAtUtc,
                 };
             }).Where(x => x != null).ToList();
+        }
+
+        private static object CardPlayback(Room room, RoomRuntime runtime, string reason)
+        {
+            if (reason != "watching" && reason != "aligning") return null;
+            var pair = runtime.CommandSnapshots;
+            if (pair == null || pair.Count != 2 || room.JoinedParticipantUserIds.Count != 2 ||
+                !RoomEligibility.IsPairEligible(pair) || string.IsNullOrEmpty(runtime.SyncItemId) ||
+                !pair.TryGetValue(room.PrimaryUserId, out var primary)) return null;
+
+            var now = DateTimeOffset.UtcNow;
+            var oldest = now.AddSeconds(-10);
+            var activeSince = now.AddSeconds(-SessionSelector.StaleSessionTimeoutSeconds);
+            if (!room.JoinedParticipantUserIds.All(id => pair.TryGetValue(id, out var sample) &&
+                sample.Online && sample.HasPlayState && sample.ObservedAtUtc >= oldest &&
+                sample.LastActivityDateUtc >= activeSince &&
+                string.Equals(sample.ItemId, runtime.SyncItemId, StringComparison.OrdinalIgnoreCase))) return null;
+
+            var other = pair.First(entry =>
+                !string.Equals(entry.Key, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase)).Value;
+            var expires = pair.Values.Min(s => new[] {
+                s.ObservedAtUtc.AddSeconds(10),
+                s.LastActivityDateUtc.AddSeconds(SessionSelector.StaleSessionTimeoutSeconds),
+            }.Min());
+            return new
+            {
+                ItemId = primary.ItemId,
+                PrimaryPaused = primary.IsPaused,
+                OtherPaused = other.IsPaused,
+                Percent = primary.HasPosition && primary.RunTimeTicks > 0
+                    ? (int?)Math.Round(100 * Math.Min(1d, primary.PositionTicks / (double)primary.RunTimeTicks),
+                        MidpointRounding.AwayFromZero) : null,
+                ValidForMs = Math.Max(0, (int)(expires - now).TotalMilliseconds),
+            };
         }
 
         public object Post(CreateRoomRequest request)

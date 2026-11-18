@@ -13,7 +13,7 @@ Watch together with another person on the same Emby Server. Create a room, open 
 | Channel | Current version | For whom |
 | --- | --- | --- |
 | Stable | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [notes](docs/releases/v1.7.3.0.md) | Users who prefer stable releases |
-| Beta | [v1.7.3.1](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.1) · [notes](docs/releases/v1.7.3.1.md) | Users testing recent improvements |
+| Beta | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [notes](docs/releases/v1.8.0.0.md) | Users testing recent improvements |
 
 The beta adds Simplified Chinese, Traditional Chinese, and English interfaces and saves playback-notification language per account. Playback notifications have not yet been accepted in real-client testing. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
 
@@ -34,12 +34,13 @@ Back up the old DLL before upgrading so you can roll back. The package contains 
 
 ## Get started
 
-Open **Watch Together** from the Emby user menu (on a Chinese-language server, the beta menu is named “同映”; actual display remains unconfirmed). Administrators can use three pages:
+Open **Watch Together** from the Emby user menu (on a Chinese-language server, the beta menu is named “同映”; actual display remains unconfirmed). Administrators can use the following pages. Administration is available in the beta.
 
 | Page | Purpose |
 | --- | --- |
 | Rooms | View status, join or leave, control playback, resync, and view diagnostics. |
 | Create and invite | Create a room for two users and select a primary, or create and accept invitations. |
+| Administration | View all rooms, playback state and primary user progress. Confirm to end synchronization. |
 | Settings | Configure stop behavior, notifications, and the update channel. |
 
 Regular users can access rooms and invitations. Administrators can also enter from the plugin configuration page.
@@ -58,7 +59,7 @@ Use **Dashboard → Scheduled Tasks → Watch Together → Update Plugin** to sc
 
 ## Interface language and translations
 
-**Version 1.7.3.1 beta:** The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Simplified Chinese and Traditional Chinese locales use their respective scripts; other locales currently use English. The language is checked when the page is opened; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting.
+**Version 1.8.0.0 beta:** The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Simplified Chinese and Traditional Chinese locales use their respective scripts; other locales currently use English. The language is checked when the page is opened; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting.
 
 Playback notifications use the account’s language from the last successful page visit. Across devices, the last save received by the server wins; the default is Simplified Chinese. Custom administrator messages remain unchanged; administrator update broadcasts remain Chinese.
 

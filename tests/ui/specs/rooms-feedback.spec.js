@@ -76,17 +76,14 @@ for (const mode of ['failure', 'partial']) {
   });
 }
 
-test('列表刷新不覆盖用户加载错误，离页清理列表错误', async ({ page }) => {
+test('用户权限数据加载失败时停止房间读取，刷新不覆盖错误，离页清理', async ({ page }) => {
   await page.goto('/?scenario=users-fail&rooms_failure=true');
   await expect(page.locator('#wtStatus')).toContainText('用户列表加载失败');
   const text = await page.locator('#wtStatus').textContent();
-  await expect(page.locator('#wtRoomsStatus')).toBeVisible();
-  await page.evaluate(() => window.__wtFixture.setRoomsFailure(false));
-  await page.locator('#wtRefresh').click();
   await expect(page.locator('#wtRoomsStatus')).toBeHidden();
+  await page.locator('#wtRefresh').click();
   await expect(page.locator('#wtStatus')).toHaveText(text);
-  await page.evaluate(() => { window.__wtFixture.setRoomsFailure(true); window.__wtFixture.view.view._wtRefreshVisible(); });
-  await expect(page.locator('#wtRoomsStatus')).toBeVisible();
+  expect(await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.path === 'WatchTogether/Rooms'))).toEqual([]);
   await page.evaluate(() => window.__wtFixture.view.onPause());
   await expect(page.locator('#wtRoomsStatus')).toBeHidden();
 });

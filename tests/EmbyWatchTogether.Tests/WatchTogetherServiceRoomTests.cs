@@ -28,6 +28,87 @@ namespace Emby.Plugins.WatchTogether.Tests
     [Collection("Plugin singleton")]
     public class WatchTogetherServiceRoomTests
     {
+        [Fact]
+        public void RoomScopesSeparateAdminOverviewFromOwnRoomsAndEnforceServerPermissions()
+        {
+            var adminId = Guid.NewGuid().ToString("N");
+            var a = Guid.NewGuid().ToString("N");
+            var b = Guid.NewGuid().ToString("N");
+            var c = Guid.NewGuid().ToString("N");
+            var d = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var first = manager.CreateRoom("server-1", "", "first", adminId, new[] { a, b }, a);
+            manager.CreateRoom("server-1", "", "second", adminId, new[] { c, d }, c);
+            using var bridge = new SessionBridge(new Mock<ISessionManager>().Object);
+            var plugin = NewPlugin(manager, bridge, new RecordingIssuer(), "server-1");
+            var admin = NewService(adminId, true);
+            var member = NewService(a);
+            var outsider = NewService(Guid.NewGuid().ToString("N"));
+            object Rooms(WatchTogetherService service, string scope) => WithPlugin(plugin, () => service.Get(new GetRoomsRequest { Scope = scope }));
+            Assert.Empty((System.Collections.IEnumerable)Rooms(admin, "mine"));
+            Assert.Equal(2, ((System.Collections.IEnumerable)Rooms(admin, "all")).Cast<object>().Count());
+            Assert.Single(((System.Collections.IEnumerable)Rooms(member, "mine")).Cast<object>());
+            Assert.Single(((System.Collections.IEnumerable)Rooms(member, null)).Cast<object>());
+            Assert.Empty((System.Collections.IEnumerable)Rooms(outsider, "mine"));
+            Assert.Throws<UnauthorizedAccessException>(() => Rooms(member, "all"));
+            Assert.Throws<UnauthorizedAccessException>(() => Rooms(outsider, "all"));
+            Assert.Throws<ArgumentException>(() => Rooms(admin, "invalid"));
+            Assert.Throws<UnauthorizedAccessException>(() => WithPlugin(plugin, () => outsider.Get(new GetRoomStateRequest { Id = first.Id })));
+            Assert.Throws<UnauthorizedAccessException>(() => WithPlugin(plugin, () => outsider.Get(new GetRoomDiagnosticsRequest { Id = first.Id })));
+            Assert.Throws<UnauthorizedAccessException>(() => WithPlugin(plugin, () => outsider.Delete(new DeleteRoomRequest { Id = first.Id })));
+            Assert.True(GetBoolean(WithPlugin(plugin, () => admin.Delete(new DeleteRoomRequest { Id = first.Id })), "Deleted"));
+            Assert.False(GetBoolean(WithPlugin(plugin, () => admin.Delete(new DeleteRoomRequest { Id = first.Id })), "Deleted"));
+            var mine = manager.CreateRoom("server-1", "", "mine", adminId, new[] { adminId, b }, adminId);
+            Assert.Equal(mine.Id, GetString(((System.Collections.IEnumerable)Rooms(admin, "mine")).Cast<object>().Single(), "RoomId"));
+        }
+
+        [Fact]
+        public void AdminCardPlaybackUsesTheSelectedPairAndRejectsUnverifiedSamples()
+        {
+            var adminId = Guid.NewGuid().ToString("N");
+            var a = Guid.NewGuid().ToString("N");
+            var b = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "pair", adminId, new[] { a, b }, a);
+            var plugin = NewPlugin(manager, null, null, "server-1");
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Watching;
+            runtime.SyncItemId = "film";
+            var now = DateTimeOffset.UtcNow;
+            SessionSnapshot Sample(string user, string item, bool paused, DateTimeOffset at, long duration = 100) =>
+                new SessionSnapshot("session-" + user, user, item, "source", user == a ? 57 : 22,
+                    duration, paused, 1, false, true, null, at);
+            var pair = new Dictionary<string, SessionSnapshot> {
+                [a] = Sample(a, "film", true, now), [b] = Sample(b, "film", false, now)
+            };
+            typeof(RoomRuntime).GetProperty("CommandSnapshots", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(runtime, pair);
+            var admin = NewService(adminId, true);
+            object Card(WatchTogetherService service, string scope, bool include) {
+                var rows = (System.Collections.IEnumerable)WithPlugin(plugin, () =>
+                    service.Get(new GetRoomsRequest { Scope = scope, IncludePlayback = include }));
+                var row = rows.Cast<object>().Single();
+                return row.GetType().GetProperty("Playback").GetValue(row);
+            }
+            var playback = Card(admin, "all", true);
+            Assert.Equal("film", GetString(playback, "ItemId"));
+            Assert.True(GetBoolean(playback, "PrimaryPaused"));
+            Assert.False(GetBoolean(playback, "OtherPaused"));
+            Assert.Equal(57, playback.GetType().GetProperty("Percent").GetValue(playback));
+            Assert.Null(Card(admin, "all", false));
+            Assert.Throws<UnauthorizedAccessException>(() => Card(NewService(a), "mine", true));
+            Assert.Throws<UnauthorizedAccessException>(() => Card(NewService(a), "all", true));
+            pair[b] = Sample(b, "film", false, now.AddMinutes(-2));
+            Assert.Null(Card(admin, "all", true));
+            pair[b] = Sample(b, "next", false, now);
+            Assert.Null(Card(admin, "all", true));
+            pair[b] = Sample(b, "film", false, now, 0);
+            Assert.Null(Card(admin, "all", true));
+            pair[b] = Sample(b, "film", false, now);
+            runtime.State = RoomState.Handoff;
+            Assert.Null(Card(admin, "all", true));
+        }
+
         [Theory]
         [InlineData(null)]
         [InlineData("周末电影")]

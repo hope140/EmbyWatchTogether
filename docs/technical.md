@@ -140,3 +140,7 @@ docs/                          当前实现说明、排错和协作流程
 - [返回用户文档 README.md](../README.md)
 - [当前架构](architecture.md)
 - [完整状态机、测试范围和人工验收步骤](watch-together-emby-plugin-plan.md)
+
+### 后台管理的列表范围
+
+v1.8.0.0 的[后台管理](maintenance/admin-management-preview.md)新增 `GET /WatchTogether/Rooms?Scope=mine|all`。mine 对管理员和普通用户均仅返回本人参与的房间；all 服务端要求管理员；不支持的 scope 拒绝。未提供 scope 保持原有管理员全量、普通成员过滤的兼容语义。页面明确选择 scope；后台通过仅限管理员的 IncludePlayback 摘要读取已选双端会话，可见卡片按用户权限加载并复用影片元数据；结束同步沿用单房间接口与独立鉴权。普通用户的直接他人接口请求仍被拒绝。真实宿主的双端播放和高负载行为仍待独立实测。

@@ -62,7 +62,7 @@ function diagnostic(scenario) {
 
 function stateForScenario(scenario) {
   if (scenario === 'empty') return [];
-  if (scenario === 'admin-manage') return [room({ RoomId: 'managed-1', Name: '管理员长列表房间', CurrentUserIsParticipant: false, CurrentUserJoined: false, CanEnd: false, IsAdmin: true })];
+  if (scenario === 'admin-manage') return [room({ RoomId: 'managed-1', Name: '管理员长列表房间', CurrentUserIsParticipant: false, CurrentUserJoined: false, CanEnd: true, IsAdmin: true })];
   if (scenario === 'admin-member') return [room({ RoomId: 'admin-member-1', Name: '管理员成员房间', IsAdmin: true })];
   if (scenario === 'recovering') return [room({ RoomId: 'recovering-1', Name: '临时掉线恢复房间', State: 'Recovering', StatusReason: 'transient_recovery', _wtState: { Sessions: [
     { UserId: 'user-a', Online: true, IsPaused: false }, { UserId: 'user-b', Online: false, IsPaused: false }
@@ -171,6 +171,7 @@ function page() {
     };
     var rooms = (scenario === 'empty' || scenario === 'accept-fail' || scenario === 'accept-network' ? [] : scenario === 'admin-manage' ? ${JSON.stringify(stateForScenario('admin-manage'))} : scenario === 'admin-member' ? ${JSON.stringify(stateForScenario('admin-member'))} : scenario === 'recovering' ? ${JSON.stringify(stateForScenario('recovering'))} : scenario === 'primary-missing' ? ${JSON.stringify(stateForScenario('primary-missing'))} : scenario === 'waiting' ? ${JSON.stringify(stateForScenario('waiting'))} : scenario === 'state-fail' ? ${JSON.stringify(stateForScenario('state-fail'))} : scenario === 'long' ? ${JSON.stringify(stateForScenario('long'))} : ${JSON.stringify(stateForScenario('active'))});
     var invitations = [];
+    var invitationListFailure = false;
     function isAdminScenario() { return ['admin-manage', 'admin-member', 'save-fail', 'token-read-fail', 'token-save-fail', 'token-clear-fail', 'token-slow'].indexOf(scenario) >= 0; }
     function delay(value) { return new Promise(function (resolve) { setTimeout(function () { resolve(value); }, scenario === 'late' || scenario === 'token-slow' ? 900 : 0); }); }
     function fail(status) { var e = new Error('mock'); e.status = status; return Promise.reject(e); }
@@ -200,16 +201,24 @@ function page() {
       return new URL('/fixture-avatar.svg?user=' + encodeURIComponent(userId) + '&status=' + (avatarStatuses[userId] || 200) + '&delay=' + avatarDelay, serverAddress).href;
     }
     function get(path) {
-      apiCalls.push({ method: 'GET', path: path });
+      var requestUrl = path;
+      var scope = new URL(path, location.origin).searchParams.get('Scope');
+      path = path.split('?')[0];
+      apiCalls.push({ method: 'GET', path: path, url: requestUrl, scope: scope });
       if (path === 'WatchTogether/Users') return isAdminScenario() ? delay(${JSON.stringify(users)}) : scenario === 'users-fail' ? fail(500) : fail(403);
-      if (path === 'WatchTogether/Rooms') return roomsFailure ? fail(503) : delay(rooms.slice());
+      if (path === 'WatchTogether/Rooms') {
+        if (scope === 'all' && !isAdminScenario()) return fail(403);
+        return roomsFailure ? fail(503) : delay(rooms.filter(function (room) {
+          return scope !== 'mine' || room.ParticipantUserIds.indexOf(accountId) >= 0;
+        }));
+      }
       if (path.indexOf('/State') >= 0) {
         if (scenario === 'state-fail' || stateFailure) return fail(503);
         var stateRoom = rooms.filter(function (candidate) { return path.indexOf(candidate.RoomId) >= 0; })[0];
         var stateValue = stateRoom ? roomState(stateRoom) : { Sessions: [] };
         return new Promise(function (resolve) { setTimeout(function () { resolve(stateValue); }, stateDelay); });
       }
-      if (path === 'WatchTogether/Invitations') return delay(invitations.slice());
+      if (path === 'WatchTogether/Invitations') return invitationListFailure ? fail(503) : delay(invitations.slice());
       if (path === 'WatchTogether/Info') return delay({ CurrentVersion: '0.0.0-ui-mock', RepositoryUrl: 'https://example.invalid/mock' });
       if (path === 'WatchTogether/GitHubToken') {
         if (!isAdminScenario()) return fail(403);
@@ -240,6 +249,12 @@ function page() {
         invitations = [{ InvitationId: 'inv-1', Name: body && JSON.parse(body).Name || '', ExpiresAtUtc: expiresAt }];
         return delay({ Status: 'created', Created: true, InvitationId: 'inv-1', Code: 'ABCD12EFghI3J4KLMNopQR', ExpiresAtUtc: expiresAt });
       }
+      if (path.indexOf('WatchTogether/Invitations/') === 0 && method === 'DELETE') {
+        var invitationId = decodeURIComponent(path.slice('WatchTogether/Invitations/'.length));
+        var previousCount = invitations.length;
+        invitations = invitations.filter(function (invitation) { return invitation.InvitationId !== invitationId; });
+        return delay({ Deleted: invitations.length < previousCount });
+      }
       if (path.indexOf('/Accept') >= 0) return delay({ Status: 'accepted', Accepted: true });
       if (path.indexOf('/Action') >= 0) return delay({ Users: ['user-a'] });
       if (path.indexOf('/Resync') >= 0) return delay({ Status: 'accepted' });
@@ -250,6 +265,7 @@ function page() {
       switchAccount: function (id) { accountId = id; }, switchServer: function (value) { serverAddress = value; },
       setRooms: function (value) { rooms = value; }, setState: function (value) { stateOverride = value; },
       setInvitations: function (value) { invitations = value; },
+      setInvitationListFailure: function (value) { invitationListFailure = value; },
       setStateFailure: function (value) { stateFailure = value; }, setRoomsFailure: function (value) { roomsFailure = value; },
       setMedia: function (id, value) { mediaOverrides[id] = value; }, setMediaFailure: function (value) { mediaFailure = value; },
       setMediaDelay: function (value) { mediaDelay = value; }, setStateDelay: function (value) { stateDelay = value; },

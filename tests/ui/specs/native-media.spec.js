@@ -159,8 +159,11 @@ for (const identity of ['account', 'server', 'pause']) {
     await expect(page.locator('.wt-roomCard')).toHaveCount(0);
     expect(await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.method !== 'GET').length)).toBe(0);
     await page.evaluate(() => { window.__wtFixture.setMediaDelay(0); window.__wtFixture.setMedia('item-a', { SeriesName: '恢复后标题' }); window.__wtFixture.view.onResume(); });
-    await expect(page.locator('.wt-roomMedia')).toContainText('恢复后标题');
-    if (identity === 'account') expect((await mediaCalls(page)).at(-1).path).toBe('Users/other-user/Items/item-a');
+    if (identity === 'account') {
+      await expect(page.locator('#wtRooms')).toContainText('暂无参与的房间');
+      await expect(page.locator('.wt-roomCard')).toHaveCount(0);
+      expect((await mediaCalls(page)).some(x => x.path === 'Users/other-user/Items/item-a')).toBe(false);
+    } else await expect(page.locator('.wt-roomMedia')).toContainText('恢复后标题');
   });
 }
 
@@ -185,8 +188,8 @@ test('切换三页保持单导航，状态未变时焦点与busy稳定', async (
   await open(page, 'admin-member');
   for (let i = 0; i < 3; i++) {
     for (const name of ['Invite', 'Settings', 'Rooms']) {
-      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V30"]').click();
-      await expect(page.locator('.tabs-viewmenubar a')).toHaveCount(3);
+      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V33"]').click();
+      await expect(page.locator('.tabs-viewmenubar a')).toHaveCount(4);
     }
   }
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');

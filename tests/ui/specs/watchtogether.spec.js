@@ -17,9 +17,9 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 }
 
 async function selectView(page, view) {
-  const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V30"]').click();
-  const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
+  const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings', admin: 'Admin' }[view];
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V33"]').click();
+  const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection', admin: '#wtRoomsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
   if (view === 'settings') await expect(page.locator('#wtGitHubTokenStatus')).not.toContainText('正在读取');
@@ -103,7 +103,7 @@ async function expectButtonTextCentered(page) {
 test('原生三页导航只显示当前区域并保留原生内容限宽', async ({ page }) => {
   await open(page, 'admin-member', 'light', 1440, 1000);
   await expect(page.locator('.tabs-viewmenubar')).toHaveCount(1);
-  await expect(page.locator('.tabs-viewmenubar a')).toHaveText(['房间', '创建与邀请', '设置']);
+  await expect(page.locator('.tabs-viewmenubar a')).toHaveText(['房间', '创建与邀请', '后台管理', '设置']);
   await expect(page.locator('#wtAdminSection')).toBeHidden();
   await expect(page.locator('#wtSettingsSection')).toBeHidden();
   await selectView(page, 'invite');
@@ -255,7 +255,7 @@ test('管理员单页显示管理和设置，普通用户隐藏这两个区域',
 test('普通用户或权限错误时隐藏管理员内容', async ({ page }) => {
   await page.goto('/?scenario=users-fail&theme=light');
   await expect(page.locator('.wt-page')).toBeVisible();
-  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('#wtStatus')).toContainText('用户列表加载失败');
   await expect(page.locator('#wtAdminSection')).toBeHidden();
   await expect(page.locator('#wtSettingsSection')).toBeHidden();
 });
@@ -339,6 +339,8 @@ test('Waiting 与 State 失败状态反馈保持原页面语义', async ({ page 
 
 test('管理员可查看非成员管理列表并保留设置区域', async ({ page }) => {
   await open(page, 'admin-manage', 'dark');
+  await expect(page.locator('#wtRooms')).toContainText('暂无参与的房间');
+  await selectView(page, 'admin');
   await expect(page.locator('#wtRooms')).toContainText('管理员长列表房间');
   await selectView(page, 'invite');
   await expect(page.locator('#wtAdminSection')).toBeVisible();
