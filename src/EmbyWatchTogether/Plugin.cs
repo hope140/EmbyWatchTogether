@@ -183,7 +183,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Change the page key together with the controller key so
                     // Emby Web refreshes the embedded HTML cache as well.
-                    Name = "WatchTogetherRoomsV33",
+                    Name = "WatchTogetherRoomsV35",
                     DisplayName = GetMenuDisplayName(),
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
@@ -193,19 +193,19 @@ namespace Emby.Plugins.WatchTogether
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherInviteV33",
+                    Name = "WatchTogetherInviteV35",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherSettingsV33",
+                    Name = "WatchTogetherSettingsV35",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherAdminV33",
+                    Name = "WatchTogetherAdminV35",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
@@ -216,7 +216,7 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Use a new controller name so Emby Web does not reuse a
                     // cached copy of the previous embedded module.
-                    Name = "WatchTogetherNativeV33.js",
+                    Name = "WatchTogetherNativeV35.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };

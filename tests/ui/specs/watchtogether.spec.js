@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings', admin: 'Admin' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V33"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V35"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection', admin: '#wtRoomsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -214,7 +214,7 @@ test('深色渐变中的旧 button-flat 会复现浅底白字，页面控件全�
 test('浅色、深色和 HSL 原生描边按钮文字和边界可辨', async ({ page }) => {
   for (const theme of ['light', 'dark', 'hsl']) {
     await open(page, 'admin-member', theme, 1024, 900);
-    const paint = await buttonPaint(page, '#wtRefresh');
+    const paint = await buttonPaint(page, '[data-act="diagnostics"]');
     expect(paint.classes).toContain('raised-outline');
     expect(paint.borderStyle).toBe('solid');
     expect(paint.borderWidth).toBeGreaterThan(0);
@@ -533,9 +533,7 @@ test('诊断内容经过脱敏，导出前不出现原始标识', async ({ page 
 
 test('Recovering 状态只针对临时掉线参与者，主用户缺失仍显示 Waiting', async ({ page }) => {
   await open(page, 'recovering', 'dark', 390, 1400);
-  await expect(page.locator('#wtRefresh')).toHaveText('刷新');
-  const refreshMetrics = await page.locator('#wtRefresh').evaluate(button => ({ width: button.getBoundingClientRect().width, textWidth: button.scrollWidth }));
-  expect(refreshMetrics.textWidth).toBeLessThanOrEqual(refreshMetrics.width);
+  await expect(page.locator('#wtRefresh')).toHaveCount(0);
   await expect(page.locator('.wt-roomState')).toHaveText('等待连接恢复');
   await expect(page.locator('.wt-roomState')).toHaveClass(/wt-roomState-recovering/);
   await expect(page.locator('.wt-roomStateDescription')).toContainText('临时掉线');

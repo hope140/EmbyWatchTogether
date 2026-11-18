@@ -1,4 +1,6 @@
 const { test, expect } = require('@playwright/test');
+
+test.beforeEach(async ({ page }) => { await page.clock.install(); });
 const fs = require('fs');
 const path = require('path');
 const artifacts = path.join(__dirname, '..', 'test-results', 'cinema-ui');
@@ -9,10 +11,12 @@ async function open(page, scenario = 'admin-member', width = 1440, theme = 'ligh
   await page.goto(`/?scenario=${scenario}&theme=${theme}`);
   await expect(page.locator('.wt-roomState')).not.toHaveText('正在读取状态');
   await expect(page.locator('.wt-roomCard')).toHaveCount(1);
+  await page.evaluate(() => clearInterval(window.__wtFixture.view.view._wtTimer));
 }
-async function refresh(page) {
+async function refresh(page, metadataDue = false) {
+  if (metadataDue) await page.clock.fastForward(5100);
   const count = await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.path.endsWith('/State')).length);
-  await page.locator('#wtRefresh').click();
+  await page.evaluate(() => window.__wtFixture.refresh());
   await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.path.endsWith('/State')).length)).toBeGreaterThan(count);
 }
 async function hasBackdrop(page) {
@@ -24,7 +28,7 @@ async function noBackdrop(page) {
   await expect(page.locator('.wt-roomBackdrop')).not.toHaveAttribute('src', /.+/);
 }
 async function selectView(page, suffix) {
-  await page.locator('.headerMiddle a[href*="WatchTogether' + suffix + 'V33"]').click();
+  await page.locator('.headerMiddle a[href*="WatchTogether' + suffix + 'V35"]').click();
   await expect(page.locator('.tabs-viewmenubar')).toHaveCount(1);
 }
 
@@ -32,7 +36,7 @@ test('本人媒体背景优先于父背景且全部原生操作可访问', async
   await open(page);
   await hasBackdrop(page);
   await page.evaluate(() => window.__wtFixture.setMedia('item-a', { ParentBackdropItemId: 'series-secret-id', ParentBackdropImageTags: ['parent-secret-tag'] }));
-  await refresh(page);
+  await refresh(page, true);
   await hasBackdrop(page);
   const imageCall = await page.evaluate(() => window.__wtFixture.imageCalls.at(-1));
   expect(imageCall.itemId).toBe('item-a');
@@ -47,15 +51,15 @@ test('本人媒体背景优先于父背景且全部原生操作可访问', async
 test('父背景fallback，无图及404保留正确片名与可用控件', async ({ page }) => {
   await open(page);
   await page.evaluate(() => window.__wtFixture.setMedia('item-a', { BackdropImageTags: [], ParentBackdropItemId: 'series-a', ParentBackdropImageTags: ['parent-tag'] }));
-  await refresh(page);
+  await refresh(page, true);
   await hasBackdrop(page);
   expect(await page.evaluate(() => window.__wtFixture.imageCalls.at(-1).itemId)).toBe('series-a');
   await page.evaluate(() => window.__wtFixture.setMedia('item-a', { BackdropImageTags: [], ParentBackdropImageTags: [], ParentBackdropItemId: null }));
-  await refresh(page);
+  await refresh(page, true);
   await noBackdrop(page);
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   await page.evaluate(() => window.__wtFixture.setMedia('item-a', { BackdropImageTags: ['missing'] }));
-  await refresh(page);
+  await refresh(page, true);
   await noBackdrop(page);
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   await expect(page.locator('[data-act="pause"]')).toBeEnabled();
@@ -75,7 +79,7 @@ test('背景URL在请求前拒绝外站、凭据和非HTTP协议', async ({ page
     'javascript:alert(1)', 'blob:http://127.0.0.1:4179/opaque'
   ]) {
     await page.evaluate(value => window.__wtFixture.setImageUrl(value), url);
-    await refresh(page);
+    await refresh(page, true);
     await noBackdrop(page);
     await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   }
@@ -86,7 +90,7 @@ test('加载中的旧背景在Waiting后不回显', async ({ page }) => {
   await open(page);
   await hasBackdrop(page);
   await page.evaluate(() => { window.__wtFixture.setImageDelay(700); window.__wtFixture.setMedia('item-a', { BackdropImageTags: ['delayed-a'] }); });
-  await refresh(page);
+  await refresh(page, true);
   await expect(page.locator('.wt-roomBackdrop')).toHaveAttribute('src', /delayed-a/);
   await page.evaluate(() => window.__wtFixture.setState({ State: 'Waiting', StatusReason: 'waiting_for_playback' }));
   await refresh(page);
@@ -102,17 +106,17 @@ test('旧图片事件不能覆盖新背景，离页与拒绝读取会清图', as
   await open(page);
   await hasBackdrop(page);
   await page.evaluate(() => { window.__wtFixture.setImageDelay(800); window.__wtFixture.setMedia('item-a', { BackdropImageTags: ['delayed-old'] }); });
-  await refresh(page);
+  await refresh(page, true);
   await expect(page.locator('.wt-roomBackdrop')).toHaveAttribute('src', /delayed-old/);
   await page.evaluate(() => { window.__wtFixture.setImageDelay(0); window.__wtFixture.setMedia('item-a', { BackdropImageTags: ['new-current'] }); });
-  await refresh(page);
+  await refresh(page, true);
   await hasBackdrop(page);
   await expect(page.locator('.wt-roomBackdrop')).toHaveAttribute('src', /new-current/);
   await page.waitForTimeout(950);
   await expect(page.locator('.wt-roomBackdrop')).toHaveAttribute('src', /new-current/);
   await hasBackdrop(page);
   await page.evaluate(() => window.__wtFixture.setMediaFailure(403));
-  await refresh(page);
+  await refresh(page, true);
   await noBackdrop(page);
   await page.evaluate(() => window.__wtFixture.view.onPause());
   await expect(page.locator('.wt-roomBackdrop[src]')).toHaveCount(0);
@@ -121,7 +125,7 @@ test('旧图片事件不能覆盖新背景，离页与拒绝读取会清图', as
 test('诊断导出不含图片标识与URL', async ({ page }) => {
   await open(page);
   await page.evaluate(() => window.__wtFixture.setMedia('item-a', { BackdropImageTags: [], ParentBackdropItemId: 'private-parent-marker', ParentBackdropImageTags: ['private-image-marker'] }));
-  await refresh(page);
+  await refresh(page, true);
   await hasBackdrop(page);
   await page.locator('[data-act="diagnostics"]').click();
   await expect(page.locator('.wt-diagnosticToolbar')).toBeVisible();

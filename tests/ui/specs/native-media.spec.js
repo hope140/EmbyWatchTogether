@@ -1,4 +1,6 @@
 const { test, expect } = require('@playwright/test');
+
+test.beforeEach(async ({ page }) => { await page.clock.install(); });
 const fs = require('fs');
 const path = require('path');
 const artifacts = path.join(__dirname, '..', 'test-results', 'native-pages');
@@ -9,13 +11,15 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100) {
   await page.goto(`/?scenario=${scenario}&theme=${theme}`);
   await expect(page.locator('.wt-roomState')).not.toHaveText('正在读取状态');
   await expect(page.locator('.wt-roomCard')).toHaveCount(1);
+  await page.evaluate(() => clearInterval(window.__wtFixture.view.view._wtTimer));
 }
 async function mediaCalls(page) {
   return page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.path.startsWith('Users/')));
 }
-async function refresh(page) {
+async function refresh(page, metadataDue = false) {
+  if (metadataDue) await page.clock.fastForward(5100);
   const before = await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.path.endsWith('/State')).length);
-  await page.locator('#wtRefresh').click();
+  await page.evaluate(() => window.__wtFixture.refresh());
   await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.path.endsWith('/State')).length)).toBeGreaterThan(before);
 }
 
@@ -76,14 +80,14 @@ test('媒体权限撤回或错误Id立即清标题，后续可重新读取', asy
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   for (const status of [403, 404, 500]) {
     await page.evaluate(value => window.__wtFixture.setMediaFailure(value), status);
-    await refresh(page);
+    await refresh(page, true);
     await expect(page.locator('.wt-roomMedia')).toHaveText('媒体信息暂不可用');
   }
   await page.evaluate(() => { window.__wtFixture.setMediaFailure(0); window.__wtFixture.setMedia('item-a', { Id: 'wrong' }); });
-  await refresh(page);
+  await refresh(page, true);
   await expect(page.locator('.wt-roomMedia')).toHaveText('媒体信息暂不可用');
   await page.evaluate(() => window.__wtFixture.setMedia('item-a', { Id: 'item-a' }));
-  await refresh(page);
+  await refresh(page, true);
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
 });
 
@@ -98,7 +102,7 @@ test('State及Rooms读取失败清除当前媒体，保留可重试反馈', asyn
   await refresh(page);
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   await page.evaluate(() => window.__wtFixture.setRoomsFailure(true));
-  await page.locator('#wtRefresh').click();
+  await page.evaluate(() => window.__wtFixture.refresh());
   await expect(page.locator('#wtRoomsStatus')).toContainText('当前列表可能不是最新');
   await expect(page.locator('.wt-roomMedia')).toBeHidden();
 });
@@ -108,7 +112,7 @@ test('慢媒体响应不阻塞下一次State，Waiting后旧片名不能回显',
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   await page.evaluate(() => { window.__wtFixture.setMediaDelay(800); window.__wtFixture.setMedia('item-a', { SeriesName: '迟到片名' }); });
   const before = (await mediaCalls(page)).length;
-  await refresh(page);
+  await refresh(page, true);
   await expect.poll(async () => (await mediaCalls(page)).length).toBeGreaterThan(before);
   await page.evaluate(() => window.__wtFixture.setState({ State: 'Waiting', StatusReason: 'waiting_for_playback' }));
   await refresh(page);
@@ -123,7 +127,7 @@ test('切换Item与房间移除均拒绝旧媒体', async ({ page }) => {
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   await page.evaluate(() => { window.__wtFixture.setMediaDelay(600); window.__wtFixture.setMedia('item-a', { SeriesName: '旧目标A' }); });
   const count = (await mediaCalls(page)).length;
-  await refresh(page);
+  await refresh(page, true);
   await expect.poll(async () => (await mediaCalls(page)).length).toBeGreaterThan(count);
   await page.evaluate(() => window.__wtFixture.setState({ SyncItemId: 'item-b', Sessions: [
     { UserId: 'user-a', ItemId: 'item-b', Online: true }, { UserId: 'user-b', ItemId: 'item-b', Online: true }
@@ -132,10 +136,10 @@ test('切换Item与房间移除均拒绝旧媒体', async ({ page }) => {
   await page.waitForTimeout(700);
   await expect(page.locator('.wt-roomCard')).not.toContainText('旧目标A');
   await page.evaluate(() => { window.__wtFixture.setMediaDelay(0); window.__wtFixture.setMedia('item-b', { SeriesName: '新目标B' }); });
-  await refresh(page);
+  await refresh(page, true);
   await expect(page.locator('.wt-roomMedia')).toContainText('新目标B');
   await page.evaluate(() => window.__wtFixture.setRooms([]));
-  await page.locator('#wtRefresh').click();
+  await page.evaluate(() => window.__wtFixture.refresh());
   await expect(page.locator('.wt-roomCard')).toHaveCount(0);
 });
 
@@ -145,7 +149,7 @@ for (const identity of ['account', 'server', 'pause']) {
     await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
     await page.evaluate(() => { window.__wtFixture.setMediaDelay(500); window.__wtFixture.setMedia('item-a', { SeriesName: '旧账号标题' }); });
     const before = (await mediaCalls(page)).length;
-    await refresh(page);
+    await refresh(page, true);
     await expect.poll(async () => (await mediaCalls(page)).length).toBeGreaterThan(before);
     await page.evaluate(kind => {
       const f = window.__wtFixture;
@@ -176,7 +180,7 @@ test('电影、特别篇、缺失字段及恶意长标题安全渲染', async ({
     [{ Type: 'Movie', Name: '<img src=x onerror=alert(1)>' + '很长的标题'.repeat(25) }, '<img src=x onerror=alert(1)>']
   ]) {
     await page.evaluate(value => window.__wtFixture.setMedia('item-a', value), item);
-    await refresh(page);
+    await refresh(page, true);
     await expect(page.locator('.wt-roomMedia')).toContainText(expected);
     await expect(page.locator('.wt-roomMedia img')).toHaveCount(0);
     const width = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
@@ -188,7 +192,7 @@ test('切换三页保持单导航，状态未变时焦点与busy稳定', async (
   await open(page, 'admin-member');
   for (let i = 0; i < 3; i++) {
     for (const name of ['Invite', 'Settings', 'Rooms']) {
-      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V33"]').click();
+      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V35"]').click();
       await expect(page.locator('.tabs-viewmenubar a')).toHaveCount(4);
     }
   }
@@ -202,7 +206,6 @@ test('切换三页保持单导航，状态未变时焦点与busy稳定', async (
 });
 
 test('State挂起超过新鲜度窗口不继续展示旧片名，成功后恢复', async ({ page }) => {
-  await page.clock.install();
   await open(page);
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
   // Isolate the delayed read from periodic retries; the freshness timer still runs.

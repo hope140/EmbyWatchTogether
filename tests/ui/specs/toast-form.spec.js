@@ -83,3 +83,26 @@ test('部分暂离失败保持可见且不报成功 toast',async({page})=>{
  await expect(page.locator('.wt-roomCard')).toContainText('暂停失败');
  expect(await page.evaluate(()=>window.__wtFixture.toasts)).toEqual([]);
 });
+
+
+for (const mode of ['default', 'missing', 'reject']) test('接受邀请未填代码时提示并聚焦 ' + mode, async ({page}) => {
+  await form(page, mode);
+  const input = page.locator('#wtInvitationAcceptCode');
+  const fallback = page.locator('#wtInvitationAcceptError');
+  await input.fill('   ');
+  await page.locator('#wtAcceptInvitation').click();
+  await expect(input).toBeFocused();
+  await expect(page.locator('#wtInvitationStatus')).toBeEmpty();
+  if (mode === 'default') {
+    await expect.poll(() => page.evaluate(() => window.__wtFixture.toasts)).toContain('请输入邀请码。');
+    await expect(fallback).toBeHidden();
+  } else {
+    await expect(fallback).toBeVisible();
+    await expect(fallback).toHaveText('请输入邀请码。');
+  }
+  const posted = await page.evaluate(() =>
+    window.__wtFixture.apiCalls.filter(call => call.method === 'POST' && call.path.endsWith('/Accept')));
+  expect(posted).toEqual([]);
+  await input.fill('fixture-invitation-code');
+  await expect(fallback).toBeHidden();
+});

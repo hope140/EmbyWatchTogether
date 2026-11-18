@@ -18,7 +18,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "正在对齐两位参与者的播放位置": "Aligning the playback positions of two participants",
         "两位参与者已连接，播放会自动同步": "Both participants are connected; playback will sync automatically",
         "正在让另一位参与者打开主用户当前视频": "Asking the other participant to open the primary user’s current video",
-        "当前房间暂时无法使用，请刷新后重试": "The current room is temporarily unavailable, please refresh and try again.",
+        "当前房间暂时无法使用，请稍后重试": "The room is temporarily unavailable. Please try again later.",
         "暂停播放": "Pause playback",
         "继续播放": "Resume playback",
         "重新同步": "Resync",
@@ -366,7 +366,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "播放速度不是 1 倍，请恢复正常速度后重试。": "The playback speed is not 1x, please restore the normal speed and try again.",
         "等待双方打开同一视频并开始播放。": "Wait for both participants to open the same video and start playing.",
         "正在等待临时掉线的参与者恢复。": "Waiting for temporarily disconnected participants to resume.",
-        "当前房间状态需要检查，请刷新后重试。": "The current room status needs to be checked, please refresh and try again.",
+        "当前房间状态需要检查，请稍后重试。": "The room status needs to be checked. Please try again later.",
         "结束同步": "End synchronization",
         "主用户进度": "Primary progress",
         "主用户已暂停 · 对方播放中": "Primary paused · other playing",
@@ -392,7 +392,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "状态暂不可用": "Status is temporarily unavailable",
         "正在读取状态": "Reading status",
         "播放状态已过期，正在等待重新读取。": "The playback status has expired and is waiting to be reread.",
-        "状态读取失败，请刷新后重试。": "Status reading failed, please refresh and try again.",
+        "状态读取失败，将自动重试。": "Could not load the room status. Retrying automatically.",
         "正在读取当前播放状态…": "Reading current playback status...",
         "视频不一致": "Videos do not match",
         "等待连接恢复": "Wait for connection to be restored",
@@ -413,8 +413,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "成员与诊断": "Members and Diagnostics",
         "房间成员": "room members",
         "暂离可重新加入；结束解除双方关系。": "You can rejoin after leaving. Ending the room removes both participants.",
-        "房间列表刷新失败，当前列表可能不是最新。请点击“刷新”重试。": "Room list refresh failed, the current list may not be up to date. Please click \"Refresh\" to try again.",
-        "房间列表加载失败，请点击“刷新”重试。": "The room list failed to load, please click \"Refresh\" to try again.",
+        "房间列表刷新失败，当前列表可能不是最新。将自动重试。": "The room list could not refresh and may be out of date. Retrying automatically.",
+        "房间列表加载失败，将自动重试。": "The room list failed to load. Retrying automatically.",
         "暂时暂停双方并重新对齐，继续吗？": "Temporarily pause both sides and realign, continue?",
         "操作": "Action",
         "处理中…": " in progress…",
@@ -477,7 +477,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "正在对齐两位参与者的播放位置": "正在對齊兩位參與者的播放位置",
         "两位参与者已连接，播放会自动同步": "兩位參與者已連線，播放會自動同步",
         "正在让另一位参与者打开主用户当前视频": "正在讓另一位參與者開啟主使用者當前影片",
-        "当前房间暂时无法使用，请刷新后重试": "當前房間暫時無法使用，請重新整理後重試",
+        "当前房间暂时无法使用，请稍后重试": "目前的房間暫時無法使用，請稍後重試",
         "暂停播放": "暫停播放",
         "继续播放": "繼續播放",
         "重新同步": "重新同步",
@@ -825,7 +825,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "播放速度不是 1 倍，请恢复正常速度后重试。": "播放速度不是 1 倍，請恢復正常速度後重試。",
         "等待双方打开同一视频并开始播放。": "等待雙方開啟同一影片並開始播放。",
         "正在等待临时掉线的参与者恢复。": "正在等待臨時掉線的參與者恢復。",
-        "当前房间状态需要检查，请刷新后重试。": "當前房間狀態需要檢查，請重新整理後重試。",
+        "当前房间状态需要检查，请稍后重试。": "目前的房間狀態需要檢查，請稍後重試。",
         "结束同步": "結束同步",
         "主用户进度": "主使用者進度",
         "主用户已暂停 · 对方播放中": "主使用者已暫停 · 對方播放中",
@@ -851,7 +851,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "状态暂不可用": "狀態暫不可用",
         "正在读取状态": "正在讀取狀態",
         "播放状态已过期，正在等待重新读取。": "播放狀態已過期，正在等待重新讀取。",
-        "状态读取失败，请刷新后重试。": "狀態讀取失敗，請重新整理後重試。",
+        "状态读取失败，将自动重试。": "狀態讀取失敗，將自動重試。",
         "正在读取当前播放状态…": "正在讀取當前播放狀態…",
         "视频不一致": "影片不一致",
         "等待连接恢复": "等待連線恢復",
@@ -872,8 +872,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "成员与诊断": "成員與診斷",
         "房间成员": "房間成員",
         "暂离可重新加入；结束解除双方关系。": "暫離可重新加入；結束解除雙方關係。",
-        "房间列表刷新失败，当前列表可能不是最新。请点击“刷新”重试。": "房間列表重新整理失敗，當前列表可能不是最新。請點擊“重新整理”重試。",
-        "房间列表加载失败，请点击“刷新”重试。": "房間列表載入失敗，請點擊“重新整理”重試。",
+        "房间列表刷新失败，当前列表可能不是最新。将自动重试。": "房間列表重新整理失敗，目前的列表可能不是最新。將自動重試。",
+        "房间列表加载失败，将自动重试。": "房間列表載入失敗，將自動重試。",
         "暂时暂停双方并重新对齐，继续吗？": "暫時暫停雙方並重新對齊，繼續嗎？",
         "操作": "操作",
         "处理中…": "處理中…",
@@ -986,7 +986,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         get Watching() { return t('两位参与者已连接，播放会自动同步'); },
         get Handoff() { return t('正在让另一位参与者打开主用户当前视频'); },
         get Recovering() { return t('正在等待临时掉线的参与者恢复'); },
-        get Unavailable() { return t('当前房间暂时无法使用，请刷新后重试'); }
+        get Unavailable() { return t('当前房间暂时无法使用，请稍后重试'); }
     };
     var actionLabels = {
         get pause() { return t('暂停播放'); },
@@ -1026,6 +1026,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         if (notices) clearChildren(notices);
         releaseNativeTabs(page);
         clearInterval(page._wtTimer);
+        window.removeEventListener('focus', page._wtRefreshVisible);
+        page.ownerDocument.removeEventListener('visibilitychange', page._wtRefreshVisible);
         clearAllRoomFeedback(page);
         clearTimeout(page._wtStatusTimer);
         Object.keys(page._wtStateExpiryTimers || {}).forEach(function (roomId) {
@@ -1036,6 +1038,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         page._wtUsers = [];
         page._wtRooms = null;
         page._wtRoomsLoaded = false;
+        page._wtRoomsPollFailures = 0;
+        page._wtRoomsRetryAt = 0;
         page._wtLastRooms = null;
         setRoomsStatus(page, '');
         page._wtInvitations = [];
@@ -1048,6 +1052,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var invitationList = page.querySelector('#wtInvitations');
         if (invitationList) invitationList.hidden = true;
         setInvitationStatus(page, '', false);
+        setAcceptInvitationError(page, '');
         page._wtInvitationCode = null;
         page._wtInvitationCopied = false;
         page._wtPendingCreatedFeedback = null;
@@ -2048,7 +2053,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
             renderInvitationCode(page);
             setInvitationStatus(page, '', false);
-            notifySuccess(page, t('邀请码已创建，请立即复制并发送给对方。'));
+            notifyToast(page, t('邀请码已创建，请立即复制并发送给对方。'));
             return loadInvitations(page);
         }).catch(function (error) {
             setInvitationStatus(page, error && error.message === 'invitation_unavailable'
@@ -2077,7 +2082,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             page._wtInvitationCopied = true;
             renderInvitationCode(page);
             setInvitationStatus(page, '', false);
-            notifySuccess(page, t('邀请码已复制。'));
+            notifyToast(page, t('邀请码已复制。'));
         }).catch(function () {
             if (page._wtInvitationCode !== invitation) return;
             page._wtInvitationCopied = false;
@@ -2102,7 +2107,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 page._wtInvitationCopied = false;
                 renderInvitationCode(page);
             }
-            if (result && result.Deleted) notifySuccess(page, t('邀请码已撤销。'));
+            if (result && result.Deleted) notifyToast(page, t('邀请码已撤销。'));
             else setInvitationStatus(page, t('邀请码不存在或已失效。'), true);
             return loadInvitations(page);
         }).catch(function (error) {
@@ -2122,13 +2127,23 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }[status] || t('邀请码未能接受，请稍后重试。');
     }
 
+    function setAcceptInvitationError(page, text) {
+        var message = page.querySelector('#wtInvitationAcceptError');
+        if (!message) return;
+        message.hidden = !text;
+        message.textContent = text;
+    }
+
     function acceptInvitation(page) {
         if (!pageActionAllowed(page)) return;
         var input = page.querySelector('#wtInvitationAcceptCode');
         var button = page.querySelector('#wtAcceptInvitation');
         var code = input ? input.value.trim() : '';
+        setAcceptInvitationError(page, '');
         if (!code) {
-            setInvitationStatus(page, t('请输入邀请码。'), true);
+            notifyToast(page, t('请输入邀请码。'), function (text) {
+                if (input && !input.value.trim()) setAcceptInvitationError(page, text);
+            });
             if (input) {
                 input.focus();
             }
@@ -2140,7 +2155,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             result = result || {};
             if (result.Status === 'accepted') {
                 setInvitationStatus(page, '', false);
-                notifySuccess(page, invitationAcceptMessage(result.Status));
+                notifyToast(page, invitationAcceptMessage(result.Status));
                 if (input) {
                     input.value = '';
                 }
@@ -2237,7 +2252,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         return apiSend(page, 'WatchTogether/GitHubToken', 'POST', { Token: value }).then(function (result) {
             clearGitHubTokenInput(page);
             setGitHubTokenStatus(page, result && result.Configured ? t('Token 已配置。') : t('Token 未配置。'));
-            if (result && result.Configured) notifySuccess(page, t('Token 已保存'));
+            if (result && result.Configured) notifyToast(page, t('Token 已保存'));
         }).catch(function (error) {
             setGitHubTokenStatus(page,
                 isPermissionError(error) ? t('保存被拒绝：只有管理员可以修改 Token。') : t('Token 保存失败，请稍后重试。'), true);
@@ -2266,7 +2281,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 page._wtGitHubTokenCanClear = true;
             }
             setGitHubTokenStatus(page, result && result.Configured ? t('Token 仍已配置。') : t('尚未配置 Token。'));
-            if (result && result.Configured === false) notifySuccess(page, t('Token 已清除'));
+            if (result && result.Configured === false) notifyToast(page, t('Token 已清除'));
         }).catch(function (error) {
             setGitHubTokenStatus(page,
                 isPermissionError(error) ? t('清除被拒绝：只有管理员可以修改 Token。') : t('Token 清除失败，请稍后重试。'), true);
@@ -2282,10 +2297,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV33',
-        invite: 'WatchTogetherInviteV33',
-        settings: 'WatchTogetherSettingsV33',
-        admin: 'WatchTogetherAdminV33'
+        rooms: 'WatchTogetherRoomsV35',
+        invite: 'WatchTogetherInviteV35',
+        settings: 'WatchTogetherSettingsV35',
+        admin: 'WatchTogetherAdminV35'
     };
 
     function currentRoute(page) {
@@ -2556,7 +2571,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }).then(function (config) {
             applyPluginConfiguration(page, config);
             setConfigStatus(page, '');
-            notifySuccess(page, t('配置已保存'));
+            notifyToast(page, t('配置已保存'));
         }).catch(function (error) {
             var message;
             if (saveStage === 'read') {
@@ -2809,7 +2824,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     };
 
     function statusReasonMessage(reason) {
-        return statusReasonMessages[reason] || t('当前房间状态需要检查，请刷新后重试。');
+        return statusReasonMessages[reason] || t('当前房间状态需要检查，请稍后重试。');
     }
 
     function roomFeedback(page, roomId, text, isError, persistent) {
@@ -2855,7 +2870,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     // Notifications never participate in the mutation promise chain. Host failures
     // cannot turn a completed operation into a failed request or retry it.
-    function notifySuccess(page, text) {
+    function notifyToast(page, text, onUnavailable) {
         var generation = page._wtGeneration;
         var route = page._wtVisibleRoute;
         function current() {
@@ -2863,6 +2878,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
         function fallback() {
             if (!current()) return;
+            if (onUnavailable) { onUnavailable(text); return; }
             var region = page.querySelector('#wtSuccessFallback');
             if (!region) return;
             var message = document.createElement('p');
@@ -2877,7 +2893,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 var toast = modules && modules[0];
                 toast = toast && (toast.default || toast);
                 if (typeof toast !== 'function') throw new Error('Toast unavailable');
-                // Host toast renders HTML. Only fixed, trusted success copy is passed.
+                // Host toast renders HTML. Only fixed, trusted messages are passed.
                 return toast({ text: text });
             });
         }).catch(fallback);
@@ -3006,7 +3022,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     function roomPresentation(page, room) {
         var entry = page._wtRoomStates[room.RoomId];
         var state = entry && entry.state;
-        if (!state) return { label: entry && entry.failed ? t('状态暂不可用') : t('正在读取状态'), description: entry && entry.expired ? t('播放状态已过期，正在等待重新读取。') : entry && entry.failed ? t('状态读取失败，请刷新后重试。') : t('正在读取当前播放状态…'), className: 'unavailable' };
+        if (!state) return { label: entry && entry.failed ? t('状态暂不可用') : t('正在读取状态'), description: entry && entry.expired ? t('播放状态已过期，正在等待重新读取。') : entry && entry.failed ? t('状态读取失败，将自动重试。') : t('正在读取当前播放状态…'), className: 'unavailable' };
         var info = getStateInfo(state.State);
         info.description = statusReasonMessage(state.StatusReason);
         if (state.StatusReason === 'different_video' || state.StatusReason === 'media_mismatch') info.label = t('视频不一致');
@@ -3241,7 +3257,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function loadRoomMedia(page, room) {
-        if (!pageActionAllowed(page) || page._wtVisibleRoute !== 'rooms' || page._wtMediaFlights[room.RoomId]) return;
+        if (!pageActionAllowed(page) || page.ownerDocument.hidden || page._wtVisibleRoute !== 'rooms' ||
+            page._wtMediaFlights[room.RoomId]) return;
         var roomId = room.RoomId;
         var sequence = (page._wtRoomSequences[roomId] || 0) + 1;
         page._wtRoomSequences[roomId] = sequence;
@@ -3269,8 +3286,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
             // This read is fresher than Rooms, but the endpoint is not an atomic snapshot.
             renderRooms(page, page._wtRooms || []);
-            if (!itemId) return;
-            if (page._wtMetadataFlights[roomId]) return;
+            if (!itemId || page.ownerDocument.hidden || page._wtMetadataFlights[roomId] ||
+                target.nextMetadataReadAt > Date.now()) return;
+            // Preserve the previous metadata request cadence for an unchanged item.
+            target.nextMetadataReadAt = Date.now() + 5000;
             var identity = page._wtIdentity;
             if (!identity.user || typeof ApiClient.getItem !== 'function') {
                 page._wtMedia[roomId] = { unavailable: true };
@@ -3406,7 +3425,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
 
     function loadCardArtwork(page, row) {
         var target = row._wtTarget;
-        if (!target || !pageActionAllowed(page)) return;
+        if (!target || !pageActionAllowed(page) || page.ownerDocument.hidden) return;
         var read = cardMetadata(page, target.id);
         if (target.read === read) return;
         target.read = read;
@@ -3787,6 +3806,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             });
             page._wtRooms = list;
             page._wtRoomsLoaded = true;
+            page._wtRoomsPollFailures = 0;
+            page._wtRoomsRetryAt = 0;
             page._wtLastRooms = list;
             setRoomsStatus(page, '');
             Object.keys(page._wtRoomStates).forEach(function (roomId) {
@@ -3831,11 +3852,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 updateRoomPresentation(page, room);
             });
             page._wtRooms = null;
+            page._wtRoomsPollFailures = Math.min(4, page._wtRoomsPollFailures + 1);
+            page._wtRoomsRetryAt = Date.now() + Math.min(5000, 1000 * Math.pow(2, page._wtRoomsPollFailures - 1));
             if (cards) renderRooms(page, []);
             syncForm(page);
             setRoomsStatus(page, page._wtRoomsLoaded
-                ? t('房间列表刷新失败，当前列表可能不是最新。请点击“刷新”重试。')
-                : t('房间列表加载失败，请点击“刷新”重试。'));
+                ? t('房间列表刷新失败，当前列表可能不是最新。将自动重试。')
+                : t('房间列表加载失败，将自动重试。'));
             return [];
         }).then(function (result) {
             page._wtRoomsLoading = false;
@@ -3961,11 +3984,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 if (result && result.Deleted === false) {
                     if (page._wtIsAdmin !== true) throw new Error(t('房间不存在或已删除'));
                     clearRoomFeedback(page, room.RoomId);
-                    notifySuccess(page, t('房间已结束或已由其他管理员结束'));
+                    notifyToast(page, t('房间已结束或已由其他管理员结束'));
                     return loadRooms(page);
                 }
                 clearRoomFeedback(page, room.RoomId);
-                notifySuccess(page, ending ? t('房间已结束') : t('房间已删除'));
+                notifyToast(page, ending ? t('房间已结束') : t('房间已删除'));
                 return loadRooms(page);
             })
             .catch(function (err) {
@@ -4002,7 +4025,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     roomFeedback(page, room.RoomId, text, true, true);
                 } else {
                     clearRoomFeedback(page, room.RoomId);
-                    notifySuccess(page, text);
+                    notifyToast(page, text);
                 }
                 return loadRooms(page);
             })
@@ -4085,7 +4108,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             page._wtCreateTouched = {};
             page._wtCreateSubmitted = false;
             syncForm(page);
-            notifySuccess(page, t('房间已创建'));
+            notifyToast(page, t('房间已创建'));
             return loadRooms(page);
         }).catch(function (err) {
             setCreateStatus(page, t('创建失败：') + errorMessage(err), true);
@@ -4120,12 +4143,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         dom.addEventListener(page.querySelector('#wtAcceptInvitation'), 'click', function () {
             acceptInvitation(page);
         });
+        dom.addEventListener(page.querySelector('#wtInvitationAcceptCode'), 'input', function () {
+            setAcceptInvitationError(page, '');
+        });
         dom.addEventListener(page.querySelector('#wtCopyInvitationCode'), 'click', function (event) {
             copyInvitationCode(page, event.currentTarget);
-        });
-        dom.addEventListener(page.querySelector('#wtRefresh'), 'click', function () {
-            if (!pageActionAllowed(page)) return;
-            loadRooms(page);
         });
         dom.addEventListener(page.querySelector('#wtRoomName'), 'input', function () {
             page._wtCreateTouched = page._wtCreateTouched || {};
@@ -4160,7 +4182,6 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         BaseView.prototype.onResume.apply(this, arguments);
         var page = this.view;
         locale = currentLocale();
-        window.removeEventListener('focus', page._wtRefreshVisible);
         page._wtActive = false;
         page._wtGeneration = (page._wtGeneration || 0) + 1;
         page._wtRoute = currentRoute(page);
@@ -4184,6 +4205,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         loading.show();
 
         loadUsers(page).then(function () {
+            if (page.ownerDocument.hidden && (page._wtVisibleRoute === 'rooms' || page._wtVisibleRoute === 'admin')) return null;
             return loadRooms(page);
         }).then(function () {
             if (page._wtVisibleRoute === 'invite') return loadInvitations(page);
@@ -4197,24 +4219,25 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             loading.hide();
         });
 
-        clearInterval(page._wtTimer);
         page._wtRefreshVisible = function () {
-            if (!pageActionAllowed(page)) return;
-            if (page._wtVisibleRoute === 'rooms' || page._wtVisibleRoute === 'admin') loadRooms(page);
-            else if (page._wtVisibleRoute === 'invite') {
+            if (page.ownerDocument.hidden || !pageActionAllowed(page)) return;
+            if (page._wtVisibleRoute === 'rooms' || page._wtVisibleRoute === 'admin') {
+                if (Date.now() >= page._wtRoomsRetryAt) loadRooms(page);
+            } else if (page._wtVisibleRoute === 'invite') {
                 loadRooms(page);
                 loadInvitations(page);
             }
         };
-        page._wtTimer = setInterval(page._wtRefreshVisible, 5000);
+        var roomView = page._wtRoute === 'rooms' || page._wtRoute === 'admin';
+        page._wtTimer = setInterval(page._wtRefreshVisible, roomView ? 1000 : 5000);
         window.addEventListener('focus', page._wtRefreshVisible);
+        page.ownerDocument.addEventListener('visibilitychange', page._wtRefreshVisible);
     };
 
     View.prototype.onPause = function () {
         var page = this.view;
         page._wtActive = false;
         page._wtGeneration = (page._wtGeneration || 0) + 1;
-        window.removeEventListener('focus', page._wtRefreshVisible);
         clearPageData(page);
         loading.hide();
         BaseView.prototype.onPause.apply(this, arguments);

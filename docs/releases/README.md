@@ -8,10 +8,12 @@
 
 ## 当前测试版
 
-- [v1.7.3.3 测试版说明](v1.7.3.3.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.3)：管理员后台、本人房间过滤与邀请页反馈。保留简体中文、繁体中文和英文界面。
+- [v1.7.3.4 测试版说明](v1.7.3.4.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.4)，房间每秒自动刷新、空邀请码提示和后台双层卡片。
 
 
 ## 历史发布
+
+- [v1.7.3.3 测试版说明](v1.7.3.3.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.3)，管理员后台、本人房间过滤与邀请页反馈。保留简体中文、繁体中文和英文界面。
 
 - [v1.7.3.1 测试版说明](v1.7.3.1.md) · [GitHub Pre-release](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.1)，多语言界面及按账号保存的播放通知语言。
 

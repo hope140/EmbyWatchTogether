@@ -1,17 +1,17 @@
 const { test, expect } = require('@playwright/test');
-const adminUrl = '/?scenario=admin-manage#!configurationpage?name=WatchTogetherAdminV33';
+const adminUrl = '/?scenario=admin-manage#!configurationpage?name=WatchTogetherAdminV35';
 async function ready(page) {
   await expect.poll(() => page.evaluate(() => window.__wtFixture.view.view._wtRoomsLoading)).toBe(false);
 }
-async function multi(page) {
-  await page.evaluate(() => {
-    clearInterval(window.__wtFixture.view.view._wtTimer);
+async function multi(page, stopPolling = true) {
+  await page.evaluate(stop => {
+    if (stop) clearInterval(window.__wtFixture.view.view._wtTimer);
     const room = {...window.__wtFixture.getRooms()[0], Playback: {
       ItemId: 'item-a', PrimaryPaused: false, OtherPaused: false, Percent: 57, ValidForMs: 10000
     }};
     window.__wtFixture.setRooms([room, {...room, RoomId: 'managed-2', Name: '第二个房间', PrimaryUserId: 'user-b', State: 'Waiting', StatusReason: 'waiting_for_playback', Playback: null}]);
     window.__wtFixture.refresh();
-  });
+  }, stopPolling);
   await expect(page.locator('.wt-adminRoom')).toHaveCount(2);
 }
 for (const [lang,label,primary] of [['zh-CN','后台管理','主用户'],['zh-TW','後台管理','主使用者'],['en-US','Administration','Primary user']]) {
@@ -21,7 +21,7 @@ for (const [lang,label,primary] of [['zh-CN','后台管理','主用户'],['zh-TW
     await page.goto('/?scenario=admin-manage&locale='+lang);
     await expect(page.locator('#wtRoomsHeading')).toContainText(lang==='en-US'?'My rooms':lang==='zh-TW'?'我的房間':'我的房间');
     await expect(page.locator('#wtRooms [data-room-id]')).toHaveCount(0);
-    await page.locator('.tabs-viewmenubar a[href*="AdminV33"]').click();
+    await page.locator('.tabs-viewmenubar a[href*="AdminV35"]').click();
     await expect(page.locator('#wtRoomsHeading')).toHaveText(label);
     await multi(page);
     const owners = page.locator('.wt-cardOwner');
@@ -50,7 +50,7 @@ for (const [lang,label,primary] of [['zh-CN','后台管理','主用户'],['zh-TW
   });
 }
 test('普通用户直访后台回退本人房间，无全站请求',async({page})=>{
-  await page.goto('/?scenario=active#!configurationpage?name=WatchTogetherAdminV33');
+  await page.goto('/?scenario=active#!configurationpage?name=WatchTogetherAdminV35');
   await expect(page.locator('.wt-roomCard')).toHaveCount(1);
   await expect(page.locator('.tabs-viewmenubar a[href*="Admin"]')).toHaveCount(0);
   await expect(page.locator('.wt-adminRoom')).toHaveCount(0);
@@ -63,17 +63,17 @@ test('权限未确认不读取房间或显示后台',async({page})=>{
   expect(await page.evaluate(()=>window.__wtFixture.apiCalls.filter(x=>x.path==='WatchTogether/Rooms'))).toEqual([]);
   await expect(page.locator('.wt-adminRoom')).toHaveCount(0);
 });
-test('诊断按需读取，刷新失败保留列表并可重试',async({page})=>{
-  await page.goto(adminUrl);await multi(page);
+test('自动刷新失败保留后台列表，连接恢复后重新显示媒体',async({page})=>{
+  await page.goto(adminUrl);await multi(page, false);
   await expect(page.locator('[data-act=diagnostics]')).toHaveCount(0);
   await expect(page.locator('.wt-cardWithImage')).toHaveCount(1);
-  await page.evaluate(()=>window.__wtFixture.setRoomsFailure(true));await page.locator('#wtRefresh').click();
+  await page.evaluate(()=>window.__wtFixture.setRoomsFailure(true));
   await expect(page.locator('.wt-cardWithImage')).toHaveCount(0);
   await expect(page.locator('#wtRoomsStatus')).toContainText('当前列表可能不是最新');
   await expect(page.locator('.wt-adminRoom')).toHaveCount(2);
   await page.locator('.wt-adminRoom').first().locator('[data-act=delete]').click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
-  await page.evaluate(()=>window.__wtFixture.setRoomsFailure(false));await page.locator('#wtRefresh').click();
+  await page.evaluate(()=>window.__wtFixture.setRoomsFailure(false));
   await expect(page.locator('#wtRoomsStatus')).toBeHidden();
 });
 test('结束确认房间和双方，失败可重试，重复结束合理提示',async({page})=>{
