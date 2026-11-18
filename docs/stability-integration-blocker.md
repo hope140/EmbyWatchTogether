@@ -17,7 +17,7 @@ S112 已按上述决策修正并补齐交叉测试：Primary 无原始快照或�
 当时的后续 Stack 计划（历史记录）：
 
 - S112（恢复实施）：基础 S111 `98ace2b` 与已暂存的 Phase E 合并；允许修改 `SyncEngine.cs`、`SyncEngineTests.cs`、Phase E 的 ADR/架构/技术/路线图/当前实现说明及本记录，独占这些文件。禁止修改会话选择、命令协议、更新器、版本、依赖和发布工作流。执行 Luna High，主线程审查并完成 merge commit；不允许并行写入。验收为全部原 beta 晚到换集测试保留、参与者 Recovery/身份边界与 drift hold/cooldown 通过。命令为完整 `dotnet test` 和 `git diff --check`。回滚为 revert 该 merge commit（mainline 1）。
-- S115（最终汇合）：基础为当前本地 beta `e0f3a02`，前置依赖为 S112 审核通过提交；主线程独占集成、允许修改两条分支交叉的 UI、页面测试及文档，既有同步产品代码仅以审核后的 S112 为准。UI 继续原生风格 HTML/AMD，接入 Recovering/drift 的现有只读诊断字段。独立 worktree，串行，UI 窄修改交给 Luna High；最终构建、全量 .NET/浏览器、四组 PowerShell 门禁及完整 diff 由主线程验收。回滚为逆序 revert 该 Stack 的集成提交。版本、发布、远端和 NAS 写入不属于本步骤。
+- S115（最终汇合）：基础为当前本地 beta `e0f3a02`，前置依赖为 S112 审核通过提交；主线程独占集成、允许修改两条分支交叉的 UI、页面测试及文档，既有同步产品代码仅以审核后的 S112 为准。UI 继续原生风格 HTML/AMD，接入 Recovering/drift 的现有只读诊断字段。独立 worktree，串行，UI 窄修改交给 Luna High；最终构建、全量 .NET/浏览器、四组 PowerShell 门禁及完整 diff 由主线程验收。回滚为逆序 revert 该 Stack 的集成提交。版本、发布、远端更新不属于本步骤。
 
 以下冲突和首轮失败记录作为历史保留，不再表示决策待定。
 

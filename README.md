@@ -15,7 +15,7 @@
 | 正式版 | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [说明](docs/releases/v1.7.3.0.md) | 希望使用 stable 版本的用户 |
 | 测试版 | [v1.7.3.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.4) · [说明](docs/releases/v1.7.3.4.md) | 愿意测试最新改进的用户 |
 
-测试版新增管理员后台和邀请页反馈，并提供简体中文、繁体中文和英文界面。查看[全部版本说明](docs/releases/README.md)和[客户端兼容性记录](docs/client-compatibility.md)。
+当前测试版包含管理员后台、房间列表每秒自动刷新和邀请页提示，支持简体中文、繁体中文和英文界面。查看[全部版本说明](docs/releases/README.md)和[客户端兼容性记录](docs/client-compatibility.md)。
 
 ## 能做什么
 
@@ -34,7 +34,7 @@
 
 ## 开始一起观看
 
-在 Emby 用户菜单打开 **Watch Together**（测试版中文服务器菜单显示“同映”，实际显示仍待确认）。管理员可使用下列页面。后台管理仅在测试版提供。
+在 Emby 用户菜单打开 **Watch Together**（测试版在中文服务器上可显示为“同映”）。管理员可使用下列页面。后台管理仅在测试版提供。
 
 | 页面 | 用途 |
 | --- | --- |
@@ -70,7 +70,7 @@ Emby 的 **Dashboard → 计划任务 → Watch Together → Update Plugin** 可
 ## 兼容性与帮助
 
 - 一个房间恰好两人，双方须登录同一台 Emby Server；不支持多人房间或跨服务器同步。
-- 插件按 Emby Server 4.9 API 构建。客户端需要支持暂停、继续和进度拖动等远程控制，双方应使用 1 倍速播放；同步依赖服务器会话快照，不保证逐帧一致。具体证据和未完成的验收见[客户端兼容性记录](docs/client-compatibility.md)。
+- 插件按 Emby Server 4.9 API 构建。客户端需要支持暂停、继续和进度拖动等远程控制，双方应使用 1 倍速播放；同步依赖服务器会话快照，不保证逐帧一致。已知的客户端差异见[客户端兼容性记录](docs/client-compatibility.md)。
 - 一直等待时，请确认双方已加入、在线且打开同一视频，并检查客户端远控能力。状态更新可能需要一轮刷新；必要时可在房间页重新同步。
 - 排查时可导出脱敏诊断 JSON，并提供操作时间、双方客户端及版本、房间状态和预期与实际结果。不要公开 Token 或完整服务器日志。
 

@@ -14,7 +14,6 @@
 | 宿主界面、权限与缓存 | [10](#10-嵌入式插件页必须兼容宿主主题变量)、[18](#18-嵌入式页面更新时必须同步页面缓存键)、[19](#19-页面账号变化必须同步使读取和操作失效)、[21](#21-原生控件调整先核对现有声明与外观覆盖)、[22](#22-动态原生控件必须保留构造器添加的样式类)、[23](#23-原生宽度和按钮必须复用当前宿主实际定义的类)、[24](#24-原生-flex-按钮的文字居中与边界需要独立验证)、[25](#25-原生标签必须在权限确定后注册并核对所有权)、[26](#26-房间片名展示需要状态权限与新鲜度共同约束)、[27](#27-背景图片加载也必须绑定当前媒体与权限)、[28](#28-媒体区域的比例与最小高度会影响窄屏宽度)、[29](#29-房间头像使用成员身份与独立图片生命周期)、[30](#30-拒绝旧请求回调时必须同步清理静态操作按钮)、[31](#31-插件分页不能依赖旧宿主的-dashboard-全局)、[32](#32-原生单选模式与跨宿主箭头定位需要分别核对)、[42](#42-分页后的操作反馈必须位于当前可见页面)；文末管理员接口、确认框和列表反馈 |
 | 异步消息与操作结果 | [15](#15-房间副作用部分失败必须如实反馈)、[16](#16-管理结果和底层异常必须走不同反馈通道)、[33](#33-取消令牌与有界等待是两个约束)、[38](#38-异步提示需要有界资源持续过期校验和独立通道)、[40](#40-operation-bound-notices-and-provably-stale-control-snapshots)；文末成功通知与保存阶段 |
 
-
 ## 1. 不要把自然播放位移当成手动 Seek
 
 - 现象：轮询快照中的位置持续变化，若直接比较两次位置会产生误报。
@@ -40,7 +39,7 @@
 - 规则：不得把 installer 的 MD5 二次校验当作信任根，也不得把私钥或 secret 写入仓库文档。
 - 验证：`ReleaseTrustStoreTests`、`release-signing.tests.ps1` 与 `release-workflow.tests.ps1`。
 - 补充规则：beta 更新检查应先在 GitHub API 返回的非 draft stable 与 prerelease 中选择最高规范版本，再验证该版本的固定资产；历史低版本缺少 manifest 或 signature 不得阻断最高版本选择，但最高版本自身缺少固定资产仍必须 fail closed。当前 GitHub API 的 35 个 Release、早期 `v1.0`/`v1.1`/`v1.2` 资产情况，以及 `GitHubReleaseClientTests` 的两个选择/缺资产测试共同确认了这一边界。
-- 补充规则：Releases API 查询与固定资产下载使用不同的有界超时；固定资产（DLL、manifest、signature）应允许 60 秒，Releases API 仍为 20 秒。该边界由服务器日志、pinned `MediaBrowser.Common` 反射确认的默认 `TimeoutMs=20000`、NAS 上官方 DLL 下载耗时 28.34 秒，以及 S5 候选实际运行更新检查任务完成共同验证；签名、哈希、来源/身份校验和失败清理仍必须保持不变。
+- 补充规则：Releases API 查询与固定资产下载使用不同的有界超时；固定资产（DLL、manifest、signature）应允许 60 秒，Releases API 仍为 20 秒。该边界由服务器日志、pinned `MediaBrowser.Common` 反射确认的默认 `TimeoutMs=20000`、公开 DLL 下载偶尔超过 20 秒，以及更新检查任务回归共同验证；签名、哈希、来源/身份校验和失败清理仍必须保持不变。
 
 - 补充规则：beta 枚举应跳过历史非规范 tag，再选择最高规范非 draft 版本；只含非法或 draft 候选时仍拒绝更新。最终最高候选缺资产或签名错误不能回退低版本，规范 tag 和固定下载地址的校验规则不变。验证：GitHubReleaseClientTests 的历史标签混合/反序、全非法或 draft、最高签名失败及最高资产缺失用例。
 
@@ -70,7 +69,7 @@
 - 补充验证：`StoppedPlaybackTests` 直接使用 SDK 的播放删除/重建对象及实际 Bridge → Provider → SyncEngine，覆盖 Stop 后同 ID 迟到进度、明确 Start、重复 Start、不同 ID/会话、缺失身份和发送途中撤销。测试需遵循目标分支的 Barrier 推进时序：beta 在条件满足时同轮推进，Stop 注入必须早于 Restore 发送；负例必须配合实际发送的正例，避免空跑。Stop 之前的异常跳变仍可能被同步；这些测试不是初始 EOF 根因证明或真实双客户端验收。同 ID 且无法鉴别的 Start/Stop 乱序边界见 architecture。
 - 服务端契约回归：Emby 4.10 Stop 在事件前替换 `PlayState`；只直接 Raise Stop 的夹具漏掉了已捕获旧快照未撤销的问题。按真实顺序清媒体、替换状态再 Raise Stop，旧实现会在命令间 Stop 后发出两条 Unpause。过滤器须按播放对象保留本生命周期的全部快照标记，并区分同 ID 的新对象。Start 的测试也应恢复 `NowPlayingItem`，SDK GetOrAdd 对已有对象仅更新播放状态，不等于完整 SessionManager Start。测试包含先采样后首次 Progress、状态多次替换、同对象新 Start 后再次 Stop、旧对象迟到 Progress/Stop、目标排队后 Stop/Start 与并发采样；来源排队窗口现由房间 gate 内捕获的来源快照数组与发送前停止标记复查覆盖，不能改为发送时按 SessionId 查找，否则同 ID 新 Start 会放行旧命令；Pause 保持只检查目标。`StoppedPlaybackTests.QueuedSourceStop_PreventsTransport` 和 `SourceBoundDispatch_StopBoundary` 覆盖来源/目标 Stop、同 ID Start、Pause 例外及进入传输后的边界。首次身份观察前的旧快照、不可辨别的同对象乱序和已进入底层的发送仍是明确边界，不能把这些隔离断言写成真实宿主验收。
 
-- 历史与命令资格分离：1.7.2.9 的共享撤销标记也会使 `Previous.Online` 变为 false，不能再用它判断“停止前曾播放哪个 Item”。换集识别使用采样时冻结的在线事实；当前命令仍使用可撤销的 Online/Stopped。桥接路径停止后的新 Item 必须有明确 Start，单独的新/旧 ID Progress 不构成重开证据；迟到候选同时绑定参与者原播放撤销标记，同 ID Stop/Start 也使候选失效。快速路径在 Stop/Start 跨轮询时同样核对原参与者。`BridgeTransition_*` 通过真实 Bridge、SDK SessionInfo、SyncEngine、CommandIssuer 到模拟 ISessionManager 发送边界，覆盖状态替换、2.635/3.3 秒、快速换集及禁止发送边界；这仍不是 NAS 双端播放验收。
+- 历史与命令资格分离：1.7.2.9 的共享撤销标记也会使 `Previous.Online` 变为 false，不能再用它判断“停止前曾播放哪个 Item”。换集识别使用采样时冻结的在线事实；当前命令仍使用可撤销的 Online/Stopped。桥接路径停止后的新 Item 必须有明确 Start，单独的新/旧 ID Progress 不构成重开证据；迟到候选同时绑定参与者原播放撤销标记，同 ID Stop/Start 也使候选失效。快速路径在 Stop/Start 跨轮询时同样核对原参与者。`BridgeTransition_*` 通过真实 Bridge、SDK SessionInfo、SyncEngine、CommandIssuer 到模拟 ISessionManager 发送边界，覆盖状态替换、2.635/3.3 秒、快速换集及禁止发送边界；这仍不是 真实双端播放验收。
 
 ## 7. Seek 失败必须冻结原目标并有界重试
 
@@ -161,7 +160,7 @@
 
 ## 19. 页面账号变化必须同步使读取和操作失效
 
-此节的 generation/menu 实现与浏览器证据属于历史 UI VNext。S116 按用户确认恢复原服务器单页控制器，不将这些历史证据记为当前页面已实现或已验收。
+此节的 generation/menu 实现与浏览器证据属于历史 UI VNext。S116 恢复旧版单页控制器，不将这些历史证据记为当前页面已实现或已验收。
 
 - 现象：为 Token 加入迟到响应隔离后，单独清空输入框仍会保留旧账号的房间、邀请和管理员视图；若只在读取回调中检查账号，切换后的第一下操作还可能使用旧页面对象。
 - 规则：页面 mutation 入口与异步回写都核对当前账号，区分 SDK 身份未知与已知登出；身份变化使整个页面 generation 失效、停止轮询、清空旧数据并禁止交互，正常 resume 后重新加载权限。document 级菜单监听在 pause 时解绑，不能在每次子视图切换时重复注册。
@@ -188,7 +187,7 @@
 
 ## 23. 原生宽度和按钮必须复用当前宿主实际定义的类
 
-- 事实：此次 NAS 宿主的 `modules/layout/layout.css` 将 `form, .readOnlyContent` 限为 `80ch`，`.auto-center` 负责双侧 auto margin，路由模板在 padded 容器内使用 `readOnlyContent auto-center`。只有 padded 容器不会自动套用此限宽。`layout_nontv.css` 的 `.page-withDockedDrawer .auto-center` 将侧栏布局的 margin 覆盖为 0；真实 Web 测得宽 727.19px 且靠左，这是宿主规则，不能凭类名宣称所有宿主状态均居中。
+- 事实：Emby Web 宿主的 `modules/layout/layout.css` 将 `form, .readOnlyContent` 限为 `80ch`，`.auto-center` 负责双侧 auto margin，路由模板在 padded 容器内使用 `readOnlyContent auto-center`。只有 padded 容器不会自动套用此限宽。`layout_nontv.css` 的 `.page-withDockedDrawer .auto-center` 将侧栏布局的 margin 覆盖为 0；真实 Web 测得宽 727.19px 且靠左，这是宿主规则，不能凭类名宣称所有宿主状态均居中。
 - 事实：当前宿主 `emby-button.css` 提供控件基础结构并继承文字色；浅色及深色渐变主题由 `.raised` 同时定义背景和文字，`.button-submit` 进一步应用主题强调色。旧 `button-flat` 没有提供相同的主题背景配对，用户截图出现浅底白字。
 - 规则：复用原生结构和类之前核对当前宿主 CSS；避免只保留原生属性而缺失主题类。主题按钮含透明色时，对比度检查应合成 alpha 与下层表面，不能把透明白色当不透明白色，也不能忽略文字 alpha。
 - 验证：真实宿主文件只读检查与用户截图、S116 当前类交叉确认；S117 通过回归及真实宿主复核分别记录，模拟渐变代表区域不等同于所有客户端背景位置验收。
@@ -240,10 +239,10 @@
 
 - 事实：2026-10-19 只读打开当前 Emby Web 4.10.0.40 的 V12 页面，控制台出现 `ReferenceError: Dashboard is not defined`；调用链为 `nativeTabs → applyRoute → setAdminVisibility → clearPageData → onResume`。初始化中断时保留“正在加载…”；同一清理函数也由 onPause 调用，会阻断离页。原 fixture 主动注入 Dashboard，掩盖了这个兼容问题。
 - 修正：S124 V14 候选构造与当前宿主 `pluginManager.getConfigurationPageUrl` 相同的相对链接 `configurationpage?name=`，并编码当前账号和服务器参数；默认 fixture 不再注入 Dashboard。页面、控制器注册、HTML 声明与浏览器测试同步更新缓存键。
-- 真实宿主返修：首次 V13 部署后，页面初始化恢复，但 emby-linkbutton 将 `#!/configurationpage` 链接按 anchor pathname 改写为 `#!/index.html/configurationpage`，切页无效。V14 改为宿主相对链接；fixture 导航改为解析 anchor pathname/query 后交给路由，不能再原样复制 href 到地址栏掩盖这种差异。
+- 真实宿主返修：在 V13 的实机检查中，页面初始化恢复，但 emby-linkbutton 将 `#!/configurationpage` 链接按 anchor pathname 改写为 `#!/index.html/configurationpage`，切页无效。V14 改为宿主相对链接；fixture 导航改为解析 anchor pathname/query 后交给路由，不能再原样复制 href 到地址栏掩盖这种差异。
 - 下拉规则：`fillSelect` 仅在选项 ID、名称或顺序变化时重建 option，避免 5 秒刷新、窗口 focus 刷新和房间名称输入替换打开中的主用户菜单。保留当前有效选择，参与者改变使旧选择失效时回退首项；继续使用宿主 emby-select，不自绘箭头或选择菜单。
 - 验证：缺少 Dashboard 的初始化/切页/离页回归、保留未变化选项及参与者变化回归，均验证修正前失败、修正后通过；完整浏览器 84/84、.NET 545/545，Release 构建打包通过。
-- 边界：用户观察到客户端三个下拉框当时均不能打开、重启后恢复；本轮没有复现该客户端卡住的原始过程，不能把选项重建修正记为其已证实根因。V13 曾部署并由真实宿主检查发现上述切页问题，V14 的部署/验收以本地 receipt 为准；没有架构或后端同步语义变更。
+- 边界：用户观察到客户端三个下拉框当时均不能打开、重启后恢复；本轮没有复现该客户端卡住的原始过程，不能把选项重建修正记为其已证实根因。V13 的真实宿主检查发现切页问题。V14 修正了切页行为，后端同步语义保持一致。
 
 ## 32. 原生单选模式与跨宿主箭头定位需要分别核对
 
@@ -253,7 +252,7 @@
 - 验证：菜单模式与旧版 390px 长标签几何回归修正前失败，后者偏差约 64.88px；修正后旧/新两种 DOM、390/1280px 与四个控件的中线偏差小于 1px。完整浏览器 89/89、.NET 545/545，构建打包通过。fixture 只模拟两种实际结构及定位规则，不模拟真实菜单运行；真实 Web 和客户端证据必须单独记录。
 - 浏览器测试切页后须等待目标面板及其预期控件可见，不能把旧房间容器残留的 `aria-busy=false` 当作目标路由已就绪。管理员权限重新读取期间，Settings 会暂时回退到 rooms；Windows CI 曾在这个窗口读到零个 select。挂起 Settings 的 Users 响应可稳定复现，改为目标面板和控件数量等待后通过，原箭头中线及右边距断言保留。
 - 真实 Web 对照：神医与 Madby 的表单由 `genericui / GenericEdit` 生成。神医“搜索范围”为 multiple select，展开的是带复选框的虚拟滚动 actionSheet；Madby“元数据语言 / 图片语言 / 国家地区”为普通单选，未指定 custom，沿用系统单选菜单。不能用前者的多选展开形态定义全部原生单选的默认外观。V15 一起看显式 custom 的单选使用同一宿主 actionSheet 的单选形态；其闭合态实测高度约 34.615px、字号 14.424px、内边距与 Madby 单选相同，Web 箭头偏差约 0.0052px。这些测量只证明相应几何与组件事实，最终外观反馈见下条。
-- 最终反馈：用户在 V16 部署后确认“可以了，进行下一步”。本轮最终普通单选外观与箭头方案据此记为用户确认；该反馈不扩大为原始客户端临时卡住已复现、真实双端播放已验收或公开发布授权。后续本地 1.7.0.1 包和已部署的 1.7.0.0/V16 候选保持身份区分。
+- V16 确定了普通单选的外观和箭头方案。客户端下拉失效的原始触发条件仍未复现。
 
 ## 33. 取消令牌与有界等待是两个约束
 
@@ -355,7 +354,6 @@
 - 稳定观察基线与前一轮样本是不同证据。双方进度差必须持续在 2 秒容差内，且相邻样本不出现可观察的大幅跳动或时间戳回退；最终一组对齐位置不能抹掉中间 seek。原 10 秒截止优先于成功判断。
 - 主控和被控目标快照保留可撤销播放标记。`StoppedPlaybackTests.TheaterHoldResume_*` 通过真实 SessionBridge/SDK 的 PlayState 替换、Stop、同 ID Start 证明旧 hold 不复活，并验证恢复 Watching 后 Pause/Unpause/Seek 正常处理。其证据是模拟传输，不是实机显示验收。
 - 等待与成功文字都需发送时复核双端语义，不只核对通知 token。原先暂停不能收到“自动继续”承诺；已恢复、停止、换会话/媒体、失去能力或关闭通知的排队消息必须退出。首次快照异常也退休 hold，避免保护恢复后自动重建旧意图。
-
 
 ## 列表刷新反馈与操作结果分开管理
 

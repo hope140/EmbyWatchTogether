@@ -15,7 +15,7 @@ Watch together with another person on the same Emby Server. Create a room, open 
 | Stable | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [notes](docs/releases/v1.7.3.0.md) | Users who prefer stable releases |
 | Beta | [v1.7.3.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.4) · [notes](docs/releases/v1.7.3.4.md) | Users testing recent improvements |
 
-The beta adds Simplified Chinese, Traditional Chinese, and English interfaces and saves playback-notification language per account. Playback notifications have not yet been accepted in real-client testing. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
+The current beta includes an Administration page, automatic room-list refresh every second, and invitation feedback. The interface is available in Simplified Chinese, Traditional Chinese, and English. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
 
 ## What it does
 
@@ -34,11 +34,11 @@ Back up the old DLL before upgrading so you can roll back. The package contains 
 
 ## Get started
 
-Open **Watch Together** from the Emby user menu (on a Chinese-language server, the beta menu is named “同映”; actual display remains unconfirmed). Administrators can use the following pages. Administration is available in the beta.
+Open **Watch Together** from the Emby user menu (the beta can appear as “同映” on a Chinese-language server). Administrators can use the following pages. Administration is available in the beta.
 
 | Page | Purpose |
 | --- | --- |
-| Rooms | View status, join or leave, control playback, resync, and view diagnostics. |
+| Rooms | View the rooms you participate in, join or leave, control playback, resync, and view diagnostics. |
 | Create and invite | Create a room for two users and select a primary, or create and accept invitations. |
 | Administration | View all rooms, playback state and primary user progress. Confirm to end synchronization. |
 | Settings | Configure stop behavior, notifications, and the update channel. |
@@ -49,7 +49,7 @@ Regular users can access rooms and invitations. Administrators can also enter fr
 2. Both users sign in to the same server and open the same video on their clients. Join the room if needed.
 3. Wait for the status to refresh and synchronization to finish. Allow the clients and server time to process pauses, resumes, and seeks.
 
-An invitation expires after 15 minutes, can be accepted once, and is lost if the server restarts before acceptance. Leaving a room preserves membership so you can rejoin; ending it removes both members' relationship and does not delete media.
+In the beta, the invitation card shows the code and its expiry time and lets you copy the code manually. Active invitations appear in a separate list where you can revoke them. An invitation expires after 15 minutes, can be accepted once, and is lost if the server restarts before acceptance. Leaving a room preserves membership so you can rejoin; ending it removes both members' relationship and does not delete media.
 
 ## Settings and updates
 
@@ -70,7 +70,7 @@ Contributions for other languages are welcome; see the [translation guide](docs/
 ## Compatibility and help
 
 - Each room has exactly two users on the same Emby Server. Multiple participants and cross-server synchronization are not supported.
-- The plugin is built against the Emby Server 4.9 API. Clients need remote pause, resume, and seek support, and both users should play at 1× speed. Synchronization relies on server session snapshots and is not frame-accurate. See the [client compatibility record](docs/client-compatibility.md) for evidence and outstanding validation.
+- The plugin is built against the Emby Server 4.9 API. Clients need remote pause, resume, and seek support, and both users should play at 1× speed. Synchronization relies on server session snapshots and is not frame-accurate. See the [client compatibility record](docs/client-compatibility.md) for known client differences.
 - If a room keeps waiting, check that both users have joined, are online, have opened the same video, and have clients that support remote control. Status may take a refresh cycle to update; use resync if needed.
 - For troubleshooting, export redacted diagnostic JSON and provide the time, client names and versions, room status, and expected and actual behavior. Do not publish tokens or full server logs.
 
