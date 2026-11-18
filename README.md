@@ -13,7 +13,7 @@
 | 通道 | 当前版本 | 适合谁 |
 | --- | --- | --- |
 | 正式版 | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [说明](docs/releases/v1.7.3.0.md) | 希望使用 stable 版本的用户 |
-| 测试版 | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [说明](docs/releases/v1.8.0.0.md) | 愿意测试最新改进的用户 |
+| 测试版 | [v1.7.3.3](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.3) · [说明](docs/releases/v1.7.3.3.md) | 愿意测试最新改进的用户 |
 
 测试版新增管理员后台和邀请页反馈，并提供简体中文、繁体中文和英文界面。查看[全部版本说明](docs/releases/README.md)和[客户端兼容性记录](docs/client-compatibility.md)。
 
@@ -59,7 +59,7 @@ Emby 的 **Dashboard → 计划任务 → Watch Together → Update Plugin** 可
 
 ## 界面语言与翻译
 
-**1.8.0.0 测试版：**页面优先读取 Emby 宿主提供的界面语言；不可用时依次尝试页面 culture、页面语言和浏览器语言。简体中文区域显示简体，繁体中文（如 zh-Hant、台湾、香港和澳门）显示繁体，其他语言目前显示英文。每次进入页面时重新读取语言；修改 Emby 语言后可重新进入页面或刷新。部分客户端或宿主可能不提供该接口，回退语言未必与 Emby 设置一致。
+**1.7.3.3 测试版：**页面优先读取 Emby 宿主提供的界面语言；不可用时依次尝试页面 culture、页面语言和浏览器语言。简体中文区域显示简体，繁体中文（如 zh-Hant、台湾、香港和澳门）显示繁体，其他语言目前显示英文。每次进入页面时重新读取语言；修改 Emby 语言后可重新进入页面或刷新。部分客户端或宿主可能不提供该接口，回退语言未必与 Emby 设置一致。
 
 播放通知使用本账号上次成功打开此页面时的语言；多设备以服务器最后收到的保存为准，未保存时默认简体中文。管理员自定义消息保留原文，插件更新的管理员广播仍为中文。
 

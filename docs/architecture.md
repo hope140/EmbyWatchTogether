@@ -45,7 +45,7 @@ Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用
 
 页面先通过宿主 getCurrentUser({enableCache:false}) 核对当前用户 ID 和明确的 Policy.IsAdministrator，仅管理员读取 WatchTogether/Users；普通用户读取自己的房间与邀请。角色读取失败不授予管理权限，身份或页面代次失效时旧结果无效。服务端独立执行权限与房间过滤；宿主 SDK 离线用户回退保持原样，未证明它导致本次问题。
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；v1.8.0.0 测试版新增仅管理员可见的[后台管理](maintenance/admin-management-preview.md)，普通用户只有房间与邀请。测试版页面键为 `WatchTogetherRoomsV33`、`WatchTogetherInviteV33`、`WatchTogetherSettingsV33`、`WatchTogetherAdminV33`，共享 `WatchTogetherNativeV33.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；v1.7.3.3 测试版新增仅管理员可见的[后台管理](maintenance/admin-management-preview.md)，普通用户只有房间与邀请。测试版页面键为 `WatchTogetherRoomsV33`、`WatchTogetherInviteV33`、`WatchTogetherSettingsV33`、`WatchTogetherAdminV33`，共享 `WatchTogetherNativeV33.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
 
 用户菜单名在 `GetPages()` 注册时读取服务器配置 `UICulture`：中文显示“同映”，其他或不可读取时显示“Watch Together”。插件身份不变，页面和播放通知语言仍按用户语言处理。配置变更后宿主是否重新读取菜单注册尚未实机确认，可能需要重启；单元测试不能代替宿主验证。
 

@@ -48,7 +48,7 @@ Git tag：v1.6.0.5
 
 ## 发布通道
 
-历史版本和发布记录见[发布索引](releases/README.md)及[维护记录](maintenance/README.md)。测试版可按影响递增合适段位，其测试属性由 prerelease 标记决定。
+历史版本和发布记录见[发布索引](releases/README.md)及[维护记录](maintenance/README.md)。测试版沿用当前正式版的前三段，依次递增第四段。前三段的更新随正式版发布。测试版在 GitHub 标记为 prerelease。
 
 - `main` 只用于 `stable` 正式发布；`stable` workflow 创建普通 GitHub Release。
 - `beta` 只用于 `beta` 测试发布；`beta` workflow 创建 GitHub prerelease。
@@ -60,7 +60,7 @@ Git tag：v1.6.0.5
 
 维护者创建版本时按以下顺序检查：
 
-1. 根据变更影响选择需要递增的段位，并将右侧段位归零；
+1. 测试版递增当前正式版系列的第四段。正式版按变更影响选择递增的段位，并将右侧段位归零；
 2. 在项目文件中同步更新 `Version`、`FileVersion`、`AssemblyVersion`；
 3. 为该版本准备并审核 `docs/releases/v<version>.md` 中文 Release Notes，确认内容覆盖用户可见变化、配置兼容性和升级注意；
 4. 运行构建、测试和发布校验；
