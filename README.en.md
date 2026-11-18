@@ -13,9 +13,9 @@ Watch together with another person on the same Emby Server. Create a room, open 
 | Channel | Current version | For whom |
 | --- | --- | --- |
 | Stable | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [notes](docs/releases/v1.7.3.0.md) | Users who prefer stable releases |
-| Beta | [v1.7.3.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.4) · [notes](docs/releases/v1.7.3.4.md) | Users testing recent improvements |
+| Beta | [v1.7.3.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.5) · [notes](docs/releases/v1.7.3.5.md) | Users testing recent improvements |
 
-The current beta includes an Administration page, automatic room-list refresh every second, and invitation feedback. The interface is available in Simplified Chinese, Traditional Chinese, and English. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
+The current beta clears stale playback-control errors once synchronization has recovered. The interface is available in Simplified Chinese, Traditional Chinese, and English. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
 
 ## What it does
 
@@ -59,7 +59,7 @@ Use **Dashboard → Scheduled Tasks → Watch Together → Update Plugin** to sc
 
 ## Interface language and translations
 
-**Version 1.7.3.4 beta:** The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Simplified Chinese and Traditional Chinese locales use their respective scripts; other locales currently use English. The language is checked when the page is opened; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting.
+**Version 1.7.3.5 beta:** The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Simplified Chinese and Traditional Chinese locales use their respective scripts; other locales currently use English. The language is checked when the page is opened; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting.
 
 Playback notifications use the account’s language from the last successful page visit. Across devices, the last save received by the server wins; the default is Simplified Chinese. Custom administrator messages remain unchanged; administrator update broadcasts remain Chinese.
 
