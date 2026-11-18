@@ -76,6 +76,8 @@ ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步�
 
 ## 签名发布流程（维护者）
 
+内部预览标识、连续测试版编号和中英文文档同步见[版本规则](versioning.md)。新版签名流程会检查发布源提交的两份 README，以及发布索引中对应通道的当前版本链接。
+
 - `scripts/release/New-ReleaseSigningKey.ps1`：在仓库外生成 RSA PKCS#8 私钥和 `RSAKeyValue` 公钥；私钥不得写入仓库。
 - `scripts/release/Sign-ReleaseManifest.ps1`：检查 DLL 名称、程序集名和版本，流式计算大小与 SHA-256，并生成 canonical manifest 与 detached signature。
 - `tests/release-signing.tests.ps1`：验证密钥生成、清单 canonical 规则、签名和 DLL 校验流程。

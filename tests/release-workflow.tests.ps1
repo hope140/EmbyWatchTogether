@@ -309,6 +309,43 @@ Assert-Matches -Text $releaseRunText -Pattern '\$releaseArguments\s*\+=\s+''--pr
 Assert-Equal -Expected 1 -Actual ([System.Text.RegularExpressions.Regex]::Matches($releaseRunText, '--prerelease')).Count -Message 'The release workflow must contain one conditional --prerelease option.'
 Assert-NotMatches -Text $releaseRunText -Pattern 'gh\s+release\s+create[^\r\n]*--prerelease' -Message 'The stable release command must not unconditionally add --prerelease.'
 
+$docValidationIndex = $workflowText.IndexOf('Validate public release documentation', [System.StringComparison]::Ordinal)
+$buildReleaseIndex = $workflowText.IndexOf('Build Release', [System.StringComparison]::Ordinal)
+Assert-True -Condition ($docValidationIndex -gt $checkoutStepIndex -and $docValidationIndex -lt $buildReleaseIndex) -Message 'Release documentation must be checked from the source checkout before building.'
+$docValidationBlocks = @($runBlocks | Where-Object { $_ -match 'The release index must link to' })
+Assert-Equal -Expected 1 -Actual $docValidationBlocks.Count -Message 'There must be one executable release documentation check.'
+$validateDocs = [scriptblock]::Create($docValidationBlocks[0])
+
+$previousReleaseTag = $env:RELEASE_TAG
+$previousReleaseChannel = $env:RELEASE_CHANNEL
+$previousReleaseRoot = $env:RELEASE_SOURCE_ROOT
+$previousRepository = $env:GITHUB_REPOSITORY
+try {
+    $env:RELEASE_SOURCE_ROOT = $repositoryRoot
+    $env:GITHUB_REPOSITORY = 'hope140/EmbyWatchTogether'
+    $releaseIndex = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/releases/README.md') -Raw -Encoding utf8
+    foreach ($candidateChannel in 'stable', 'beta') {
+        $section = if ($candidateChannel -eq 'beta') { '当前测试版' } else { '当前正式版' }
+        $pattern = '(?ms)^## ' + $section + '\r?\n(?:(?!^## ).)*?/releases/tag/(?<tag>v[\d.]+)\)'
+        $entry = [regex]::Match($releaseIndex, $pattern)
+        Assert-True -Condition $entry.Success -Message "The release index is missing its current $candidateChannel version."
+        $env:RELEASE_TAG = $entry.Groups['tag'].Value
+        $env:RELEASE_CHANNEL = $candidateChannel
+        & $validateDocs
+
+        $env:RELEASE_CHANNEL = if ($candidateChannel -eq 'beta') { 'stable' } else { 'beta' }
+        $rejected = $false
+        try { & $validateDocs } catch { $rejected = $_.Exception.Message -like 'README* must link to*' }
+        Assert-True -Condition $rejected -Message 'The documentation check must reject a version linked only from the other channel.'
+    }
+}
+finally {
+    $env:RELEASE_TAG = $previousReleaseTag
+    $env:RELEASE_CHANNEL = $previousReleaseChannel
+    $env:RELEASE_SOURCE_ROOT = $previousReleaseRoot
+    $env:GITHUB_REPOSITORY = $previousRepository
+}
+
 $projectPath = Join-Path $repositoryRoot 'src/EmbyWatchTogether/EmbyWatchTogether.csproj'
 $projectText = Get-Content -LiteralPath $projectPath -Raw
 $versionMatch = [System.Text.RegularExpressions.Regex]::Match($projectText, '<Version>(?<version>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)</Version>')

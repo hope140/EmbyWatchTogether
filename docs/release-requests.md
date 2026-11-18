@@ -35,7 +35,7 @@ channel 决定 stable 或 prerelease；不接受额外任意命令、脚本或�
 sourceSha 必须是对应通道分支（stable 为 main，beta 为 beta）的祖先，三处
 项目版本必须与四段数字 tag 一致。ciRunId 必须是同仓库该准确源码 SHA、对应
 分支 push 的 `.github/workflows/ci.yml` 成功运行；请求 PR 自己的准确 head
-也必须通过该 CI。源码必须包含中文发布说明和已审核签名公钥映射。
+也必须通过该 CI。源码必须包含中文发布说明、对应通道的中英文 README 与发布索引入口，以及已审核签名公钥映射。文档同步范围见[发布检查](versioning.md#发布检查)。
 
 ## 信任与失败边界
 

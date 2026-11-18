@@ -331,6 +331,47 @@ jobs:
 
           Write-Output ('Release input validation passed for tag {0} and keyId {1}.' -f $tag, $keyId)
 
+      - name: Validate public release documentation
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          $tag = $env:RELEASE_TAG
+          $channel = $env:RELEASE_CHANNEL
+          $root = $env:RELEASE_SOURCE_ROOT
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag"
+          $notes = "docs/releases/$tag.md"
+          if (-not (Test-Path -LiteralPath (Join-Path $root $notes) -PathType Leaf)) {
+              throw "Public release notes are missing: $notes"
+          }
+
+          $rows = if ($channel -eq 'beta') {
+              @{ 'README.md' = '测试版'; 'README.en.md' = 'Beta' }
+          } else {
+              @{ 'README.md' = '正式版'; 'README.en.md' = 'Stable' }
+          }
+          foreach ($entry in $rows.GetEnumerator()) {
+              $pattern = '^\|[ \t]*' + [regex]::Escape($entry.Value) + '[ \t]*\|'
+              $matchesForChannel = @(Get-Content -LiteralPath (Join-Path $root $entry.Key) -Encoding utf8 |
+                  Where-Object { $_ -cmatch $pattern })
+              if ($matchesForChannel.Count -ne 1 -or -not $matchesForChannel[0].Contains("($url)") -or
+                  -not $matchesForChannel[0].Contains("($notes)")) {
+                  throw "$($entry.Key) must link to $tag and its notes in the $channel row."
+              }
+          }
+
+          $heading = if ($channel -eq 'beta') { '当前测试版' } else { '当前正式版' }
+          $index = Get-Content -LiteralPath (Join-Path $root 'docs/releases/README.md') -Encoding utf8 -Raw
+          $sectionPattern = '(?ms)^## ' + [regex]::Escape($heading) + '[ \t]*\r?\n(.*?)(?=^## |\z)'
+          $current = [regex]::Match($index, $sectionPattern)
+          $currentRows = @($current.Groups[1].Value -split '\r?\n' |
+              Where-Object { $_ -match '^[ \t]*-[ \t]+\[' })
+          if ($currentRows.Count -ne 1 -or -not $currentRows[0].Contains("($url)") -or
+              -not $currentRows[0].Contains("($tag.md)")) {
+              throw "The release index must link to $tag and its notes in the current $channel section."
+          }
+
       - name: Build Release
         shell: pwsh
         run: |
