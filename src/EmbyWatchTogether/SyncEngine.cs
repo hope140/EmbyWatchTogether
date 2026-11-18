@@ -4592,6 +4592,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.ClearRemoteControlRecovery();
             runtime.ClearDriftTelemetry(clearAutoRepairHistory: false);
             runtime.State = RoomState.Watching;
+            runtime.Error = null;
             runtime.Barrier = null;
             runtime.Pending.Clear();
             runtime.WaitingPauseRetries.Clear();

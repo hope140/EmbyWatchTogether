@@ -1245,6 +1245,79 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void SeekTimeout_LateAlignmentAndRestore_ClearsCurrentErrorButKeepsDiagnostics()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+            const long target = 80 * SessionSnapshot.TicksPerSecond;
+            const long followerStart = 51 * SessionSnapshot.TicksPerSecond;
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: target),
+                Snapshot("s2", "u2", paused: false, position: followerStart));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: target),
+                Snapshot("s2", "u2", paused: true, position: followerStart));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RemoteCommands.Seek, runtime.Pending["u2"].Command);
+
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + 0.1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + SyncConstants.PendingRetryGraceSeconds + 1.1);
+            var timedOut = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, timedOut.State);
+            Assert.Equal(BarrierStage.Seek, runtime.Barrier.Stage);
+            Assert.Equal("playback command was not acknowledged", timedOut.Error);
+            Assert.NotNull(runtime.Barrier.SeekRetryAtUtc);
+            Assert.Empty(runtime.Pending);
+            Assert.Equal(2, _issuer.Issued.Count(command => command.command == RemoteCommands.Seek));
+
+            // A late snapshot reaches the original target before another seek is due.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: target),
+                Snapshot("s2", "u2", paused: true, position: target));
+            _clock.Advance(1);
+            var restoring = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Barrier, restoring.State);
+            Assert.Equal(BarrierStage.Restore, runtime.Barrier.Stage);
+            Assert.Equal(timedOut.Error, restoring.Error);
+            Assert.Equal(2, runtime.Pending.Count);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: target),
+                Snapshot("s2", "u2", paused: true, position: target));
+            _clock.Advance(0.5);
+            var partlyRestored = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Barrier, partlyRestored.State);
+            Assert.Equal(timedOut.Error, partlyRestored.Error);
+            Assert.Single(runtime.Pending);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: target),
+                Snapshot("s2", "u2", paused: false, position: target));
+            _clock.Advance(0.5);
+            var recovered = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, recovered.State);
+            Assert.Null(recovered.Error);
+            Assert.Empty(runtime.Pending);
+            Assert.Equal(2, _issuer.Issued.Count(command => command.command == RemoteCommands.Seek));
+            var diagnostics = SyncDiagnostics.Build(room, runtime, "server-1", "test", "watching", _clock.Now);
+            Assert.Null(diagnostics.LastError);
+            var failedSeek = Assert.Single(diagnostics.Events, entry =>
+                entry.Type == "command_failed" && entry.Command == RemoteCommands.Seek);
+            Assert.Contains(diagnostics.Events, entry =>
+                entry.Type == "entered_watching" && entry.AtUtc > failedSeek.AtUtc);
+        }
+
+        [Fact]
         public void SeekImmediateIssueFailure_PreservesBarrierUntilCooldownRetry()
         {
             var room = CreateRoom();
