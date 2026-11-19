@@ -12,10 +12,10 @@ Watch together with another person on the same Emby Server. Create a room, open 
 
 | Channel | Current version | For whom |
 | --- | --- | --- |
-| Stable | [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0) · [notes](docs/releases/v1.7.3.0.md) | Users who prefer stable releases |
+| Stable | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [notes](docs/releases/v1.8.0.0.md) | Users who prefer stable releases |
 | Beta | [v1.7.3.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.5) · [notes](docs/releases/v1.7.3.5.md) | Users testing recent improvements |
 
-The current beta clears stale playback-control errors once synchronization has recovered. The interface is available in Simplified Chinese, Traditional Chinese, and English. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
+The current stable release includes Administration and an interface in Simplified Chinese, Traditional Chinese, and English. It also clears stale playback-control errors once synchronization has recovered. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
 
 ## What it does
 
@@ -34,7 +34,7 @@ Back up the old DLL before upgrading so you can roll back. The package contains 
 
 ## Get started
 
-Open **Watch Together** from the Emby user menu (the beta can appear as “同映” on a Chinese-language server). Administrators can use the following pages. Administration is available in the beta.
+Open **Watch Together** from the Emby user menu (it can appear as “同映” on a Chinese-language server). Administrators can use the following pages.
 
 | Page | Purpose |
 | --- | --- |
@@ -49,7 +49,7 @@ Regular users can access rooms and invitations. Administrators can also enter fr
 2. Both users sign in to the same server and open the same video on their clients. Join the room if needed.
 3. Wait for the status to refresh and synchronization to finish. Allow the clients and server time to process pauses, resumes, and seeks.
 
-In the beta, the invitation card shows the code and its expiry time and lets you copy the code manually. Active invitations appear in a separate list where you can revoke them. An invitation expires after 15 minutes, can be accepted once, and is lost if the server restarts before acceptance. Leaving a room preserves membership so you can rejoin; ending it removes both members' relationship and does not delete media.
+The invitation card shows the code and its expiry time and lets you copy the code manually. Active invitations appear in a separate list where you can revoke them. An invitation expires after 15 minutes, can be accepted once, and is lost if the server restarts before acceptance. Leaving a room preserves membership so you can rejoin; ending it removes both members' relationship and does not delete media.
 
 ## Settings and updates
 
@@ -59,7 +59,7 @@ Use **Dashboard → Scheduled Tasks → Watch Together → Update Plugin** to sc
 
 ## Interface language and translations
 
-**Version 1.7.3.5 beta:** The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Simplified Chinese and Traditional Chinese locales use their respective scripts; other locales currently use English. The language is checked when the page is opened; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting.
+The page first tries the Emby host's interface language, then the page culture, page language, and browser language. Simplified Chinese and Traditional Chinese locales use their respective scripts; other locales currently use English. The language is checked when the page is opened; reopen or refresh the page after changing Emby's language. Some clients or hosts may not expose the language API, so the fallback may differ from your Emby setting.
 
 Playback notifications use the account’s language from the last successful page visit. Across devices, the last save received by the server wins; the default is Simplified Chinese. Custom administrator messages remain unchanged; administrator update broadcasts remain Chinese.
 
