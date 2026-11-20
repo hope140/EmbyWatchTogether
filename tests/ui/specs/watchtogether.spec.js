@@ -17,9 +17,9 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 }
 
 async function selectView(page, view) {
-  const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V26"]').click();
-  const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection' }[view];
+  const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings', admin: 'Admin' }[view];
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V35"]').click();
+  const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection', admin: '#wtRoomsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
   if (view === 'settings') await expect(page.locator('#wtGitHubTokenStatus')).not.toContainText('正在读取');
@@ -103,7 +103,7 @@ async function expectButtonTextCentered(page) {
 test('原生三页导航只显示当前区域并保留原生内容限宽', async ({ page }) => {
   await open(page, 'admin-member', 'light', 1440, 1000);
   await expect(page.locator('.tabs-viewmenubar')).toHaveCount(1);
-  await expect(page.locator('.tabs-viewmenubar a')).toHaveText(['房间', '创建与邀请', '设置']);
+  await expect(page.locator('.tabs-viewmenubar a')).toHaveText(['房间', '创建与邀请', '后台管理', '设置']);
   await expect(page.locator('#wtAdminSection')).toBeHidden();
   await expect(page.locator('#wtSettingsSection')).toBeHidden();
   await selectView(page, 'invite');
@@ -214,7 +214,7 @@ test('深色渐变中的旧 button-flat 会复现浅底白字，页面控件全�
 test('浅色、深色和 HSL 原生描边按钮文字和边界可辨', async ({ page }) => {
   for (const theme of ['light', 'dark', 'hsl']) {
     await open(page, 'admin-member', theme, 1024, 900);
-    const paint = await buttonPaint(page, '#wtRefresh');
+    const paint = await buttonPaint(page, '[data-act="diagnostics"]');
     expect(paint.classes).toContain('raised-outline');
     expect(paint.borderStyle).toBe('solid');
     expect(paint.borderWidth).toBeGreaterThan(0);
@@ -255,7 +255,7 @@ test('管理员单页显示管理和设置，普通用户隐藏这两个区域',
 test('普通用户或权限错误时隐藏管理员内容', async ({ page }) => {
   await page.goto('/?scenario=users-fail&theme=light');
   await expect(page.locator('.wt-page')).toBeVisible();
-  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('#wtStatus')).toContainText('用户列表加载失败');
   await expect(page.locator('#wtAdminSection')).toBeHidden();
   await expect(page.locator('#wtSettingsSection')).toBeHidden();
 });
@@ -339,6 +339,8 @@ test('Waiting 与 State 失败状态反馈保持原页面语义', async ({ page 
 
 test('管理员可查看非成员管理列表并保留设置区域', async ({ page }) => {
   await open(page, 'admin-manage', 'dark');
+  await expect(page.locator('#wtRooms')).toContainText('暂无参与的房间');
+  await selectView(page, 'admin');
   await expect(page.locator('#wtRooms')).toContainText('管理员长列表房间');
   await selectView(page, 'invite');
   await expect(page.locator('#wtAdminSection')).toBeVisible();
@@ -531,9 +533,7 @@ test('诊断内容经过脱敏，导出前不出现原始标识', async ({ page 
 
 test('Recovering 状态只针对临时掉线参与者，主用户缺失仍显示 Waiting', async ({ page }) => {
   await open(page, 'recovering', 'dark', 390, 1400);
-  await expect(page.locator('#wtRefresh')).toHaveText('刷新');
-  const refreshMetrics = await page.locator('#wtRefresh').evaluate(button => ({ width: button.getBoundingClientRect().width, textWidth: button.scrollWidth }));
-  expect(refreshMetrics.textWidth).toBeLessThanOrEqual(refreshMetrics.width);
+  await expect(page.locator('#wtRefresh')).toHaveCount(0);
   await expect(page.locator('.wt-roomState')).toHaveText('等待连接恢复');
   await expect(page.locator('.wt-roomState')).toHaveClass(/wt-roomState-recovering/);
   await expect(page.locator('.wt-roomStateDescription')).toContainText('临时掉线');
@@ -665,3 +665,160 @@ test('浅色、深色和仅 HSL 主题均保持可读且无外部字体', async 
     if (theme === 'dark') await page.screenshot({ path: path.join(artifactDir, 'desktop-dark-active-room.png'), fullPage: true });
   }
 });
+
+test('host locale localizes static controls, room status, diagnostics and confirmation', async ({ page }) => {
+  await page.goto('/?scenario=active&locale=en-US');
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+  await expect(page.locator('.wt-roomCard')).toContainText('Both participants are connected');
+  await page.locator('.wt-roomCard button[data-act="diagnostics"]').click();
+  await expect(page.locator('.wt-diagnosticToolbar')).toContainText('Export diagnostic JSON');
+  await page.locator('.wt-roomCard button[data-act="delete"]').click();
+  await expect(page.getByRole('alertdialog', { name: 'End room' })).toContainText('Both participants will leave the room.');
+});
+
+test('locale falls back safely when host locale is missing or throws', async ({ page }) => {
+  await page.goto('/?locale=missing&html_lang=zh-CN');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
+  await page.goto('/?locale=throw&html_lang=en');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+  await page.goto('/?locale=fr-FR&html_lang=zh-CN');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+});
+
+test('changing host language is applied when the view resumes', async ({ page }) => {
+  await page.goto('/?locale=zh-CN');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+  await expect(page.locator('.wt-roomCard')).toContainText('Both participants are connected');
+});
+
+test('language changes update waiting status in both directions', async ({ page }) => {
+  await page.goto('/?scenario=waiting&locale=zh-CN');
+  await expect(page.locator('.wt-roomCard')).toContainText('等待双方打开同一视频并开始播放');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('.wt-roomCard')).toContainText('Wait for both participants to open the same video and start playing');
+  await page.evaluate(() => { window.__wtFixture.locale = 'zh-CN'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('.wt-roomCard')).toContainText('等待双方打开同一视频并开始播放');
+});
+
+test('English settings identify the actual scheduled task', async ({ page }) => {
+  await page.goto('/?scenario=admin-member&locale=en-US');
+  await selectView(page, 'settings');
+  await expect(page.locator('.wt-updateHelp')).toContainText('Watch Together → Update Plugin');
+});
+
+test('host default export and page culture are supported', async ({ page }) => {
+  await page.goto('/?locale=default&html_lang=en');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
+  await page.goto('/?locale=missing&culture=zh-CN&html_lang=en');
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
+});
+
+test('operation labels translate after actions and page cleanup', async ({ page }) => {
+  await page.goto('/?scenario=empty&locale=zh-CN');
+  await selectView(page, 'invite');
+  await page.locator('#wtCreateInvitation').click();
+  await expect(page.locator('#wtInvitationCode')).toHaveText('ABCD12EFghI3J4KLMNopQR');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtCreateInvitation')).toHaveText('Create invitation code');
+  await page.evaluate(() => { window.__wtFixture.locale = 'zh-CN'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtCreateInvitation')).toHaveText('创建邀请码');
+  await page.goto('/?scenario=admin-member&locale=zh-CN');
+  await selectView(page, 'settings');
+  await expect(page.locator('#wtSaveConfig')).toBeEnabled();
+  await page.locator('#wtSaveConfig').click();
+  await expect(page.locator('#wtSaveConfig')).toHaveText('保存设置');
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtSaveConfig')).toHaveText('Save settings');
+});
+
+test('leaving during a pending invitation restores the label in the new language', async ({ page }) => {
+  await page.goto('/?scenario=late&locale=zh-CN');
+  await selectView(page, 'invite');
+  await page.locator('#wtCreateInvitation').click();
+  await expect(page.locator('#wtCreateInvitation')).toHaveText('创建中…');
+  await page.evaluate(() => { window.__wtFixture.view.onPause(); window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onResume(); });
+  await expect(page.locator('#wtCreateInvitation')).toHaveText('Create invitation code');
+  await expect(page.locator('#wtCreateInvitation')).toBeEnabled();
+});
+
+test('page reports its language for the authenticated account and changes it on resume', async ({ page }) => {
+  await page.goto('/?scenario=empty&locale=zh-CN');
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.languageCalls)).toEqual([{ userId: 'user-a', language: 'zh' }]);
+  await expect(page.locator('.wt-languageHint')).toHaveCount(0);
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.languageCalls.at(-1))).toEqual({ userId: 'user-a', language: 'en' });
+  await expect(page.locator('.wt-languageHint')).toHaveCount(0);
+});
+
+test('a language preference request failure does not prevent the room page loading', async ({ page }) => {
+  await page.goto('/?scenario=language-fail&locale=en-US');
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.wt-roomCard')).toBeVisible();
+  await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
+  await expect(page.locator('#wtLanguageStatus')).toContainText('Could not save the notification language');
+});
+
+for (const [tag, expected] of [
+  ['zh-Hant', 'zh-Hant'], ['zh-TW', 'zh-Hant'], ['zh-HK', 'zh-Hant'],
+  ['zh-MO', 'zh-Hant'], ['zh_hant_hk', 'zh-Hant'], ['zh-Hans-TW', 'zh'],
+  ['zh-CN', 'zh'], ['zh-SG', 'zh'], ['en-US', 'en'], ['fr-FR', 'en']
+]) {
+  test(`host language ${tag} is normalized to ${expected}`, async ({ page }) => {
+    await page.goto('/?scenario=empty&locale=' + tag);
+    await expect.poll(() => page.evaluate(() => window.__wtFixture.languageCalls.at(-1)?.language)).toBe(expected);
+    await expect(page.locator('#wtRoomsHeading')).toHaveText(expected === 'zh-Hant' ? '我的房間' : expected === 'zh' ? '我的房间' : 'My rooms');
+  });
+}
+
+test('Traditional Chinese covers dynamic status, confirmation, feedback and switch', async ({ page }) => {
+  await page.goto('/?scenario=waiting&locale=zh-TW');
+  await expect(page.locator('.wt-roomCard')).toContainText('等待雙方開啟同一影片並開始播放');
+  await expect(page.locator('.wt-roomCard')).toContainText('房間控制');
+  await page.locator('.wt-roomCard button[data-act="delete"]').click();
+  await expect(page.getByRole('alertdialog', { name: '結束房間' })).toBeVisible();
+  await page.locator('[data-confirm=cancel]').click();
+  await page.evaluate(() => { window.__wtFixture.locale = 'en-US'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('.wt-roomCard')).toContainText('Wait for both participants to open the same video');
+  await page.evaluate(() => { window.__wtFixture.locale = 'zh-HK'; window.__wtFixture.view.onPause(); window.__wtFixture.view.onResume(); });
+  await expect(page.locator('.wt-roomCard')).toContainText('等待雙方開啟同一影片並開始播放');
+});
+
+for (const [tag, expected] of [['zh-CN', 'zh'], ['zh-TW', 'zh-Hant'], ['en-US', 'en']]) {
+  test(`both creation paths submit ${expected}`, async ({ page }) => {
+    await page.goto('/?scenario=admin-member&locale=' + tag);
+    await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+    await page.evaluate(() => window.__wtFixture.setRooms([]));
+    await selectView(page, 'invite');
+    await page.locator('#wtCreate').click();
+    await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.find(x => x.method === 'POST' && x.path === 'WatchTogether/Rooms')?.body?.Language)).toBe(expected);
+    await page.locator('#wtInvitationAcceptCode').fill('abc123');
+    await page.locator('#wtAcceptInvitation').click();
+    await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.find(x => x.path.includes('/Accept'))?.body?.Language)).toBe(expected);
+  });
+}
+
+test('Traditional dictionary covers every source key and preserves placeholders', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../../src/EmbyWatchTogether/Web/Configuration/watchtogether.js'), 'utf8');
+  const english = source.split('var translations = { en: {')[1].split('}, "zh-Hant": {')[0];
+  const traditional = source.split('}, "zh-Hant": {')[1].split('} };')[0];
+  const en = JSON.parse('{' + english + '}');
+  const tw = JSON.parse('{' + traditional + '}');
+  expect(Object.keys(tw).sort()).toEqual(Object.keys(en).sort());
+  for (const key of Object.keys(en)) {
+    expect(typeof tw[key], key).toBe('string');
+    expect(tw[key], key).not.toBe('');
+    expect(tw[key].match(/\{\d+\}/g) || [], key).toEqual(key.match(/\{\d+\}/g) || []);
+  }
+});
+
+for (const [tag, expected] of [['zh-CN', '未知用户'], ['zh-TW', '未知使用者'], ['en-US', 'unknown user']]) {
+  test(`missing participant name uses localized fallback: ${tag}`, async ({ page }) => {
+    await page.goto('/?scenario=active&locale=' + tag);
+    await expect(page.locator('.wt-roomCard')).toBeVisible();
+    await page.evaluate(() => { const rooms = window.__wtFixture.getRooms(); rooms[0].Participants[0].Name = null; window.__wtFixture.setRooms(rooms); window.__wtFixture.refresh(); });
+    await expect(page.locator('.wt-roomCard')).toContainText(expected);
+  });
+}

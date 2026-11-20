@@ -5,7 +5,7 @@
 | 要追溯的主题 | 原始记录 |
 | --- | --- |
 | S111–S115、S116–S124 的整合和排期，以及 1.7.2.15–18 交付过程 | [截至 1.7.2.18 的排期快照](development-through-v1.7.2.18.md) |
-| 2026-09 至 2026-11 的客户端观察、旧候选身份及验收清单 | [客户端验收原文](client-evidence-through-v1.7.2.18.md) |
+| 2026-09 至 2026-11 的客户端观察与验证清单 | [客户端历史记录](client-evidence-through-v1.7.2.18.md) |
 | 原生控件与旧单页布局 | [控件方案](../native-controls-plan.md) |
 | S122 原生分页、媒体与头像 | [分页实施契约](../native-pages-media-plan.md) |
 | 已撤回的早期 UI VNext | [方案](../ui-vnext-plan.md)、[验证](../ui-vnext-verification.md) |

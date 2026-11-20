@@ -85,6 +85,8 @@ namespace Emby.Plugins.WatchTogether
         private readonly List<CancellationTokenSource> _deferredCommandTimeoutDisposals =
             new List<CancellationTokenSource>();
 
+        private readonly Func<string, string> _notificationLanguage;
+
         public SyncEngine(
             RoomManager roomManager,
             ISessionSnapshotProvider snapshotProvider,
@@ -96,13 +98,15 @@ namespace Emby.Plugins.WatchTogether
             bool notifyOtherOnPlaybackStop = true,
             IMessageIssuer messageIssuer = null,
             ILogManager logManager = null,
-            bool notifyOnSyncActions = true)
+            bool notifyOnSyncActions = true,
+            Func<string, string> notificationLanguage = null)
         {
             _stopToken = _cts.Token;
             _roomManager = roomManager ?? throw new ArgumentNullException(nameof(roomManager));
             _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
             _issuer = issuer;
             _messageIssuer = messageIssuer;
+            _notificationLanguage = notificationLanguage;
             try
             {
                 _logger = logManager?.GetLogger("WatchTogether.SyncEngine");
@@ -3650,7 +3654,10 @@ namespace Emby.Plugins.WatchTogether
                 }
 
                 if (!isFresh() || token.IsCancellationRequested || _stopRequested) return;
-                TryIssueMessage(room.Id, adminUserId, userId, target, header, text,
+                var language = NotificationText.LanguageFor(userId, _notificationLanguage);
+                TryIssueMessage(room.Id, adminUserId, userId, target,
+                    NotificationText.Translate(header, userId, _ => language),
+                    NotificationText.Translate(text, userId, _ => language),
                     NotificationTimeoutMs, now, token, out _);
             }, delaySeconds);
         }
@@ -4585,6 +4592,7 @@ namespace Emby.Plugins.WatchTogether
             runtime.ClearRemoteControlRecovery();
             runtime.ClearDriftTelemetry(clearAutoRepairHistory: false);
             runtime.State = RoomState.Watching;
+            runtime.Error = null;
             runtime.Barrier = null;
             runtime.Pending.Clear();
             runtime.WaitingPauseRetries.Clear();

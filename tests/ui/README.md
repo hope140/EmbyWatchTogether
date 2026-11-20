@@ -58,3 +58,5 @@ S124 V14 候选将默认 fixture 对齐当前 Server Web，不提供旧的 `Dash
 ### 宿主确认兼容性
 
 `confirmation.spec.js` 使用 fixture 的异步 `confirm` 模块契约（确认 resolve、取消 reject），同时令 native `window.confirm` 抛错，以覆盖原生脚本对话框不可用的宿主。覆盖四类确认、加载失败、重复点击、账号/服务器/页面/房间状态失效和普通控制无额外确认。fixture 的简易对话框不是 Emby 真实组件，不能据此宣称宿主视觉/焦点/返回键验收；需另在 Web、新 Windows 客户端及旧客户端确认。
+
+`admin-preview.spec.js` 覆盖 V35 管理员卡片、mine/all 权限、三语言、窄屏、结束确认与失效清理。后台使用列表播放摘要，按可见卡片请求媒体元数据和缩略图，复用相同条目；不逐房间请求 State 或 Diagnostics。真实宿主与双端仍须另验。见[预览说明](../../docs/maintenance/admin-management-preview.md)。

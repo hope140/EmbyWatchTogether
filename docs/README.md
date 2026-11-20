@@ -10,7 +10,7 @@
 | 运行时结构与实现边界 | [架构](architecture.md)、[技术文档](technical.md) |
 | 长期方向与延期决策 | [路线图](roadmap.md) |
 | 发布哈希、CI、故障调查 | [维护记录索引](maintenance/README.md) |
-| 历史 Stack、界面方案与验收原文 | [历史资料索引](history/README.md) |
+| 历史设计、技术决策与兼容性记录 | [历史资料索引](history/README.md) |
 | 已证实的约束与架构决策 | [经验主题导航](lessons-learned.md)、[ADR](adr/README.md) |
 
 ## 开发与发布规则
@@ -18,5 +18,6 @@
 - [AGENTS](../AGENTS.md)、[PR Stack 工作流](pr-stack-workflow.md)、[模型与任务 Tier](ai-model-policy.md)。
 - [验证与交接](validation-and-handoff.md)、[浏览器测试](../tests/ui/README.md)、[诊断日志](handoff-diagnostics.md)。
 - [版本规则](versioning.md)、[审核式发布请求](release-requests.md)；构建和手动签名发布入口见[技术文档](technical.md)。
+- [协作与发布规则审视](maintenance/rules-review-2026-11.md)：规则来源、保留理由和待决建议。
 
-维护记录写清日期、源码和证据层次。已完成过程进入历史或维护索引；新决策更新路线图/ADR，真实验收更新兼容性记录。发布、部署和客户端验收分别记录，不以其中一项替代另一项。
+维护记录注明源码版本、可复现检查和验证范围。设计决策更新路线图或 ADR，客户端观察更新兼容性记录。服务器地址、私人部署记录和本机路径保存在仓库外。

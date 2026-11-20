@@ -22,20 +22,20 @@ secret。原 `workflow_dispatch` 的 tag、channel、key_id 用法保留。
   "keyId": "prod-2026-08",
   "sourceSha": "完整的40位小写源码提交SHA",
   "ciRunId": 39575988859,
-  "title": "Watch Together v1.7.1.0 正式版",
+  "title": "v1.7.1.0 正式版",
   "notesPath": "docs/releases/v1.7.1.0.md",
   "notesSha256": "该源码提交中说明文件原始字节的64位小写SHA256"
 }
 ```
 
-示例中的 SHA 占位符必须替换。标题完全取自请求；正文完全取自固定源码 SHA
+示例中的 SHA 占位符必须替换。新请求标题须精确为 `<tag> 正式版`（stable）或 `<tag> 测试版`（beta），中间一个半角空格，标题完全取自请求；旧请求的 retry 仍须逐字节沿用原始标题。正文完全取自固定源码 SHA
 中的 notesPath，并由 notesSha256 锁定。Actions 不生成或改写正文。
 channel 决定 stable 或 prerelease；不接受额外任意命令、脚本或路径。
 
 sourceSha 必须是对应通道分支（stable 为 main，beta 为 beta）的祖先，三处
 项目版本必须与四段数字 tag 一致。ciRunId 必须是同仓库该准确源码 SHA、对应
 分支 push 的 `.github/workflows/ci.yml` 成功运行；请求 PR 自己的准确 head
-也必须通过该 CI。源码必须包含中文发布说明和已审核签名公钥映射。
+也必须通过该 CI。源码必须包含中文发布说明、对应通道的中英文 README 与发布索引入口，以及已审核签名公钥映射。文档同步范围见[发布检查](versioning.md#发布检查)。
 
 ## 信任与失败边界
 

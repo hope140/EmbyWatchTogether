@@ -15,7 +15,7 @@ async function avatarsLoaded(page) {
 }
 async function refresh(page) {
   const before = await page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.path.endsWith('/State')).length);
-  await page.locator('#wtRefresh').click();
+  await page.evaluate(() => window.__wtFixture.refresh());
   await expect.poll(() => page.evaluate(() => window.__wtFixture.apiCalls.filter(x => x.path.endsWith('/State')).length)).toBeGreaterThan(before);
 }
 
@@ -95,7 +95,7 @@ test('旧头像load和error不能改变恢复后或已移除的房间', async ({
   await page.evaluate(() => { window.__staleAvatarLoad(); window.__staleAvatarError(); });
   await avatarsLoaded(page);
   await page.evaluate(() => window.__wtFixture.setRooms([]));
-  await page.locator('#wtRefresh').click();
+  await page.evaluate(() => window.__wtFixture.refresh());
   await expect(page.locator('.wt-roomCard')).toHaveCount(0);
   await page.waitForTimeout(800);
   await expect(page.locator('.wt-participantAvatarImage[src]')).toHaveCount(0);

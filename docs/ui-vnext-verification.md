@@ -40,7 +40,7 @@
 - 主线程已查看修正后的 390px Recovery 房间及诊断截图；截图带 mock 宿主标记。Recovery fixture 的 4.2 秒年龄与 5.8 秒剩余窗口匹配 10 秒合同，drift 修复阈值与冷却样本亦已校正为自洽值。
 - Knowledge Review：ADR-003 与经验第 20 条已同步参与者恢复和主用户停止/Handoff 的优先级；UI 架构继续使用现有嵌入 HTML/AMD。
 
-当时剩余验收：最终构建尚未部署到 NAS，真实 Emby 顶栏/主题/缓存、桌面/手机和双账号播放验收未在该轮执行；后续验收状态见 `client-compatibility.md`，正式版本状态见 `development-roadmap.md`。
+当时剩余验收：真实 Emby 顶栏/主题/缓存、桌面/手机和双账号播放验收未在该轮执行；后续验收状态见 `client-compatibility.md`，正式版本状态见 `development-roadmap.md`。
 
 ## 历史与持续验收矩阵
 
@@ -123,14 +123,14 @@ S9 的 mock Playwright fixture 验证 `tabs-viewmenubar`、`emby-tabs-slider`、
 - GitHub Token 区域复用 `emby-input`、`emby-button`、原生 `raised button-submit` / `button-flat` 语义；移除 Token 专属按钮颜色、背景和圆角覆写。
 - Token 读取、保存、清除使用资源 sequence、页面 generation、账号身份和 pause 隔离；清除复用页面确认对话框，取消不发送 DELETE，离页或账号变化清空明文草稿。
 - Mock fixture 覆盖管理员/普通用户、读取失败仍可清除、保存失败、确认取消、pause 迟到响应和账号切换；截图继续输出到忽略目录 `tests/ui/test-results/ui-vnext/`。
-- 本轮不接入 Phase E 新字段，不改变 Token API、同步、Session、Room 或版本；真实 Emby/NAS、部署、重启、签名和发布仍待主线程单独验收。
+- 本轮不接入 Phase E 新字段，不改变 Token API、同步、Session、Room 或版本；仍需在真实 Emby 中单独验证。
 
 ### S115 PhaseE 只读诊断衔接
 
 - 页面入口和共享 controller 轮换到 `WatchTogetherUiMineV5`、`WatchTogetherUiManageV5`、`WatchTogetherUiSettingsV5` 与 `WatchTogetherUiNativeTabsV5.js`。
 - Recovering 状态使用主题变量 badge；`transient_recovery`、TransientRecovery、Drift 和 drift event 只读展示并进入清洗 JSON 导出。
 - TransientRecovery 只表示参与者临时缺失；主用户缺失继续走 beta Waiting/stop/handoff 路径。RecoveryWindow 与 TransientRecovery 分开保留。
-- 本轮不改变媒体元数据、业务动作、Token 存储或同步状态机；真实 Emby/NAS/发布仍待主线程验收。
+- 本轮不改变媒体元数据、业务动作、Token 存储或同步状态机；仍需在真实 Emby 中验证。
 
 仍待真实 Emby 收口的视觉差异：mock 顶栏无法复现真实 Emby 侧栏、账号菜单、宿主字体和缓存后的 header 尺寸；媒体名称、封面和头像继续按权限门禁使用占位；真实播放状态、双账号设备信息和移动端软键盘布局尚未验收。
 

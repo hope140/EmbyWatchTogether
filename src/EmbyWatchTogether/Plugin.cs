@@ -4,6 +4,7 @@ using System.Threading;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Model.Drawing;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
@@ -26,6 +27,7 @@ namespace Emby.Plugins.WatchTogether
         public static Plugin Instance { get; private set; }
 
         private GitHubTokenStore _githubTokenStore;
+        private readonly IServerConfigurationManager _serverConfiguration;
         private readonly object _configurationLock = new object();
 
         /// <summary>
@@ -35,10 +37,20 @@ namespace Emby.Plugins.WatchTogether
         /// </summary>
         public event EventHandler<PluginConfigurationChangedEventArgs> ConfigurationChanged;
 
-        public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
+        public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer,
+            IServerConfigurationManager serverConfiguration = null)
             : base(applicationPaths, xmlSerializer)
         {
+            _serverConfiguration = serverConfiguration;
             Instance = this;
+        }
+
+        internal NotificationLanguageStore NotificationLanguages { get; set; }
+
+        internal string GetNotificationLanguage(string userId)
+        {
+            try { return NotificationLanguages?.GetLanguage(userId) ?? "zh"; }
+            catch { return "zh"; }
         }
 
         public RoomStore Store { get; internal set; }
@@ -171,8 +183,8 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Change the page key together with the controller key so
                     // Emby Web refreshes the embedded HTML cache as well.
-                    Name = "WatchTogetherRoomsV26",
-                    DisplayName = "Watch Together",
+                    Name = "WatchTogetherRoomsV35",
+                    DisplayName = GetMenuDisplayName(),
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                     EnableInMainMenu = false,
                     EnableInUserMenu = true,
@@ -181,13 +193,19 @@ namespace Emby.Plugins.WatchTogether
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherInviteV26",
+                    Name = "WatchTogetherInviteV35",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
                 new PluginPageInfo
                 {
-                    Name = "WatchTogetherSettingsV26",
+                    Name = "WatchTogetherSettingsV35",
+                    DisplayName = "Watch Together",
+                    EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
+                },
+                new PluginPageInfo
+                {
+                    Name = "WatchTogetherAdminV35",
                     DisplayName = "Watch Together",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.watchtogether.html",
                 },
@@ -198,10 +216,29 @@ namespace Emby.Plugins.WatchTogether
                 {
                     // Use a new controller name so Emby Web does not reuse a
                     // cached copy of the previous embedded module.
-                    Name = "WatchTogetherNativeV26.js",
+                    Name = "WatchTogetherNativeV35.js",
                     EmbeddedResourcePath = "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js",
                 },
             };
+        }
+
+        private string GetMenuDisplayName()
+        {
+            try
+            {
+                var culture = _serverConfiguration?.Configuration?.UICulture?.Trim();
+                if (string.Equals(culture, "zh", StringComparison.OrdinalIgnoreCase) ||
+                    (culture != null && culture.StartsWith("zh-", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return "同映";
+                }
+            }
+            catch
+            {
+                // A missing or unavailable server configuration must not prevent plugin loading.
+            }
+
+            return "Watch Together";
         }
     }
 }

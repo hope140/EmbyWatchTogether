@@ -1245,6 +1245,79 @@ namespace Emby.Plugins.WatchTogether.Tests
         }
 
         [Fact]
+        public void SeekTimeout_LateAlignmentAndRestore_ClearsCurrentErrorButKeepsDiagnostics()
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine();
+            EnterWatching(engine, room);
+            var runtime = _rooms.GetRuntime(room.Id);
+            const long target = 80 * SessionSnapshot.TicksPerSecond;
+            const long followerStart = 51 * SessionSnapshot.TicksPerSecond;
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: target),
+                Snapshot("s2", "u2", paused: false, position: followerStart));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: target),
+                Snapshot("s2", "u2", paused: true, position: followerStart));
+            _clock.Advance(1);
+            engine.PollOnce(_clock.Now);
+            Assert.Equal(RemoteCommands.Seek, runtime.Pending["u2"].Command);
+
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + 0.1);
+            engine.PollOnce(_clock.Now);
+            _clock.Advance(SyncConstants.PendingTimeoutSeconds + SyncConstants.PendingRetryGraceSeconds + 1.1);
+            var timedOut = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Barrier, timedOut.State);
+            Assert.Equal(BarrierStage.Seek, runtime.Barrier.Stage);
+            Assert.Equal("playback command was not acknowledged", timedOut.Error);
+            Assert.NotNull(runtime.Barrier.SeekRetryAtUtc);
+            Assert.Empty(runtime.Pending);
+            Assert.Equal(2, _issuer.Issued.Count(command => command.command == RemoteCommands.Seek));
+
+            // A late snapshot reaches the original target before another seek is due.
+            SetCandidates(
+                Snapshot("s1", "u1", paused: true, position: target),
+                Snapshot("s2", "u2", paused: true, position: target));
+            _clock.Advance(1);
+            var restoring = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Barrier, restoring.State);
+            Assert.Equal(BarrierStage.Restore, runtime.Barrier.Stage);
+            Assert.Equal(timedOut.Error, restoring.Error);
+            Assert.Equal(2, runtime.Pending.Count);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: target),
+                Snapshot("s2", "u2", paused: true, position: target));
+            _clock.Advance(0.5);
+            var partlyRestored = engine.PollOnce(_clock.Now).Single();
+            Assert.Equal(RoomState.Barrier, partlyRestored.State);
+            Assert.Equal(timedOut.Error, partlyRestored.Error);
+            Assert.Single(runtime.Pending);
+
+            SetCandidates(
+                Snapshot("s1", "u1", paused: false, position: target),
+                Snapshot("s2", "u2", paused: false, position: target));
+            _clock.Advance(0.5);
+            var recovered = engine.PollOnce(_clock.Now).Single();
+
+            Assert.Equal(RoomState.Watching, recovered.State);
+            Assert.Null(recovered.Error);
+            Assert.Empty(runtime.Pending);
+            Assert.Equal(2, _issuer.Issued.Count(command => command.command == RemoteCommands.Seek));
+            var diagnostics = SyncDiagnostics.Build(room, runtime, "server-1", "test", "watching", _clock.Now);
+            Assert.Null(diagnostics.LastError);
+            var failedSeek = Assert.Single(diagnostics.Events, entry =>
+                entry.Type == "command_failed" && entry.Command == RemoteCommands.Seek);
+            Assert.Contains(diagnostics.Events, entry =>
+                entry.Type == "entered_watching" && entry.AtUtc > failedSeek.AtUtc);
+        }
+
+        [Fact]
         public void SeekImmediateIssueFailure_PreservesBarrierUntilCooldownRetry()
         {
             var room = CreateRoom();
@@ -6071,7 +6144,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             bool notifyOtherOnPlaybackStop = true,
             bool notifyOnSyncActions = false,
             IMessageIssuer messageIssuer = null,
-            ILogManager logManager = null)
+            ILogManager logManager = null,
+            Func<string, string> notificationLanguage = null)
         {
             var engine = new SyncEngine(
                 _rooms, _provider, _issuer, () => serverId, () => _clock.Now,
@@ -6080,7 +6154,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 notifyOtherOnPlaybackStop: notifyOtherOnPlaybackStop,
                 notifyOnSyncActions: notifyOnSyncActions,
                 messageIssuer: messageIssuer ?? _messageIssuer,
-                logManager: logManager);
+                logManager: logManager, notificationLanguage: notificationLanguage);
             if ((messageIssuer ?? _messageIssuer) is RecordingMessageIssuer recording)
                 recording.WaitForIdle = () => WaitForNotifications(engine);
             return engine;
@@ -6248,6 +6322,23 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             engine.PollOnce(_clock.Now);
             Assert.Equal(2, _messageIssuer.Issued.Count);
+        }
+
+        [Theory]
+        [InlineData("en", "Watch Together", "Different videos")]
+        [InlineData("zh-Hant", "一起觀看", "雙方開啟")]
+        public void DifferentVideoNotice_UsesEachRecipientsLanguage(string language, string header, string body)
+        {
+            var room = CreateRoom();
+            var engine = CreateEngine(notifyOnSyncActions: true, notificationLanguage: id => id == "u1" ? language : "zh");
+            SetCandidates(Snapshot("s1", "u1", paused: false, position: 0, itemId: "a"),
+                Snapshot("s2", "u2", paused: false, position: 0, itemId: "b"));
+            engine.PollOnce(_clock.Now);
+            var messages = _messageIssuer.Issued;
+            Assert.Equal(2, messages.Count);
+            Assert.Equal(header, messages.Single(m => m.userId == "u1").header);
+            Assert.Contains(body, messages.Single(m => m.userId == "u1").text);
+            Assert.Equal("双方打开了不同视频，已暂停同步；请打开同一视频", messages.Single(m => m.userId == "u2").text);
         }
 
         [Fact]

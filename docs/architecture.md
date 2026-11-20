@@ -2,7 +2,7 @@
 
 本文只描述当前代码已实现的结构；行为细节、API、构建和人工验收入口见 [`technical.md`](technical.md)。[`watch-together-emby-plugin-plan.md`](watch-together-emby-plugin-plan.md) 保留为历史实现说明。架构变更应先更新本文，再评估是否需要 [`adr/README.md`](adr/README.md) 中的 ADR。
 
-当前正式版为 [v1.7.3.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0)，当前 beta 测试线为 [v1.7.2.20](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.2.20)。本次调整按钮与设置页文案，不修改同步引擎或权限规则；公开发布状态见版本链接，证据边界见[兼容性记录](client-compatibility.md)。
+当前公开正式版与测试版见[发布日志](releases/README.md)；本文描述本分支代码，可能包含测试版功能。真实客户端验收边界见[兼容性记录](client-compatibility.md)和相应版本说明。
 
 1.7.2.19 源自[可选房间名预览](maintenance/optional-room-name-preview.md)：空白名称在注册锁内从未占用的四位编号中随机选择并持久化，邀请只在接受创建时分配；已有名称不迁移。三页和控制器资源键为 V23。
 
@@ -39,17 +39,21 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 
 Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用配置锁。设置提交保留当前内部 pending，更新管理器通过原子 writer 获取当前配置并记录安装事实；配置尚未建立时将新对象挂入 BasePlugin 后保存。设置变更事件在锁外发布已规范化的不可变选项。 更新提示通过按 `ISessionManager` 共享的有界发送槽位执行，最多等待 5 秒；不响应取消的传输继续占位直到实际完成，后续计划任务不会叠加发送。提示超时或失败不阻止安装、不改写已安装事实，调用方真实取消仍向上传播。
 
+页面打开时向认证接口提交实际选用的简体中文、繁体中文或英文，独立的 `notification-languages.json` 按账号持久化偏好；无记录或存储不可读时自动通知默认中文。播放通知在原有身份及新鲜度校验后按接收者选择固定文案，自定义管理员消息保留原文；不同设备共用账号，以服务器最后成功保存为准。更新管理员广播仍走独立路径。房间默认名在创建时按请求页面语言生成并作为普通名称持久化，手动建房使用创建页面语言，邀请码建房使用接受页面语言；缺省或不支持的语言回退简体中文，已有及自定义名称不迁移。
+
 ## 嵌入式 UI
 
 页面先通过宿主 getCurrentUser({enableCache:false}) 核对当前用户 ID 和明确的 Policy.IsAdministrator，仅管理员读取 WatchTogether/Users；普通用户读取自己的房间与邀请。角色读取失败不授予管理权限，身份或页面代次失效时旧结果无效。服务端独立执行权限与房间过滤；宿主 SDK 离线用户回退保持原样，未证明它导致本次问题。
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；普通用户只有房间与邀请。当前页面键为 `WatchTogetherRoomsV26`、`WatchTogetherInviteV26`、`WatchTogetherSettingsV26`，共享 `WatchTogetherNativeV26.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。它不代表已发布的 v1.6.1.0 资产已包含这些改动。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；v1.7.3.3 测试版新增仅管理员可见的[后台管理](maintenance/admin-management-preview.md)，普通用户只有房间与邀请。v1.7.3.4 的页面键为 `WatchTogetherRoomsV35`、`WatchTogetherInviteV35`、`WatchTogetherSettingsV35`、`WatchTogetherAdminV35`，共享 `WatchTogetherNativeV35.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。后台小卡片与普通房间共用外框和媒体区的主题样式。
+
+用户菜单名在 `GetPages()` 注册时读取服务器配置 `UICulture`：中文显示“同映”，其他或不可读取时显示“Watch Together”。插件身份不变，页面和播放通知语言仍按用户语言处理。配置变更后宿主是否重新读取菜单注册尚未实机确认，可能需要重启；单元测试不能代替宿主验证。
 
 内容区沿用宿主 `readOnlyContent auto-center` 的侧栏对齐，在插件作用域按已确认的影院式布局扩展到最大 1180px；窄屏随可用空间收缩并堆叠为单列。房间采用媒体/参与者主区和原生控制侧栏，创建与邀请、设置使用双列分组。`emby-input`、`emby-select`、`emby-checkbox`、`emby-button` 由宿主提供外观，动态按钮保留构造器附加的样式类。按钮显式设置 flex 内容居中；普通操作使用 `raised raised-outline`，轮廓来自 `--wt-muted`，主操作保持 `raised button-submit` 主题填充。
 
 S124 已随 v1.7.0.1 发布，使用 V16 页面/控制器缓存键，去除 Dashboard 全局依赖并使用宿主相对路由链接；四个单选控件沿用 Madby 普通单选的宿主默认菜单模式。旧 Theater 的直属箭头按控件 grid 行居中，新版 Web 保留其包装层定位；变更证据和真实验收边界见经验记录第 31、32 节。
 
-房间页按约 5 秒刷新既有 `/Rooms` 和 `/State`，并在严格状态、成员、同 Item 与资格检查后，通过当前登录用户的 Emby `getItem` 接口读取片名。状态新鲜度为 10 秒，错误或过期时不显示旧片名；状态与媒体请求独立，迟到响应绑定页面代次、账号、服务器、房间与媒体目标。媒体区在可靠同步状态下显示片名及当前授权 DTO 提供的背景；等待、失效和无图时使用中性占位。背景通过宿主 `getImageUrl` 生成，仅接受绑定服务器同源 HTTP(S) 地址且不得嵌入用户名/密码；图片加载回调绑定页面、房间、目标和 URL，失效时清除 src。片名、图片标识和 URL 不进入诊断导出。`/State` 是非原子读取，其结果只用于展示，不能替代同步核心身份确认。后端逻辑及协议未修改。
+普通房间页对所有角色只读取本人房间（`/Rooms?Scope=mine`），后台页读取要求服务端管理员权限的 `Scope=all`，每轮读取一次含播放摘要的列表，可见卡片按当前用户权限按需获取媒体。无 scope 的旧调用语义保留。两页在前台每秒检查一次，后台或隐藏时暂停房间轮询，未完成的读取不重叠，列表失败后退避重试。普通房间页读取 `/Rooms` 和各房间的 `/State`，并在严格状态、成员、同 Item 与资格检查后，通过当前登录用户的 Emby `getItem` 接口读取片名。同一媒体详情的读取间隔至少为五秒。状态新鲜度为 10 秒，错误或过期时不显示旧片名；状态与媒体请求独立，迟到响应绑定页面代次、账号、服务器、房间与媒体目标。媒体区在可靠同步状态下显示片名及当前授权 DTO 提供的背景；等待、失效和无图时使用中性占位。背景通过宿主 `getImageUrl` 生成，仅接受绑定服务器同源 HTTP(S) 地址且不得嵌入用户名/密码；图片加载回调绑定页面、房间、目标和 URL，失效时清除 src。片名、图片标识和 URL 不进入诊断导出。`/State` 是非原子读取，其结果只用于展示，不能替代同步核心身份确认。列表 scope 扩展不修改同步核心或播放控制协议。
 
 房间外层使用浅色细边框。参与者头像仅从当前房间两位成员及其受限摘要中取 ID，通过宿主 `getUserImageUrl` 生成同服务器地址，不新增用户资料查询。头像与同步状态独立；缺图或失败保留首字，页面代次内抑制重复失败请求。账号、服务器、房间或页面生命周期变化使旧图片回调失效，清除图片 src；头像信息不进入诊断、日志或持久缓存。
 

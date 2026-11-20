@@ -3,13 +3,60 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Configuration;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Drawing;
+using MediaBrowser.Model.Serialization;
+using Moq;
 using Xunit;
 
 namespace Emby.Plugins.WatchTogether.Tests
 {
+    [Collection("Plugin singleton")]
     public class PluginPagesTests
     {
+        [Theory]
+        [InlineData("zh-CN", "同映")]
+        [InlineData("zh-Hant", "同映")]
+        [InlineData("zh-TW", "同映")]
+        [InlineData(" ZH-hk ", "同映")]
+        [InlineData("zh", "同映")]
+        [InlineData("en-US", "Watch Together")]
+        [InlineData("ja-JP", "Watch Together")]
+        [InlineData("zhfake", "Watch Together")]
+        [InlineData("", "Watch Together")]
+        [InlineData(null, "Watch Together")]
+        public void UserMenu_UsesServerCultureOnFirstRegistration(string culture, string expected)
+        {
+            var manager = new Mock<IServerConfigurationManager>();
+            manager.SetupGet(x => x.Configuration).Returns(new ServerConfiguration { UICulture = culture });
+            var plugin = new Plugin(Mock.Of<IApplicationPaths>(), Mock.Of<IXmlSerializer>(), manager.Object);
+            var pages = plugin.GetPages().ToList();
+
+            Assert.Equal(expected, pages.Single(p => p.EnableInUserMenu).DisplayName);
+            Assert.Equal("Watch Together", plugin.Name);
+            Assert.Equal(Plugin.PluginId, plugin.Id);
+            Assert.Equal("Watch Together", pages.Single(p => p.Name == "WatchTogetherInviteV35").DisplayName);
+            Assert.Equal("Watch Together", pages.Single(p => p.Name == "WatchTogetherSettingsV35").DisplayName);
+        }
+
+        [Fact]
+        public void UserMenu_RereadsServerCultureAndFallsBackWhenUnavailable()
+        {
+            var configuration = new ServerConfiguration { UICulture = "zh-CN" };
+            var manager = new Mock<IServerConfigurationManager>();
+            manager.SetupGet(x => x.Configuration).Returns(configuration);
+            var plugin = new Plugin(Mock.Of<IApplicationPaths>(), Mock.Of<IXmlSerializer>(), manager.Object);
+            Assert.Equal("同映", plugin.GetPages().Single(p => p.EnableInUserMenu).DisplayName);
+            configuration.UICulture = "en-US";
+            Assert.Equal("Watch Together", plugin.GetPages().Single(p => p.EnableInUserMenu).DisplayName);
+            manager.SetupGet(x => x.Configuration).Throws<System.InvalidOperationException>();
+            Assert.Equal("Watch Together", plugin.GetPages().Single(p => p.EnableInUserMenu).DisplayName);
+            var withoutManager = new Plugin(Mock.Of<IApplicationPaths>(), Mock.Of<IXmlSerializer>());
+            Assert.Equal("Watch Together", withoutManager.GetPages().Single(p => p.EnableInUserMenu).DisplayName);
+        }
+
         [Fact]
         public void PluginAssembly_EmbedsWatchTogetherPageAndController()
         {
@@ -21,17 +68,17 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV26");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV26");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV26");
-            Assert.Equal(4, pages.Count);
+            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV35");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV35");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV35");
+            Assert.Equal(5, pages.Count);
             Assert.Single(pages, page => page.EnableInUserMenu);
             Assert.All(pages.Where(page => !page.Name.EndsWith(".js")), page =>
                 Assert.Equal("Emby.Plugins.WatchTogether.Configuration.watchtogether.html", page.EmbeddedResourcePath));
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV7");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV26.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV35.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
@@ -58,7 +105,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV26");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV35");
             Assert.Equal("people", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
@@ -73,10 +120,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             var names = plugin.GetPages().Select(page => page.Name).ToArray();
             var html = ReadResource(typeof(Plugin).Assembly, "Emby.Plugins.WatchTogether.Configuration.watchtogether.html");
             var script = ReadResource(typeof(Plugin).Assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
-            foreach (var route in new[] { "Rooms", "Invite", "Settings", "Native" })
+            foreach (var route in new[] { "Rooms", "Invite", "Settings", "Admin", "Native" })
             {
-                var name = "WatchTogether" + route + "V26" + (route == "Native" ? ".js" : "");
+                var name = "WatchTogether" + route + "V35" + (route == "Native" ? ".js" : "");
                 Assert.Contains(name, names);
+                var previousKey = "WatchTogether" + route + "V34";
+                Assert.DoesNotContain(previousKey + (route == "Native" ? ".js" : ""), names);
+                Assert.DoesNotContain(previousKey, html);
+                Assert.DoesNotContain(previousKey, script);
                 Assert.DoesNotContain("WatchTogether" + route + "V22", html);
                 Assert.DoesNotContain("WatchTogether" + route + "V22", script);
                 Assert.Contains(name, route == "Native" ? html : script);
@@ -100,7 +151,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV26.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV35.js\"", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", javascript);
             Assert.DoesNotContain("WatchTogetherSettingsV5", html);
@@ -205,10 +256,10 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("clearAllRoomFeedback", javascript);
             Assert.Contains("_wtStatusTimer", javascript);
             Assert.DoesNotContain("正在处理此房间，请稍候", javascript);
-            Assert.Contains("ending ? '房间已结束'", javascript);
+            Assert.Contains("ending ? t('房间已结束')", javascript);
             var deleteFunctionIndex = javascript.IndexOf("function deleteRoom", System.StringComparison.Ordinal);
             var deleteFeedbackIndex = javascript.IndexOf("clearRoomFeedback(page, room.RoomId)", deleteFunctionIndex, System.StringComparison.Ordinal);
-            var deleteStatusIndex = javascript.IndexOf("notifySuccess(page, ending", deleteFunctionIndex, System.StringComparison.Ordinal);
+            var deleteStatusIndex = javascript.IndexOf("notifyToast(page, ending", deleteFunctionIndex, System.StringComparison.Ordinal);
             Assert.True(deleteFeedbackIndex >= 0 && deleteStatusIndex > deleteFeedbackIndex);
             Assert.DoesNotContain("room.Error", javascript);
             Assert.Contains("getPluginConfiguration", javascript);
@@ -255,7 +306,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("waiting_pause_retry_limit", javascript);
             Assert.Contains("reportedRemoteControl", javascript);
             Assert.Contains("session.ReportedSupportsRemoteControl", javascript);
-            Assert.Contains("session.online ? (session.paused ? '已暂停' : '播放中') : '状态未知'", javascript);
+            Assert.Contains("session.online ? (session.paused ? t('已暂停') : t('播放中')) : t('状态未知')", javascript);
             Assert.Contains("上报远控", javascript);
             Assert.Contains("raw.Pending", javascript);
             Assert.Contains("raw.Barrier", javascript);
@@ -293,6 +344,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("wtInvitationCodePanel", html);
             Assert.Contains("wtCopyInvitationCode", html);
             Assert.Contains("wtInvitations", html);
+            Assert.Contains("wtInvitationListStatus", html);
             Assert.Contains("WatchTogether/Invitations", javascript);
             Assert.Contains("WatchTogether/Invitations/' + encodeURIComponent(code) + '/Accept", javascript);
             Assert.Contains("WatchTogether/Invitations/' + encodeURIComponent(invitation.InvitationId)", javascript);
@@ -301,7 +353,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("creator_cannot_accept", javascript);
             Assert.Contains("rate_limited", javascript);
             Assert.Contains("room_unavailable", javascript);
-            Assert.Contains("自动复制失败，请手动复制邀请码。", javascript);
+            Assert.Contains("复制失败，请选中邀请码手动复制。", javascript);
             Assert.DoesNotContain("room.IsSelfService && room.CanEnd", javascript);
             Assert.Contains("else if (room.CanEnd)", javascript);
             Assert.Contains("CanEnd", javascript);

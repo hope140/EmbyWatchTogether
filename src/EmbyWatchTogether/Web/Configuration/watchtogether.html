@@ -3,7 +3,7 @@
      data-horizontal="false"
      data-forcescrollbar="true"
      data-centerfocus="true"
-     data-controller="__plugin/WatchTogetherNativeV26.js"
+     data-controller="__plugin/WatchTogetherNativeV35.js"
      data-require="emby-input,emby-select,emby-checkbox,emby-button">
     <style>
         .wt-page {
@@ -81,13 +81,15 @@
         .wt-invitationCode strong { display: block; margin: .65em 0; padding: .65em; color: var(--wt-text); background: var(--wt-card); border: 1px solid var(--wt-border); border-radius: .35em; overflow-wrap: anywhere; }
         .wt-acceptInvitation { margin-top: 2em; padding-top: 1.5em; border-top: 1px solid var(--wt-border); }
         #wtInvitations { margin-top: 1.5em; gap: 1em; }
+        #wtInvitations[hidden] { display: none; }
+        #wtInvitationCode { user-select: text; }
         #wtInvitations > .wt-roomMeta { padding-top: 1em; border-top: 1px solid var(--wt-border); overflow-wrap: anywhere; }
         #wtInvitations button { margin-top: .75em; }
-        .wt-refresh { white-space: nowrap; min-width: 6em; }
         .wt-roomList { display: flex; flex-direction: column; gap: 2.5em; }
         #wtRoomsSection > .wt-sectionHeading { margin-bottom: 1.7em; align-items: center; }
         #wtRoomsSection > .wt-sectionHeading .wt-sectionDescription { font-size: .9em; }
-        .wt-roomCard { min-width: 0; padding: 1.4em; border: 1px solid var(--wt-border); border-radius: .6em; box-sizing: border-box; }
+        .wt-roomCard, .wt-adminRoom { min-width: 0; border: 1px solid var(--wt-border); border-radius: .6em; box-sizing: border-box; }
+        .wt-roomCard { padding: 1.4em; }
         .wt-roomHeader { display: flex; align-items: center; flex-wrap: wrap; gap: .85em 1.15em; margin-bottom: 1.4em; }
         .wt-roomName { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: clamp(1.6em, 2.6vw, 2.25em); font-weight: 700; }
         .wt-roomState { flex: 0 0 auto; padding: .38em .85em; border: 1px solid currentColor; border-radius: 999px; font-size: .86em; font-weight: 600; white-space: nowrap; }
@@ -99,7 +101,8 @@
         .wt-roomState-unavailable { border-color: #d8797f; background: #fff0f1; color: #9f353e; }
         .wt-roomLayout { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(15em, 1fr); gap: 1.75em; }
         .wt-roomMain { min-width: 0; }
-        .wt-roomPresentation { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; min-width: 0; height: auto; min-height: 350px; padding: 1.75em; box-sizing: border-box; border-radius: .5em; background: var(--wt-card); text-align: center; }
+        .wt-roomPresentation, .wt-cardScene { border-radius: .5em; background: var(--wt-card); }
+        .wt-roomPresentation { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; min-width: 0; height: auto; min-height: 350px; padding: 1.75em; box-sizing: border-box; text-align: center; }
         .wt-roomPresentation > :not(.wt-roomBackdrop) { position: relative; z-index: 2; }
         .wt-roomPresentation--media { align-items: flex-start; justify-content: flex-end; text-align: left; }
         .wt-roomBackdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; z-index: 0; }
@@ -189,6 +192,42 @@
             .wt-primaryLabel { margin: .35em 0 0; }
             .wt-sectionHeading { align-items: flex-start; }
         }
+        .wt-roomList.wt-adminGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19em), 1fr)); align-items: stretch; gap: 1em; }
+        .wt-adminGrid > .wt-emptyState { grid-column: 1 / -1; }
+        .wt-adminRoom { display: flex; flex-direction: column; overflow-wrap: anywhere; padding: .75em; }
+        .wt-cardScene { position: relative; isolation: isolate; overflow: hidden; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; min-height: 11em; padding: 1.05em 1.15em; }
+        .wt-cardBackdrop, .wt-cardWithImage .wt-cardScene::before { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+        .wt-cardBackdrop { z-index: -2; object-fit: cover; }
+        .wt-cardWithImage .wt-cardScene::before { content: ''; z-index: -1; background: linear-gradient(180deg, rgba(0,0,0,.52), rgba(0,0,0,.18) 35%, rgba(0,0,0,.86)); }
+        .wt-cardWithImage .wt-cardScene { color: white; }
+        .wt-cardTop, .wt-cardPeople { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35em .75em; }
+        .wt-cardTop { justify-content: space-between; align-items: flex-start; margin-bottom: auto; padding-bottom: 1.15em; }
+        .wt-cardWaiting { display: none; }
+        .wt-cardIdle .wt-cardTop { padding-bottom: .45em; }
+        .wt-cardIdle .wt-cardWaiting { display: block; align-self: center; width: min(29%, 7em); min-width: 4em; height: auto; margin: 0 auto .5em; color: var(--wt-muted); }
+        .wt-cardRoom { flex: 1 1 6em; font-size: .88em; }
+        .wt-cardStatus { margin-inline-start: auto; max-width: 100%; font-size: .79em; font-weight: 600; padding: .25em .65em; border-radius: 1em; background: var(--wt-surface); }
+        .wt-cardWithImage .wt-cardStatus { background: rgba(0,0,0,.56); }
+        .wt-cardNoTitle .wt-cardRoom { visibility: hidden; }
+        .wt-page h3.wt-cardFilm { margin: 0 0 .4em; color: inherit; font-size: 1.32em; }
+        .wt-cardPeople { font-size: .93em; }
+        .wt-cardPeople > span + span::before { content: '·'; margin-inline-end: .75em; }
+        .wt-cardOwner { display: flex; align-items: baseline; flex-wrap: wrap; gap: .15em .55em; }
+        .wt-cardRole { color: var(--wt-muted); }
+        .wt-cardFoot { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; padding: .8em .25em .1em; }
+        .wt-cardProgress { display: grid; grid-template-columns: 1fr auto; gap: .4em; font-size: .84em; }
+        .wt-cardProgress progress { width: 100%; height: 5px; grid-column: 1 / -1; appearance: none; border: 0; border-radius: 4px; overflow: hidden; background: var(--wt-surface); color: var(--wt-primary); }
+        .wt-cardProgress progress::-webkit-progress-bar { background: var(--wt-surface); }
+        .wt-cardProgress progress::-webkit-progress-value { background: var(--wt-primary); border-radius: inherit; }
+        .wt-cardProgress progress::-moz-progress-bar { background: var(--wt-primary); }
+        .wt-cardProgress [hidden], .wt-cardBackdrop[hidden] { display: none; }
+        .wt-cardActions { display: flex; justify-content: flex-end; }
+        .wt-cardHasProgress .wt-cardActions { margin-top: .75em; }
+        .wt-adminRoom:not(.wt-cardHasProgress) .wt-cardFoot { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: end; align-items: center; gap: .5em; }
+        .wt-adminRoom:not(.wt-cardHasProgress) .wt-cardProgress { display: block; }
+        .wt-cardFoot > .wt-roomFeedback { grid-column: 1 / -1; }
+        .wt-cardActions .wt-action { min-height: 44px; margin: 0; }
+
     </style>
 
     <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page settingsContainer">
@@ -275,14 +314,16 @@
                 <h3 class="wt-subHeading">接受邀请</h3>
             <div class="wt-formGrid">
                 <div class="inputContainer wt-fieldWide">
-                    <input is="emby-input" id="wtInvitationAcceptCode" label="邀请码" placeholder="输入对方发来的邀请码" autocomplete="off" />
+                    <input is="emby-input" id="wtInvitationAcceptCode" label="邀请码" placeholder="输入对方发来的邀请码" autocomplete="off" aria-describedby="wtInvitationAcceptError" />
+                    <p id="wtInvitationAcceptError" class="fieldDescription wt-formHint error" role="alert" hidden></p>
                 </div>
             </div>
             <div class="wt-formActions">
                 <button is="emby-button" id="wtAcceptInvitation" type="button" class="raised button-submit">接受邀请</button>
             </div>
             </div>
-            <div id="wtInvitations" class="wt-roomList" aria-live="polite"></div>
+            <p id="wtInvitationListStatus" class="fieldDescription" role="status" hidden></p>
+            <div id="wtInvitations" class="wt-roomList" aria-live="polite" hidden></div>
         </div>
 
         </div>
@@ -292,7 +333,6 @@
                 <div>
                     <h2 id="wtRoomsHeading">房间</h2>
                 </div>
-                <button is="emby-button" id="wtRefresh" type="button" class="raised raised-outline wt-refresh">刷新</button>
             </div>
             <p id="wtRoomsStatus" class="fieldDescription wt-roomsStatus" role="status" aria-live="polite" hidden></p>
             <div id="wtRooms" class="wt-roomList" aria-busy="true"></div>
@@ -306,6 +346,7 @@
                 <li id="wtHelpStep3">看到“同步中”后即可一起观看。</li>
             </ol>
             <p class="fieldDescription">一方暂时不在线时，房间会等待；恢复后会继续尝试同步。</p>
+            <p id="wtLanguageStatus" class="fieldDescription error" role="status" aria-live="polite" hidden></p>
         </div>
 
         <div class="verticalSection wt-section" id="wtSettingsSection" hidden style="display:none">
@@ -378,7 +419,7 @@
                         <span>GitHub 项目</span>
                     </a>
                 </div>
-                <p class="fieldDescription wt-updateHelp">在 Emby 计划任务的“Watch Together 更新检查”中调整检查时间或手动运行。安装后重启 Emby 生效。</p>
+                <p class="fieldDescription wt-updateHelp">在 Emby 计划任务的“Watch Together → Update Plugin”中调整检查时间或手动运行。安装后重启 Emby 生效。</p>
             </div>
             </div>
             </div>

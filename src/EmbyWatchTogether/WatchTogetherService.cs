@@ -10,7 +10,11 @@ using MediaBrowser.Model.Services;
 namespace Emby.Plugins.WatchTogether
 {
     [Route("/WatchTogether/Rooms", "GET")]
-    public class GetRoomsRequest { }
+    public class GetRoomsRequest
+    {
+        public string Scope { get; set; }
+        public bool IncludePlayback { get; set; }
+    }
 
     [Route("/WatchTogether/Rooms", "POST")]
     public class CreateRoomRequest
@@ -20,6 +24,8 @@ namespace Emby.Plugins.WatchTogether
         public string[] ParticipantUserIds { get; set; }
 
         public string PrimaryUserId { get; set; }
+
+        public string Language { get; set; }
     }
 
     [Route("/WatchTogether/Invitations", "POST")]
@@ -41,6 +47,8 @@ namespace Emby.Plugins.WatchTogether
     public class AcceptInvitationRequest
     {
         public string Code { get; set; }
+
+        public string Language { get; set; }
     }
 
     [Route("/WatchTogether/Rooms/{Id}", "DELETE")]
@@ -95,6 +103,12 @@ namespace Emby.Plugins.WatchTogether
         public string Text { get; set; }
     }
 
+    [Route("/WatchTogether/NotificationLanguage", "POST")]
+    public class SetNotificationLanguageRequest
+    {
+        public string Language { get; set; }
+    }
+
     [Route("/WatchTogether/Users", "GET")]
     public class GetUsersRequest { }
 
@@ -122,19 +136,43 @@ namespace Emby.Plugins.WatchTogether
     {
         internal Plugin RuntimePlugin { get; set; }
 
+        public object Post(SetNotificationLanguageRequest request)
+        {
+            var userId = CurrentUserId();
+            if (string.IsNullOrWhiteSpace(userId)) throw new UnauthorizedAccessException("authenticated user required");
+            if (request == null || (request.Language != "zh" && request.Language != "en" && request.Language != "zh-Hant"))
+                throw new ArgumentException("unsupported language");
+            var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
+            if (plugin.NotificationLanguages == null) throw new ServiceUnavailableException("notification language storage unavailable");
+            plugin.NotificationLanguages.SetLanguage(userId, request.Language);
+            return new { Language = request.Language };
+        }
+
         public object Get(GetRoomsRequest request)
         {
             var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
 
             string currentUserId = CurrentUserId();
             bool admin = IsAdmin();
+            var scope = request?.Scope;
+            if (!string.IsNullOrEmpty(scope) && scope != "mine" && scope != "all")
+                throw new ArgumentException("unsupported room scope");
+            if (scope == "all" && !admin)
+                throw new UnauthorizedAccessException("administrator required");
+            bool cards = request?.IncludePlayback == true;
+            if (cards && (!admin || scope != "all"))
+                throw new UnauthorizedAccessException("administrator overview required");
+            bool mine = scope == "mine" || !admin;
             return plugin.Rooms.ListRooms().Select(r =>
             {
-                if (!admin && !r.HasParticipant(currentUserId)) return null;
-                var runtime = plugin.Rooms.GetRuntime(r.Id);
+                if (mine && !r.HasParticipant(currentUserId)) return null;
+                // Read the selected pair and the room phase from the same engine cycle.
+                using var access = cards ? plugin.Rooms.TryEnterRoom(r.Id) : null;
+                var runtime = cards ? access?.Runtime : plugin.Rooms.GetRuntime(r.Id);
                 if (runtime == null) return null;
                 return new
                 {
+                    Playback = cards ? CardPlayback(r, runtime, GetStatusReason(plugin, r, runtime)) : null,
                     RoomId = r.Id,
                     Name = r.Name,
                     State = runtime.State.ToString(),
@@ -154,6 +192,40 @@ namespace Emby.Plugins.WatchTogether
             }).Where(x => x != null).ToList();
         }
 
+        private static object CardPlayback(Room room, RoomRuntime runtime, string reason)
+        {
+            if (reason != "watching" && reason != "aligning") return null;
+            var pair = runtime.CommandSnapshots;
+            if (pair == null || pair.Count != 2 || room.JoinedParticipantUserIds.Count != 2 ||
+                !RoomEligibility.IsPairEligible(pair) || string.IsNullOrEmpty(runtime.SyncItemId) ||
+                !pair.TryGetValue(room.PrimaryUserId, out var primary)) return null;
+
+            var now = DateTimeOffset.UtcNow;
+            var oldest = now.AddSeconds(-10);
+            var activeSince = now.AddSeconds(-SessionSelector.StaleSessionTimeoutSeconds);
+            if (!room.JoinedParticipantUserIds.All(id => pair.TryGetValue(id, out var sample) &&
+                sample.Online && sample.HasPlayState && sample.ObservedAtUtc >= oldest &&
+                sample.LastActivityDateUtc >= activeSince &&
+                string.Equals(sample.ItemId, runtime.SyncItemId, StringComparison.OrdinalIgnoreCase))) return null;
+
+            var other = pair.First(entry =>
+                !string.Equals(entry.Key, room.PrimaryUserId, StringComparison.OrdinalIgnoreCase)).Value;
+            var expires = pair.Values.Min(s => new[] {
+                s.ObservedAtUtc.AddSeconds(10),
+                s.LastActivityDateUtc.AddSeconds(SessionSelector.StaleSessionTimeoutSeconds),
+            }.Min());
+            return new
+            {
+                ItemId = primary.ItemId,
+                PrimaryPaused = primary.IsPaused,
+                OtherPaused = other.IsPaused,
+                Percent = primary.HasPosition && primary.RunTimeTicks > 0
+                    ? (int?)Math.Round(100 * Math.Min(1d, primary.PositionTicks / (double)primary.RunTimeTicks),
+                        MidpointRounding.AwayFromZero) : null,
+                ValidForMs = Math.Max(0, (int)(expires - now).TotalMilliseconds),
+            };
+        }
+
         public object Post(CreateRoomRequest request)
         {
             RequireAdmin();
@@ -171,7 +243,8 @@ namespace Emby.Plugins.WatchTogether
                 name: request.Name,
                 adminUserId: CurrentUserId(),
                 participantUserIds: request.ParticipantUserIds ?? Array.Empty<string>(),
-                primaryUserId: request.PrimaryUserId);
+                primaryUserId: request.PrimaryUserId,
+                language: request.Language);
 
             return new
             {
@@ -271,7 +344,8 @@ namespace Emby.Plugins.WatchTogether
                     string.Empty,
                     invitation.Name,
                     invitation.CreatorUserId,
-                    CurrentUserId()),
+                    CurrentUserId(),
+                    language: request?.Language),
                 DateTimeOffset.UtcNow);
             if (!result.Succeeded)
             {
@@ -869,6 +943,10 @@ namespace Emby.Plugins.WatchTogether
                 // Explicit administrator messages remain independent of automatic notices.
                 if (requireSyncNotifications && !IsSyncNotificationsEnabled(plugin))
                     return DisplayMessageResult.Skipped;
+                // Custom administrator messages are sent verbatim.
+                var language = requireSyncNotifications ? NotificationText.LanguageFor(message.UserId, plugin.GetNotificationLanguage) : "zh";
+                string header = requireSyncNotifications ? NotificationText.Translate(message.Header, message.UserId, _ => language) : message.Header;
+                string text = requireSyncNotifications ? NotificationText.Translate(message.Text, message.UserId, _ => language) : message.Text;
                 var messageIssuer = plugin.Issuer as IMessageIssuer;
                 if (messageIssuer != null)
                 {
@@ -877,8 +955,8 @@ namespace Emby.Plugins.WatchTogether
                         message.ControllingUserId,
                         message.UserId,
                         snapshot,
-                        message.Header,
-                        message.Text,
+                        header,
+                        text,
                         message.TimeoutMs,
                         DateTimeOffset.UtcNow,
                         out _) ? DisplayMessageResult.Sent : DisplayMessageResult.Failed;
@@ -889,8 +967,8 @@ namespace Emby.Plugins.WatchTogether
                     plugin.Bridge.SendDisplayMessageAsync(
                             message.ControllingUserId,
                             snapshot.SessionId,
-                            message.Header,
-                            message.Text,
+                            header,
+                            text,
                             message.TimeoutMs,
                             timeout.Token)
                         .GetAwaiter().GetResult();
@@ -1071,7 +1149,7 @@ namespace Emby.Plugins.WatchTogether
                 // A missing/deleted user must not make a room response fail.
             }
 
-            return "未知用户";
+            return null;
         }
 
         private static string ToPublicError(string error)

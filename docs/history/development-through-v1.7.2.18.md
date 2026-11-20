@@ -1,32 +1,32 @@
-> 历史快照：保留截至 v1.7.2.18 发布时的原始记录。下文“当前”“本次”“待验收”等均指当时，不能当作今日状态。除归档后的相对链接外，正文未改写。现行入口见[文档索引](../README.md)。
+> 历史快照：保留截至 v1.7.2.18 发布时的原始记录。下文“当前”“本次”“待验收”等均指当时，不能当作今日状态。现行入口见[文档索引](../README.md)。
 
 # Watch Together 当前排期
 
 ## 当前状态
 
-当前正式版与公开测试版见[发布日志索引](../releases/README.md)。用户已于 2026-11-11 将 1.7.2.13 总体验收定为通过，并继续一周观察；缺少逐项实机记录不否定这一用户结论。后续页面版本的验证范围见[客户端兼容性记录](../client-compatibility.md)。strict-follow 和多人同步观看仍无限期延期，见[路线图](../roadmap.md)。
+当前正式版和测试版见[发布日志](../releases/README.md)，客户端验证范围见[兼容性记录](../client-compatibility.md)。strict-follow 和多人同步仍无限期延期，见[路线图](../roadmap.md)。
 
-2026-11-12：用户确认四轮页面预览可进入新的测试版，并继续在日常使用中观察真实交互。1.7.2.15 仅整合文案精简、设置局部间距、独立列表失败反馈和同级标题及其回归测试，不改同步引擎。管理员页面延后到当前测试线转正式版之后，另行确认；本次不安排额外单独页面验收，也不将已有自动化或用户预览确认写成真实客户端全量验收。
+2026-11-12：[1.7.2.15 测试版](../releases/v1.7.2.15.md)包含文案、间距、独立列表失败反馈和标题调整，同步引擎沿用此前版本。
 
 2026-11-12：[1.7.2.16 已公开发布为 beta/prerelease](../releases/v1.7.2.16.md)，包含成功通知、创建表单和保存阶段结果反馈，现有 toast 备用提示保持不变。保存故障分支以自动测试为依据，未人工注入真实服务器故障。公开发布不等于现有服务器已安装该签名资产，也不代表正式版发布；源码与工作流见[发布状态核查](../maintenance/v1.7.2.16-beta-publication.md)。
 
-2026-11-12：用户已确认操作文案预览，整理为 [1.7.2.17 测试版](../releases/v1.7.2.17.md)。仅缩短操作文案并区分结束/删除反馈，不改业务、布局或 toast 备用提示。真实故障分支未人工注入；本次仅发布，现有预览保持不变。管理员页面仍在正式版之后另行确认。
+2026-11-12：[1.7.2.17 测试版](../releases/v1.7.2.17.md)缩短操作文案并区分结束和删除反馈。自动测试覆盖失败分支。
 
-2026-11-12：[1.7.2.18 测试版](../releases/v1.7.2.18.md)整合已确认的插件卡片与双人图标，以及普通用户角色读取和 V21 缓存更新。用户已确认网页普通用户正常，随后确认 V21 解决新版 Windows 客户端普通账号误报。角色失败、账号/服务器切换等分支仍以自动测试为依据。本轮只发布，不再次安装或重启现有预览；管理员页面仍延后到正式版之后。详细事实持续记录于[角色修复调查](../maintenance/nonadmin-role-access.md)、经验和兼容性文档。
+2026-11-12：[1.7.2.18 测试版](../releases/v1.7.2.18.md)加入插件卡片和双人图标，修正普通用户角色读取并更新为 V21 缓存键。角色失败与账号或服务器切换由自动测试覆盖。详见[角色修复调查](../maintenance/nonadmin-role-access.md)。
 
 ## 2026-10-19 排期与证据（历史）
 
 以下内容保留当时的版本、源码身份和验收记录，不代表当前发布状态。
 
-当时正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，已于 2026-10-18 完成验收、签名发布与下载后独立核验，Latest 指向该版本。原服务器单页界面、同步、诊断和更新设置为当时基线。
+当时正式版为 [`v1.6.1.0`](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)，已于 2026-10-18 完成验收、签名发布与下载后独立核验，Latest 指向该版本。旧版单页界面、同步、诊断和更新设置为当时基线。
 
-当时正式版 UI 来源为 `a1408e0` 的原服务器页面，`f294c67` 仅提供其上的 Phase E 诊断增量；S116 控件契约见 [`native-controls-plan.md`](../native-controls-plan.md)。早期 UI VNext 为已撤回的历史候选。
+当时正式版 UI 来源为 `a1408e0` 的旧版页面，`f294c67` 仅提供其上的 Phase E 诊断增量；S116 控件契约见 [`native-controls-plan.md`](../native-controls-plan.md)。早期 UI VNext 为已撤回的历史候选。
 
-用户后续确认 S122 的原生分页、媒体与头像布局并授权测试发布；当时 beta 为 `v1.7.0.1`，在正式版同步核心上增加上述界面能力并修正页面兼容性，现行 Token、更新通道和诊断功能保留。S122 契约见 [`native-pages-media-plan.md`](../native-pages-media-plan.md)，发布与真实双端待验收范围见[测试版维护记录](../maintenance/v1.7.0.1-beta-publication.md)。
+[v1.7.0.1 测试版](../maintenance/v1.7.0.1-beta-publication.md)在 v1.6.1.0 的同步核心上增加原生分页、媒体和头像，并修正页面兼容性。显示契约见[原生分页方案](../native-pages-media-plan.md)。
 
 本轮排期已完成：S116–S118 原生控件与页面适配 → S119 候选准备 → S120 文档受众整理 → S121 stable 发布与核验。具体验收边界见 [`client-compatibility.md`](../client-compatibility.md)，发布证据见[维护记录](../maintenance/v1.6.1.0-publication.md)。
 
-S124 的 V16 页面修正完成本地部署及用户界面确认后，已完成 [v1.7.0.1 beta 签名发布与下载核验](../maintenance/v1.7.0.1-beta-publication.md)。客户端原始临时卡住过程尚未复现，真实双端功能继续收集实际反馈。
+S124 的 V16 页面修正见 [v1.7.0.1 beta 签名发布与下载核验](../maintenance/v1.7.0.1-beta-publication.md)。客户端原始临时卡住过程尚未复现，真实双端功能继续收集实际反馈。
 
 浏览器回归已通过 [PR #24](https://github.com/hope140/EmbyWatchTogether/pull/24) 合入 `beta`，与 .NET 检查并行运行；首次云端检查的 89 项浏览器测试、545 项 .NET 测试、构建与四组脚本门禁通过，报告已上传并下载核验。运行和报告查看方式见[浏览器测试说明](../../tests/ui/README.md)。
 
@@ -41,9 +41,9 @@ strict-follow 和多人同步观看已无限期延期，状态见 [`roadmap.md`]
 
 - 远端 `beta`：`a1408e03203201501690544df64509d0926164ec`，版本 `1.6.0.5`。
 - 远端 `main` / Latest stable：`c6568f56b16e03fa62a45265ddb7589006418847` / `v1.5.0.0`。
-- Phase E：`codex/playback-stability`，`5730084b791a63867ebf50571681c7eb230db08d`；已有历史部署记录，自动测试与真实客户端验收分别记录。
+- Phase E：`codex/playback-stability`，`5730084b791a63867ebf50571681c7eb230db08d`；已自动测试与真实客户端验证分别记录。
 - UI VNext：`codex/stack-97-ui-native-tabs-acceptance`，`68908b0`；已实现 Emby 原生分页、主体控件与本地浏览器门禁，历史 mock 结果不替代当前集成状态的真实宿主验收。
-- S110：`codex/stack-110-handoff-diagnostics` 中未提交的诊断候选；2026-10-18 只读核验 NAS 当前 DLL SHA-256 与原部署记录一致，为 `513dda4032d3c06c1d66091610e83e5569fcc810c2982abb05aed2adcb36d535`。此证据证明候选文件身份，不证明重复跳集根因已修复。
+- S110 增加换集诊断日志，用于关联目标、发送尝试和确认事件。
 
 ## 执行约定
 
@@ -55,13 +55,13 @@ strict-follow 和多人同步观看已无限期延期，状态见 [`roadmap.md`]
 
 ## PR Stack 计划
 
-### S116：原服务器单页上的原生控件调整（历史）
+### S116：旧版单页上的原生控件调整（历史）
 
 基础为本地 beta `90feffd`，按用户最新确认恢复 UI 基线，后端保持原已审核实现。实现、所有权、验证和回滚的完整契约见 `native-controls-plan.md`。以下 S111–S115 为历史整合过程；其三页 UI 布局不再是当前交付方案。
 
 ### S111：收录已部署的换集诊断候选
 
-- 目标：将 NAS 当前候选对应的 S110 源码纳入可审核本地提交。
+- 目标：收录 S110 的换集诊断源码。
 - 基础分支：`beta@a1408e0`；前置依赖：无。
 - 允许修改及所有权：`HandoffTrace.cs`、`SessionBridgeCommandIssuer.cs`、`SyncEngine.cs`、对应两项测试、`docs/handoff-diagnostics.md`、本排期文档。
 - 禁止修改：UI、版本、更新器、持久化、会话桥接协议、发布工作流及其他文件。
@@ -100,7 +100,7 @@ strict-follow 和多人同步观看已无限期延期，状态见 [`roadmap.md`]
 - 目标：在最终集成状态构建、验证并合入本地 beta，记录正式版剩余验收。
 - 基础分支：S113 已审核 commit；前置依赖：S113。
 - 允许修改及所有权：README、架构、技术说明、路线图、UI 验证记录、相关经验文档；产品修正必须退回对应 Stack。
-- 禁止修改：版本、tag、Release、签名、远端、NAS 文件和运行服务。
+- 禁止修改：版本、tag、Release、签名、远端。
 - 实现边界（历史）：本轮完成本地集成；当时的正式版仍等待 UI 与真实集成验收，不将旧部署或 mock 结果当作新构建验收。
 - 验收：完整 .NET tests/build、现有四组 PowerShell 门禁、本地 UI 浏览器测试、完整 diff 审核及干净 Git 状态；本地 beta 包含所有审核提交。
 - 测试命令：`pwsh -NoProfile -File scripts/build.ps1 -Configuration Release`；`tests/build-path-guard.tests.ps1`、`tests/release-signing.tests.ps1`、`tests/release-workflow.tests.ps1`、`tests/ci-workflow.tests.ps1`；`npm test`；`git diff --check`。
@@ -113,7 +113,7 @@ strict-follow 和多人同步观看已无限期延期，状态见 [`roadmap.md`]
 - 基础分支：`beta@e0f3a02`；前置依赖：S112 `f294c67`，完整 .NET 544/544、主线程交叉窄测 5/5。
 - 主线程文件所有权：跨分支 merge、README、架构、技术/版本说明、当前排期、经验及策略记录；同步产品代码保持 S112 审核结果。
 - UI 子任务允许修改及所有权：`Plugin.cs` 的页面缓存键、`Web/Configuration/watchtogether.html` / `watchtogether.js`、`PluginPagesTests.cs`、`tests/ui/fixture/server.js` / `specs/watchtogether.spec.js`、`docs/ui-vnext-plan.md` / `ui-vnext-verification.md`。
-- 禁止修改：同步引擎、Session/Room/邀请/Token/更新器 API、依赖和锁文件、程序集版本、发布工作流、远端及 NAS。
+- 禁止修改：同步引擎、Session/Room/邀请/Token/更新器 API、依赖和锁文件、程序集版本、发布工作流、远端。
 - 实现边界：Emby 原生风格、控件与现有 HTML/AMD 不变；接入 `Recovering` 标签和 `transient_recovery` 原因，保留两种恢复窗口、Handoff、drift 的各自诊断与脱敏导出；页面/控制器/route 缓存键统一 V5。
 - 验收：保留 Token、权限、账号及页面生命周期门禁；参与者 Recovery 的房间和诊断信息一致，主用户缺失仍显示原 beta 等待/停止状态；新诊断字段不导出原始身份，320px 展开诊断无横向溢出，浅深主题可读。
 - 测试命令：`node --check src/EmbyWatchTogether/Web/Configuration/watchtogether.js`；页面/诊断 .NET 过滤测试；`npm ci` / `npm test`（`tests/ui`）；最终 `scripts/build.ps1 -Configuration Release` 和四组 PowerShell 门禁；`git diff --check`。
@@ -127,12 +127,11 @@ strict-follow 和多人同步观看已无限期延期，状态见 [`roadmap.md`]
 2. 最终构建在真实 Emby 中验证桌面/手机、浅深主题、管理员/普通用户、缓存、邀请/设置、Recovering/换片/漂移；记录具体构建身份及结果。
 3. 文档整理后由主线程执行最终构建、stable tag/Release 和发布后闭环核验。
 
-用户已于 2026-10-18 确认本轮验收通过。当前页面沿用原服务器内容，不增加媒体展示区；真实客户端的具体型号、版本和时长不在此文档中补写。
+该阶段沿用单页结构，未引入媒体展示区。
 
 ## S111–S115 历史整合状态
 
 - S111：`98ace2b`，已收录原 S110 六项精确文件；issuer/SyncEngine 相关 173 项测试通过。原 S110 工作区未提交改动完整保留。
-- 部署前 NAS 文件身份：原 S110 安装 DLL 与本机产物及历史部署 receipt 的 SHA-256 三者一致。之后部署过 S115 候选；当前候选以 S116 记录为准。
 - S112：`f294c67`，按用户已确认的 beta 主用户规则整合 Phase E，完整 .NET 544/544、主线程交叉窄测 5/5 通过；首次 535/541 和六项失败为已解决的历史记录。
 - 已确认策略：主用户缺失走 beta 的 2 秒停止观察与 10 秒晚到换集识别；Recovery 仅处理非主用户参与者缺失。参与者恢复期间主用户发生变化，先交还原有停止/Handoff 路径，不在 Recovery 内迁移身份。
 - S113：`2f3f481`，从 S111 整合既有原生分页、表单、开关、列表及按钮，保留 beta Token 功能并完成生命周期收口。子代理执行的 .NET 页面/服务测试 56 项通过，UI 浏览器 35 项通过，最后的账号立即操作隔离窄测 1 项通过；随后由 S114 独立完成回归。

@@ -38,6 +38,11 @@ function parseRequest(text, path) {
   check(Number.isSafeInteger(r.ciRunId) && r.ciRunId > 0, 'Source CI run ID is invalid.');
   check(typeof r.title === 'string' && r.title.trim() === r.title && r.title.length > 0 &&
     r.title.length <= 200 && !/[\u0000-\u001f\u007f]/.test(r.title), 'Release title is invalid.');
+  // Legacy retries retain their reviewed title only after the immutable original is verified in validate().
+  if (path === originalPath) {
+    const expectedTitle = `${r.tag} ${r.channel === 'stable' ? '正式版' : '测试版'}`;
+    check(r.title === expectedTitle, 'Release title must match the tag and channel.');
+  }
   check(r.notesPath === `docs/releases/${r.tag}.md`, 'Notes path must be derived from the tag.');
   check(typeof r.notesSha256 === 'string' && /^[0-9a-f]{64}$/.test(r.notesSha256), 'Notes SHA-256 is invalid.');
   return r;

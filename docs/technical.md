@@ -44,7 +44,7 @@
 - `PATCH`：对现有功能进行一组明确、面向用户的兼容性修复，且不引入新的功能线。
 - `REVISION`：同一修复版本内的小范围、低风险、可独立部署的修复、边界保护、日志/提示调整、打包或更新流程修正。
 
-递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。当前正式版与测试版状态见[发布日志索引](releases/README.md)。历史版本整理不移动、重命名或重建已有 tag。
+递增高位时，右侧各段归零，例如 `MAJOR` 递增为 `2.0.0.0`，`MINOR` 递增为 `1.3.0.0`，`PATCH` 递增为 `1.2.1.0`，`REVISION` 递增为 `1.2.0.15`。项目文件中的 `Version`、`FileVersion`、`AssemblyVersion` 必须完全一致且不带 `v`；Git tag 使用 `v` 前缀并与三项版本一致，例如 `1.2.0.15` 对应 `v1.2.0.15`。正式版至少改变 MAJOR、MINOR、PATCH 中的一段，第四段仅递增为 beta/prerelease。示例：`1.4.0.0` -> `1.4.0.1`（beta）-> `1.4.1.0`（stable）。测试版沿用当前正式版前三段并递增第四段。当前正式版与测试版状态见[发布日志索引](releases/README.md)。历史版本整理不移动、重命名或重建已有 tag。
 
 完整的递增条件、归零规则、历史版本兼容和发布检查见[正式版本号规则](versioning.md)。
 
@@ -75,6 +75,8 @@ dist/EmbyWatchTogether.zip
 ZIP 内 DLL 位于根目录，解压后可直接按[用户文档中的安装步骤](../README.md#安装)复制。脚本使用 `.publish/` 作为临时发布目录；这些目录和二进制输出均已被 `.gitignore` 忽略。自定义 `-OutputDirectory` 必须避开仓库源码、测试、脚本、文档、协作配置和 `.publish/`；输出与暂存路径及其祖先不得经过符号链接或 reparse point。可先加 `-ValidatePathsOnly` 只读验证路径；默认 `dist/` 和独立的仓库外物理目录仍受支持。
 
 ## 签名发布流程（维护者）
+
+内部预览标识、连续测试版编号和中英文文档同步见[版本规则](versioning.md)。新版签名流程会检查发布源提交的两份 README，以及发布索引中对应通道的当前版本链接。
 
 - `scripts/release/New-ReleaseSigningKey.ps1`：在仓库外生成 RSA PKCS#8 私钥和 `RSAKeyValue` 公钥；私钥不得写入仓库。
 - `scripts/release/Sign-ReleaseManifest.ps1`：检查 DLL 名称、程序集名和版本，流式计算大小与 SHA-256，并生成 canonical manifest 与 detached signature。
@@ -140,3 +142,7 @@ docs/                          当前实现说明、排错和协作流程
 - [返回用户文档 README.md](../README.md)
 - [当前架构](architecture.md)
 - [完整状态机、测试范围和人工验收步骤](watch-together-emby-plugin-plan.md)
+
+### 后台管理的列表范围
+
+v1.7.3.3 的[后台管理](maintenance/admin-management-preview.md)新增 `GET /WatchTogether/Rooms?Scope=mine|all`。mine 对管理员和普通用户均仅返回本人参与的房间；all 服务端要求管理员；不支持的 scope 拒绝。未提供 scope 保持原有管理员全量、普通成员过滤的兼容语义。页面明确选择 scope；后台通过仅限管理员的 IncludePlayback 摘要读取已选双端会话，可见卡片按用户权限加载并复用影片元数据；结束同步沿用单房间接口与独立鉴权。普通用户的直接他人接口请求仍被拒绝。真实宿主的双端播放和高负载行为仍待独立实测。

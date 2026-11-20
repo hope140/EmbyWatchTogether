@@ -11,7 +11,7 @@ async function prepareCreate(page, mode = 'success') {
     fixture.setRooms([]);
     fixture.creationCompleted = false;
     ApiClient.getJSON = path => {
-      if (mode === 'refresh-fails' && fixture.creationCompleted && path === 'WatchTogether/Rooms') {
+      if (mode === 'refresh-fails' && fixture.creationCompleted && path.startsWith('WatchTogether/Rooms')) {
         return Promise.reject({ status: 503 });
       }
       return originalGet(path);
