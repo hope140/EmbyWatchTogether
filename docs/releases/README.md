@@ -4,7 +4,7 @@
 
 ## 当前正式版
 
-- [v1.7.3.0 发布说明](v1.7.3.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0)：正式版。
+- [v1.8.0.0 发布说明](https://github.com/hope140/EmbyWatchTogether/blob/v1.8.0.0/docs/releases/v1.8.0.0.md) · [GitHub Release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0)：正式版。
 
 ## 当前测试版
 
@@ -13,6 +13,7 @@
 
 ## 历史正式版
 
+- [v1.7.3.0 说明](v1.7.3.0.md) · [下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.0)
 - [v1.7.1.0 说明](v1.7.1.0.md) · [下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.1.0)
 - [v1.6.1.0](v1.6.1.0.md) · [下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.6.1.0)
 - [v1.5.0.0](v1.5.0.0.md) · [下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.5.0.0)
