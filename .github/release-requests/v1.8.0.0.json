@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "tag": "v1.8.0.0",
+  "channel": "stable",
+  "keyId": "prod-2026-08",
+  "sourceSha": "36a7918beb0b7858f4a64dc95aa7d3615c9573b3",
+  "ciRunId": 44712241969,
+  "title": "v1.8.0.0 正式版",
+  "notesPath": "docs/releases/v1.8.0.0.md",
+  "notesSha256": "045a98111ffc8150d8ab357e31901695b1b12ae3ee2bb68e8ca42d8614e1ad8b"
+}
