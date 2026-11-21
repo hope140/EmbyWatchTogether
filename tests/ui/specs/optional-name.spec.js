@@ -90,3 +90,68 @@ test('接受邀请成功使用宿主 toast 并清空输入', async ({page}) => {
   await expect(page.locator('#wtInvitationAcceptCode')).toHaveValue('');
   await expect(page.locator('#wtInvitationStatus')).toBeEmpty();
 });
+
+for (const outcome of ['expired', 'accepted']) {
+  test(`server-confirmed ${outcome} invitation removes the code and copy action`, async ({ page }) => {
+    await invitePage(page);
+    await page.locator('#wtCreateInvitation').click();
+    await expect(page.locator('#wtInvitations')).toBeVisible();
+    await page.evaluate(() => {
+      window.__wtFixture.setInvitations([]);
+      window.__wtFixture.setInvitationListFailure(true);
+      window.__wtFixture.refresh();
+    });
+    await expect(page.locator('#wtInvitationListStatus')).toBeVisible();
+    await expect(page.locator('#wtInvitationCodePanel')).toBeVisible();
+    await expect(page.locator('#wtInvitationStatus')).toBeEmpty();
+    await expect(page.locator('#wtInvitationRoomLink')).toBeHidden();
+
+    await page.evaluate(outcome => {
+      const fixture = window.__wtFixture;
+      if (outcome === 'accepted') {
+        fixture.setRooms([{ RoomId: 'accepted-room', Name: 'Accepted room', PrimaryUserId: 'user-a',
+          ParticipantUserIds: ['user-a', 'user-b'], JoinedParticipantUserIds: ['user-a', 'user-b'] }]);
+      }
+      fixture.setInvitationListFailure(false);
+      fixture.refresh();
+    }, outcome);
+    await expect(page.locator('#wtInvitationCodePanel')).toBeHidden();
+    await expect(page.locator('#wtInvitationCode')).toBeEmpty();
+    await expect(page.locator('#wtCopyInvitationCode')).toBeDisabled();
+    await expect(page.locator('#wtInvitationStatus')).toHaveText('邀请码不存在或已失效。');
+    if (outcome === 'accepted') {
+      await expect(page.locator('#wtInvitationRoomLink')).toHaveText('前往房间');
+      await expect(page.locator('#wtInvitationRoomLink')).toHaveAttribute('href', /RoomsV35/);
+      await expect(page.locator('#wtInvitationRoomLink')).toBeVisible();
+      await page.evaluate(() => {
+        window.__wtFixture.setRoomsFailure(true);
+        window.__wtFixture.refresh();
+      });
+      await expect(page.locator('#wtInvitationRoomLink')).toBeHidden();
+    } else {
+      await expect(page.locator('#wtInvitationRoomLink')).toBeHidden();
+    }
+  });
+}
+
+test('list response started before creation cannot invalidate the new code', async ({ page }) => {
+  await invitePage(page);
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.view.view._wtInvitationListRequest)).toBeNull();
+  await page.evaluate(() => {
+    const get = ApiClient.getJSON;
+    ApiClient.getJSON = function (path) {
+      if (path === 'WatchTogether/Invitations' && !window.resolveOldInvitationList) {
+        return new Promise(resolve => { window.resolveOldInvitationList = resolve; });
+      }
+      return get(path);
+    };
+    window.__wtFixture.refresh();
+  });
+  await expect.poll(() => page.evaluate(() => typeof window.resolveOldInvitationList)).toBe('function');
+  await page.locator('#wtCreateInvitation').click();
+  await expect(page.locator('#wtInvitationCodePanel')).toBeVisible();
+  await page.evaluate(() => window.resolveOldInvitationList([]));
+  await expect(page.locator('#wtCreateInvitation')).toBeEnabled();
+  await expect(page.locator('#wtInvitationCodePanel')).toBeVisible();
+  await expect(page.locator('#wtInvitationStatus')).toBeEmpty();
+});

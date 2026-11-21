@@ -18,6 +18,69 @@ namespace Emby.Plugins.WatchTogether.Tests
     [Collection(TransportTimingCollection.Name)]
     public class StoppedPlaybackTests
     {
+        [Fact]
+        public void MissingAnchorPosition_WaitsForValidPositionBeforeSeeking()
+        {
+            using var f = new Fixture();
+            var runtime = f.Rooms.GetRuntime(f.Room.Id);
+            runtime.ResetToWaiting();
+            var primary = f.A.GetPlaySessionInfo("p1");
+            primary.PlayState.PositionTicks = null;
+
+            f.Poll(f.Now);
+            Assert.DoesNotContain(f.Issuer.Calls, call => call.command == RemoteCommands.Seek);
+
+            primary.PlayState.PositionTicks = 24 * SessionSnapshot.TicksPerSecond;
+            f.Poll(f.Now.AddSeconds(1));
+            Assert.Contains(("u2", RemoteCommands.Seek, primary.PlayState.PositionTicks), f.Issuer.Calls);
+
+            f.B.GetPlaySessionInfo("p2").PlayState.PositionTicks = primary.PlayState.PositionTicks;
+            f.Poll(f.Now.AddSeconds(2));
+            Assert.Equal(RoomState.Watching, runtime.State);
+        }
+
+        [Fact]
+        public void MissingFollowerPosition_CannotAcknowledgeSeekToRealZero()
+        {
+            using var f = new Fixture();
+            var runtime = f.Rooms.GetRuntime(f.Room.Id);
+            runtime.ResetToWaiting();
+            f.A.GetPlaySessionInfo("p1").PlayState.PositionTicks = 0;
+            f.Poll(f.Now);
+            Assert.Contains(("u2", RemoteCommands.Seek, (long?)0), f.Issuer.Calls);
+
+            var follower = f.B.GetPlaySessionInfo("p2");
+            follower.PlayState.PositionTicks = null;
+            Assert.False(PendingMatcher.Matches(RemoteCommands.Seek, 0, SessionSnapshot.FromSessionInfo(f.B)));
+            Assert.False(PendingMatcher.Matches(RemoteCommands.Seek, null, SessionSnapshot.FromSessionInfo(f.A)));
+            f.Poll(f.Now.AddSeconds(1));
+            Assert.Equal(BarrierStage.Seek, runtime.Barrier.Stage);
+            Assert.Contains("u2", runtime.Pending.Keys);
+
+            follower.PlayState.PositionTicks = 0;
+            f.Poll(f.Now.AddSeconds(2));
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Empty(runtime.Pending);
+        }
+
+        [Fact]
+        public void MissingPositionWhileWatching_DoesNotLookLikeManualSeek()
+        {
+            using var f = new Fixture();
+            var runtime = f.Rooms.GetRuntime(f.Room.Id);
+            var primary = f.A.GetPlaySessionInfo("p1");
+            primary.PlayState.PositionTicks = null;
+
+            f.Poll(f.Now);
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Empty(f.Issuer.Calls);
+
+            primary.PlayState.PositionTicks = 300 * SessionSnapshot.TicksPerSecond;
+            f.Poll(f.Now.AddSeconds(1));
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.Empty(f.Issuer.Calls);
+        }
+
         private sealed class Issuer : ICommandIssuer
         {
             internal readonly List<(string user, string command, long? position)> Calls = new();

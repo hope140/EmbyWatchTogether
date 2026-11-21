@@ -261,7 +261,7 @@ namespace Emby.Plugins.WatchTogether
 
         public string ItemId { get; set; }
 
-        public long TargetPositionTicks { get; set; }
+        public long? TargetPositionTicks { get; set; }
 
         public DateTimeOffset CreatedAtUtc { get; set; }
     }

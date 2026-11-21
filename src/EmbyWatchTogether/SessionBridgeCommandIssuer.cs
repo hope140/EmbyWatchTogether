@@ -147,8 +147,14 @@ namespace Emby.Plugins.WatchTogether
                             cancellationToken);
                         break;
                     case RemoteCommands.Seek:
+                        if (!positionTicks.HasValue)
+                        {
+                            error = "seek_position_unavailable";
+                            return false;
+                        }
+
                         _dispatch.Execute("playback:" + snapshot.SessionId,
-                            token => DispatchPlayback(snapshot, commandSources, () => _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks ?? 0, token)),
+                            token => DispatchPlayback(snapshot, commandSources, () => _bridge.SendSeekAsync(controllingUserId, snapshot.SessionId, positionTicks.Value, token)),
                             cancellationToken);
                         break;
                     default:
