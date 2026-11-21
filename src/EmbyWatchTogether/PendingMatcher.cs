@@ -37,8 +37,8 @@ namespace Emby.Plugins.WatchTogether
 
             if (string.Equals(command, RemoteCommands.Seek, StringComparison.Ordinal))
             {
-                long target = positionTicks ?? 0;
-                return Math.Abs(snapshot.PositionTicks - target) <= SyncConstants.SeekToleranceTicks;
+                return snapshot.HasPosition && positionTicks.HasValue &&
+                    Math.Abs(snapshot.PositionTicks - positionTicks.Value) <= SyncConstants.SeekToleranceTicks;
             }
 
             return false;

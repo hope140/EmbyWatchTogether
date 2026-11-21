@@ -395,7 +395,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "状态读取失败，将自动重试。": "Could not load the room status. Retrying automatically.",
         "正在读取当前播放状态…": "Reading current playback status...",
         "视频不一致": "Videos do not match",
-        "等待连接恢复": "Wait for connection to be restored",
+        "等待连接恢复": "Waiting for connection to recover",
+        "需要重新同步": "Resync needed",
+        "前往房间": "Go to room",
         "等待播放": "waiting to play",
         "正在同步\n": "Synchronizing\n",
         "正在一起观看\n": "Watching together\n",
@@ -855,6 +857,8 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         "正在读取当前播放状态…": "正在讀取當前播放狀態…",
         "视频不一致": "影片不一致",
         "等待连接恢复": "等待連線恢復",
+        "需要重新同步": "需要重新同步",
+        "前往房间": "前往房間",
         "等待播放": "等待播放",
         "正在同步\n": "正在同步\n",
         "正在一起观看\n": "正在一起觀看\n",
@@ -1922,11 +1926,29 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function setInvitationStatus(page, text, isError) {
+        page._wtInviteInvalidated = false;
+        syncInvitationRoomLink(page);
         var el = page.querySelector('#wtInvitationStatus');
         if (el) {
             el.textContent = text || '';
             el.setAttribute('role', isError ? 'alert' : 'status');
             el.classList.toggle('error', !!isError);
+        }
+    }
+
+    function syncInvitationRoomLink(page) {
+        var link = page.querySelector('#wtInvitationRoomLink');
+        if (!link) return;
+        var userId = page._wtIdentity && idKey(page._wtIdentity.user);
+        var belongsToRoom = page._wtInviteInvalidated && userId && (page._wtRooms || []).some(function (room) {
+            return (room.ParticipantUserIds || []).some(function (id) { return idKey(id) === userId; });
+        });
+        link.hidden = !belongsToRoom;
+        if (belongsToRoom) {
+            link.href = configurationPageUrl(page, routePageNames.rooms);
+            link.textContent = t('前往房间');
+        } else {
+            link.removeAttribute('href');
         }
     }
 
@@ -1953,6 +1975,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         }
         panel.hidden = !value;
         if (!value) {
+            if (copy) copy.disabled = true;
             code.textContent = '';
             expires.textContent = '';
             return;
@@ -2001,10 +2024,22 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     function loadInvitations(page) {
+        if (page._wtInvitationListRequest) return page._wtInvitationListRequest.promise;
         var request = {};
+        var createdCode = page._wtInvitationCode;
         page._wtInvitationListRequest = request;
         function update(list, failed) {
             if (page._wtInvitationListRequest !== request) return [];
+            page._wtInvitationListRequest = null;
+            if (!failed && createdCode && createdCode.id && page._wtInvitationCode === createdCode &&
+                !list.some(function (invitation) { return idKey(invitation.InvitationId) === idKey(createdCode.id); })) {
+                page._wtInvitationCode = null;
+                page._wtInvitationCopied = false;
+                renderInvitationCode(page);
+                setInvitationStatus(page, t('邀请码不存在或已失效。'), false);
+                page._wtInviteInvalidated = true;
+                syncInvitationRoomLink(page);
+            }
             page._wtInvitations = list;
             renderInvitations(page, list);
             var status = page.querySelector('#wtInvitationListStatus');
@@ -2014,11 +2049,13 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
             return list;
         }
-        return apiGet(page, 'WatchTogether/Invitations').then(function (list) {
-            return Array.isArray(list) ? update(list, false) : update([], true);
+        request.promise = apiGet(page, 'WatchTogether/Invitations').then(function (list) {
+            return Array.isArray(list) && list.every(function (invitation) { return invitation && invitation.InvitationId; })
+                ? update(list, false) : update([], true);
         }).catch(function () {
             return update([], true);
         });
+        return request.promise;
     }
 
     function createInvitation(page) {
@@ -2818,6 +2855,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         get media_mismatch() { return t('两位参与者的媒体信息不一致，请打开同一视频。'); },
         get media_handoff() { return t('正在让另一位参与者打开主用户当前视频，请稍候。'); },
         get handoff_failed() { return t('换片等待或对齐未完成，已停止自动恢复。请确认双方播放状态后使用重新同步。'); },
+        get participant_resync_failed() { return t('参与者重新同步未完成'); },
         get unsupported_playback_rate() { return t('播放速度不是 1 倍，请恢复正常速度后重试。'); },
         get waiting_for_playback() { return t('等待双方打开同一视频并开始播放。'); },
         get transient_recovery() { return t('正在等待临时掉线的参与者恢复。'); }
@@ -3027,6 +3065,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         info.description = statusReasonMessage(state.StatusReason);
         if (state.StatusReason === 'different_video' || state.StatusReason === 'media_mismatch') info.label = t('视频不一致');
         else if (state.StatusReason === 'transient_recovery' || state.State === 'Recovering') info.label = t('等待连接恢复');
+        else if (['stop_resume_confirmation_required', 'handoff_failed', 'participant_resync_failed'].indexOf(state.StatusReason) >= 0) {
+            info.label = t('需要重新同步');
+            info.needsResync = true;
+        } else if (state.StatusReason === 'command_failed') info.label = t('播放控制未完成');
         else if (state.StatusReason === 'member_left') info.label = t('等待参与者');
         else if (['snapshot_unavailable', 'snapshot_stale', 'server_unavailable'].indexOf(state.StatusReason) >= 0) info.label = t('状态暂不可用');
         else if (state.State === 'Waiting') info.label = t('等待播放');
@@ -3214,18 +3256,22 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         view.description.textContent = info.description;
         var media = page._wtMedia[room.RoomId];
         var state = page._wtRoomStates[room.RoomId];
-        var prefix = state && state.state && state.state.State === 'Barrier' ? t('正在同步\n') : t('正在一起观看\n');
+        var mediaLabel = state && state.state && state.state.StatusReason === 'watching' ? t('正在一起观看\n') : info.label;
         var hasTitle = !!(media && media.title);
         view.presentation.classList.toggle('wt-roomPresentation--media', hasTitle);
         view.waiting.hidden = hasTitle;
         view.waitingTitle.textContent = info.label === t('等待播放') ? t('等待双方打开视频') : info.label;
         view.waitingTitle.hidden = hasTitle;
-        view.mediaLabel.textContent = hasTitle ? prefix : media && media.unavailable ? t('媒体信息暂不可用') : '';
+        view.mediaLabel.textContent = hasTitle ? mediaLabel : media && media.unavailable ? t('媒体信息暂不可用') : '';
         view.mediaTitle.textContent = hasTitle ? media.heading || media.title : '';
         view.mediaDetail.textContent = hasTitle ? media.detail || '' : '';
         view.mediaDetail.hidden = !view.mediaDetail.textContent;
         view.description.hidden = hasTitle;
         view.media.hidden = !hasTitle && !(media && media.unavailable);
+        if (view.resyncButton) {
+            view.resyncButton.classList.toggle('button-submit', !!info.needsResync);
+            view.resyncButton.classList.toggle('raised-outline', !info.needsResync);
+        }
         if (view.pauseButton) {
             var primaryPause = !!(state && state.state && state.state.State === 'Watching' && state.state.StatusReason === 'watching');
             view.pauseButton.classList.toggle('button-submit', primaryPause);
@@ -3704,8 +3750,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             playback.setAttribute('role', 'group');
             playback.setAttribute('aria-label', t('播放控制'));
             groupHeading(playback, t('播放控制'));
+            var resyncButton = null;
             if (room.CurrentUserJoined && !room.IsAdmin) {
-                playback.appendChild(createActionButton(page, room, 'participantResync'));
+                resyncButton = createActionButton(page, room, 'participantResync');
+                playback.appendChild(resyncButton);
                 var resyncHint = document.createElement('p');
                 resyncHint.className = 'fieldDescription wt-resyncHint';
                 resyncHint.textContent = t('以主用户视频和进度为准，可能切换视频。');
@@ -3716,6 +3764,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 ['pause', 'resume', 'resync'].forEach(function (action) {
                     var button = createActionButton(page, room, action);
                     if (action === 'pause') pauseButton = button;
+                    if (action === 'resync') resyncButton = button;
                     playback.appendChild(button);
                 });
             }
@@ -3757,7 +3806,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             page._wtRoomViews[room.RoomId] = {
                 state: state, description: stateDescription, media: media, mediaLabel: mediaLabel,
                 mediaTitle: mediaTitle, mediaDetail: mediaDetail, presentation: presentation, backdrop: backdrop,
-                waiting: waiting, waitingTitle: waitingTitle, pauseButton: pauseButton, avatars: avatars
+                waiting: waiting, waitingTitle: waitingTitle, pauseButton: pauseButton, resyncButton: resyncButton, avatars: avatars
             };
             updateRoomPresentation(page, room);
             container.appendChild(card);
@@ -3805,6 +3854,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     ? requestedAt + Math.min(10000, value.ValidForMs) : 0;
             });
             page._wtRooms = list;
+            syncInvitationRoomLink(page);
             page._wtRoomsLoaded = true;
             page._wtRoomsPollFailures = 0;
             page._wtRoomsRetryAt = 0;
@@ -3852,6 +3902,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 updateRoomPresentation(page, room);
             });
             page._wtRooms = null;
+            syncInvitationRoomLink(page);
             page._wtRoomsPollFailures = Math.min(4, page._wtRoomsPollFailures + 1);
             page._wtRoomsRetryAt = Date.now() + Math.min(5000, 1000 * Math.pow(2, page._wtRoomsPollFailures - 1));
             if (cards) renderRooms(page, []);

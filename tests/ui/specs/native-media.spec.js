@@ -66,13 +66,47 @@ for (const [name, state, label] of unsafeStates) {
   });
 }
 
-test('Barrier显示正在同步并保留正确剧集', async ({ page }) => {
+test('Barrier显示正在对齐并保留正确剧集', async ({ page }) => {
   await open(page);
   await page.evaluate(() => window.__wtFixture.setState({ State: 'Barrier', StatusReason: 'aligning' }));
   await refresh(page);
-  await expect(page.locator('.wt-roomMediaLabel')).toHaveText('正在同步');
+  await expect(page.locator('.wt-roomMediaLabel')).toHaveText('正在对齐');
   await expect(page.locator('.wt-roomMedia strong')).toHaveText('山海之间');
   await expect(page.locator('.wt-roomMediaDetail')).toHaveText('第 1 季 · 第 3 集');
+});
+
+
+test('room shows the current playback phase and highlights resync only when needed', async ({ page }) => {
+  await open(page, 'waiting');
+  const title = page.locator('.wt-waitingTitle');
+  const resync = page.locator('[data-action="participantResync"]');
+  await expect(title).toHaveText('等待双方打开视频');
+  await expect(resync).toBeVisible();
+  for (const [state, reason, label] of [
+    ['Handoff', 'media_handoff', '正在同步视频'],
+    ['Recovering', 'transient_recovery', '等待连接恢复'],
+    ['Waiting', 'stop_resume_confirmation_required', '需要重新同步'],
+    ['Waiting', 'handoff_failed', '需要重新同步'],
+    ['Waiting', 'participant_resync_failed', '需要重新同步'],
+    ['Barrier', 'command_failed', '播放控制未完成']
+  ]) {
+    await page.evaluate(([State, StatusReason]) => window.__wtFixture.setState({ State, StatusReason }), [state, reason]);
+    await refresh(page);
+    await expect(title).toHaveText(label);
+    if (label === '需要重新同步') await expect(resync).toHaveClass(/button-submit/);
+    else await expect(resync).not.toHaveClass(/button-submit/);
+  }
+  await page.evaluate(() => {
+    const fixture = window.__wtFixture;
+    fixture.setState({ State: 'Watching', StatusReason: 'watching', Eligible: true, Sessions: [
+      { UserId: 'user-a', ItemId: 'item-a', Online: true },
+      { UserId: 'user-b', ItemId: 'item-a', Online: true }
+    ] });
+  });
+  await refresh(page);
+  await expect(resync).not.toHaveClass(/button-submit/);
+  await expect(page.locator('.wt-roomMediaLabel')).toHaveText('正在一起观看');
+  expect(await page.evaluate(() => window.__wtFixture.apiCalls.filter(call => call.method !== 'GET'))).toEqual([]);
 });
 
 test('媒体权限撤回或错误Id立即清标题，后续可重新读取', async ({ page }) => {

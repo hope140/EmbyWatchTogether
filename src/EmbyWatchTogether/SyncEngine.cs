@@ -498,6 +498,11 @@ namespace Emby.Plugins.WatchTogether
                         {
                             if (!eligible)
                                 runtime.Error = StoppedPlaybackError;
+                            if (sameItem && snapshots.Values.Any(s => !s.HasPosition))
+                            {
+                                results.Add(Result(room, runtime, eligible));
+                                continue;
+                            }
                             if (sameItem && !HasLargePositionGap(snapshots))
                             {
                                 runtime.Error = null;
@@ -2700,7 +2705,7 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset? lastSeekAtUtc,
             long seekDetectionThresholdTicks)
         {
-            if (previous == null || current == null)
+            if (previous?.HasPosition != true || current?.HasPosition != true)
             {
                 return false;
             }
@@ -3252,6 +3257,14 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
+                if (pending.Command == RemoteCommands.Seek &&
+                    runtime.State == RoomState.Barrier &&
+                    snapshots.Values.Any(s => s?.HasPosition != true))
+                {
+                    // Wait for fresh positions within the existing seek deadline.
+                    continue;
+                }
+
                 double timeoutSeconds = SyncConstants.PendingTimeoutSeconds;
                 if (runtime.State == RoomState.Barrier &&
                     pending.Retries >= SyncConstants.MaxPendingRetries)
@@ -3281,7 +3294,8 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                if (pending.Retries < SyncConstants.MaxPendingRetries && snapshot != null)
+                if (pending.Retries < SyncConstants.MaxPendingRetries && snapshot != null &&
+                    (pending.Command != RemoteCommands.Seek || snapshot.HasPosition))
                 {
                     long? positionTicks = pending.PositionTicks;
                     runtime.Pending.Remove(userId);
@@ -3945,7 +3959,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             if (!runtime.Previous.TryGetValue(barrier.AnchorUserId, out var previous) ||
-                previous == null ||
+                previous?.HasPosition != true ||
                 (!previous.IsPaused && !anchor.IsPaused) ||
                 !IsClearlyOutsideBarrierTarget(runtime, barrier, anchor.PositionTicks))
             {
@@ -4040,7 +4054,7 @@ namespace Emby.Plugins.WatchTogether
             }
 
             if (!runtime.Previous.TryGetValue(barrier.AnchorUserId, out var previous) ||
-                previous == null ||
+                previous?.HasPosition != true ||
                 previous.IsPaused != anchor.IsPaused)
             {
                 // A pause transition can include normal position movement while
@@ -4120,7 +4134,8 @@ namespace Emby.Plugins.WatchTogether
             };
             runtime.SyncItemId = anchor.ItemId;
             runtime.RecordDiagnosticEvent(
-                "barrier_started", anchorUser, null, "entered", anchor.PositionTicks, null, now);
+                "barrier_started", anchorUser, null, "entered",
+                anchor.HasPosition ? (long?)anchor.PositionTicks : null, null, now);
             if (fromMediaHandoff)
             {
                 runtime.RecordDiagnosticEvent(
@@ -4170,11 +4185,14 @@ namespace Emby.Plugins.WatchTogether
                 return;
             }
 
+            bool positionsAvailable = snapshots.Values.All(s => s.HasPosition);
             switch (barrier.Stage)
             {
                 case BarrierStage.Pause:
                     if (!barrier.PauseSent)
                     {
+                        if (!positionsAvailable) return;
+
                         bool waitingForCommand = false;
                         bool allIssued = true;
                         string issueFailure = null;
@@ -4213,7 +4231,7 @@ namespace Emby.Plugins.WatchTogether
                         if (waitingForCommand) return;
                     }
 
-                    if (runtime.Pending.Count == 0 && members.All(u => snapshots[u].IsPaused))
+                    if (positionsAvailable && runtime.Pending.Count == 0 && members.All(u => snapshots[u].IsPaused))
                     {
                         // The primary may continue playing until Emby applies the
                         // pause command. Re-anchor after both acknowledgements so
@@ -4238,6 +4256,13 @@ namespace Emby.Plugins.WatchTogether
                     return;
 
                 case BarrierStage.Seek:
+                    if (!positionsAvailable)
+                    {
+                        RememberBarrierSnapshots(runtime, snapshots, now);
+                        if (IsSeekRetryBudgetExpired(barrier, now)) FailSeekBarrier(runtime, room.Id, now);
+                        return;
+                    }
+
                     var follower = members.First(u => !string.Equals(u, barrier.AnchorUserId, StringComparison.OrdinalIgnoreCase));
                     var anchor = snapshots[barrier.AnchorUserId];
                     long target = barrier.PrimaryPositionTicks;
@@ -4947,7 +4972,6 @@ namespace Emby.Plugins.WatchTogether
                     // position (borrowed from syncplay's pause-snap idea); the
                     // target is stable because the anchor is paused.
                     snapshots.TryGetValue(winner.userId, out var winnerSnapshot);
-                    long anchorPositionTicks = winnerSnapshot?.PositionTicks ?? 0;
                     foreach (var user in members)
                     {
                         if (user != winner.userId &&
@@ -4963,7 +4987,7 @@ namespace Emby.Plugins.WatchTogether
                                 AnchorItemId = winnerSnapshot.ItemId,
                                 SessionId = followerSnapshot.SessionId,
                                 ItemId = followerSnapshot.ItemId,
-                                TargetPositionTicks = anchorPositionTicks,
+                                TargetPositionTicks = winnerSnapshot.HasPosition ? (long?)winnerSnapshot.PositionTicks : null,
                                 CreatedAtUtc = now,
                             };
                         }
@@ -5067,6 +5091,8 @@ namespace Emby.Plugins.WatchTogether
                 Math.Abs(primary.PlaybackRate - 1.0) > SyncConstants.PlaybackRateTolerance ||
                 Math.Abs(participant.PlaybackRate - 1.0) > SyncConstants.PlaybackRateTolerance ||
                 !string.Equals(primary.ItemId, participant.ItemId, StringComparison.OrdinalIgnoreCase) ||
+                !primary.HasPosition ||
+                !participant.HasPosition ||
                 primary.RunTimeTicks <= 0 ||
                 participant.RunTimeTicks <= 0)
             {
@@ -5202,9 +5228,9 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                if (!follower.IsPaused)
+                if (!follower.IsPaused || !follower.HasPosition || !anchor.HasPosition)
                 {
-                    // Wait for the propagated pause to land before seeking.
+                    // Wait for the propagated pause and both positions before seeking.
                     continue;
                 }
 
@@ -5215,7 +5241,8 @@ namespace Emby.Plugins.WatchTogether
                     continue;
                 }
 
-                if (Math.Abs(follower.PositionTicks - align.TargetPositionTicks) <= SyncConstants.SeekToleranceTicks)
+                long target = align.TargetPositionTicks ?? anchor.PositionTicks;
+                if (Math.Abs(follower.PositionTicks - target) <= SyncConstants.SeekToleranceTicks)
                 {
                     runtime.PauseAlign.Remove(userId);
                     continue;
@@ -5227,7 +5254,7 @@ namespace Emby.Plugins.WatchTogether
                     userId,
                     follower,
                     RemoteCommands.Seek,
-                    align.TargetPositionTicks,
+                    target,
                     now,
                     out var failure))
                 {
@@ -5242,7 +5269,7 @@ namespace Emby.Plugins.WatchTogether
                 runtime.PauseAlign.Remove(userId);
                 _logger?.Info(
                     $"Room {room.Id}: aligned paused follower {userId} to " +
-                    $"{FormatPosition(align.TargetPositionTicks)}s (anchor {align.AnchorUserId})");
+                    $"{FormatPosition(target)}s (anchor {align.AnchorUserId})");
             }
         }
 
