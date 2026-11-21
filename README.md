@@ -1,6 +1,6 @@
 # Emby Watch Together
 
-中文 · [English](README.en.md)
+中文 · [English README](README.en.md)
 
 让同一台 Emby Server 上的两个人一起观看：创建房间，打开同一视频，由服务器协调播放状态和进度。插件运行在 Emby Server 内，无需额外同步服务。
 
@@ -12,10 +12,10 @@
 
 | 通道 | 当前版本 | 适合谁 |
 | --- | --- | --- |
-| 正式版 | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [说明](docs/releases/v1.8.0.0.md) | 希望使用 stable 版本的用户 |
-| 测试版 | [v1.7.3.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.5) · [说明](docs/releases/v1.7.3.5.md) | 愿意测试最新改进的用户 |
+| 正式版 | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [说明](docs/releases/v1.8.0.0.md) | 首次安装和日常使用 |
+| 测试版 | [v1.7.3.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.5) · [说明](docs/releases/v1.7.3.5.md) | 上一轮测试版本 |
 
-当前正式版支持管理员后台及简体中文、繁体中文和英文界面，并修复同步恢复后仍显示旧的播放控制错误的问题。查看[全部版本说明](docs/releases/README.md)和[客户端兼容性记录](docs/client-compatibility.md)。
+首次安装请选择正式版。当前正式版支持管理员后台及简体中文、繁体中文和英文界面，并修复同步恢复后仍显示旧的播放控制错误的问题。查看[全部版本说明](docs/releases/README.md)和[客户端兼容性记录](docs/client-compatibility.md)。
 
 ## 能做什么
 
@@ -46,7 +46,7 @@
 普通用户可访问“房间”和“邀请”页面。管理员也可从插件配置页进入。
 
 1. 管理员在“创建与邀请”中创建房间；或者一人创建邀请码并立即发送给另一位用户，对方在“邀请”中接受。
-2. 两人登录同一台服务器，在各自客户端打开同一视频；如有需要，在房间页点击“加入房间”。
+2. 两人用不同账号登录同一台服务器，每人只参加一个房间。在各自客户端打开同一视频，如有需要，在房间页点击“加入房间”。
 3. 等待状态刷新和同步完成，之后即可一起观看。暂停、继续或拖动时，请给客户端和服务器一点时间处理。
 
 创建邀请码后可从卡片查看到期时间并手动复制，也可从列表撤销有效邀请。邀请码有效 15 分钟，只能接受一次；服务器重启后未接受的邀请码失效。“暂离房间”保留成员关系，之后可重新加入；“结束房间”解除双方关系，不删除媒体。
