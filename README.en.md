@@ -1,6 +1,6 @@
 # Emby Watch Together
 
-[中文](README.md) · English
+[中文 README](README.md) · English
 
 Watch together with another person on the same Emby Server. Create a room, open the same video, and let the server coordinate playback and position. The plugin runs inside Emby Server and needs no separate synchronization service.
 
@@ -12,10 +12,10 @@ Watch together with another person on the same Emby Server. Create a room, open 
 
 | Channel | Current version | For whom |
 | --- | --- | --- |
-| Stable | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [notes](docs/releases/v1.8.0.0.md) | Users who prefer stable releases |
-| Beta | [v1.7.3.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.5) · [notes](docs/releases/v1.7.3.5.md) | Users testing recent improvements |
+| Stable | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [notes](docs/releases/v1.8.0.0.md) | First installs and everyday use |
+| Beta | [v1.8.0.1](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.1) · [notes](docs/releases/v1.8.0.1.md) | Try the latest improvements |
 
-The current stable release includes Administration and an interface in Simplified Chinese, Traditional Chinese, and English. It also clears stale playback-control errors once synchronization has recovered. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
+Choose the stable release for a first install. The current stable release includes Administration and an interface in Simplified Chinese, Traditional Chinese, and English. It also clears stale playback-control errors once synchronization has recovered. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
 
 ## What it does
 
@@ -46,7 +46,7 @@ Open **Watch Together** from the Emby user menu (it can appear as “同映” o
 Regular users can access rooms and invitations. Administrators can also enter from the plugin configuration page.
 
 1. An administrator creates a room, or one user creates an invitation code and sends it promptly to the other user to accept.
-2. Both users sign in to the same server and open the same video on their clients. Join the room if needed.
+2. Use two accounts on the same server. Each account can be in one room at a time. Open the same video on both clients and join the room if needed.
 3. Wait for the status to refresh and synchronization to finish. Allow the clients and server time to process pauses, resumes, and seeks.
 
 The invitation card shows the code and its expiry time and lets you copy the code manually. Active invitations appear in a separate list where you can revoke them. An invitation expires after 15 minutes, can be accepted once, and is lost if the server restarts before acceptance. Leaving a room preserves membership so you can rejoin; ending it removes both members' relationship and does not delete media.
