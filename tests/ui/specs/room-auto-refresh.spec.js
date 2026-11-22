@@ -54,7 +54,7 @@ test('我的房间每秒读本人状态，同一影片限频，隐藏和离页�
 
 test('后台多房间每轮只取一份列表摘要，不逐房读取状态或影片', async ({page}) => {
   await installClock(page);
-  await page.goto('/?scenario=admin-manage#!configurationpage?name=WatchTogetherAdminV36');
+  await page.goto('/?scenario=admin-manage#!configurationpage?name=WatchTogetherAdminV37');
   await expect(page.locator('.wt-adminRoom')).toHaveCount(1);
   await page.evaluate(() => {
     const fixture = window.__wtFixture;

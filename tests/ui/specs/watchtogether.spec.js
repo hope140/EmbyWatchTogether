@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings', admin: 'Admin' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V36"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V37"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection', admin: '#wtRoomsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -827,6 +827,19 @@ for (const [tag, language, heading, endRoom, createCode, emptyCode, waitingTitle
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   });
 }
+
+test('Russian resume label fits its button at 320px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto('/?scenario=admin-member&locale=ru-RU');
+  const resume = page.locator('.wt-roomControls [data-act="resume"]');
+  await expect(resume).toHaveText('Продолжить воспроизведение');
+  await expect.poll(() => resume.evaluate(button => {
+    const range = document.createRange();
+    range.selectNodeContents(button);
+    const bounds = button.getBoundingClientRect();
+    return Array.from(range.getClientRects()).every(rect => rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1);
+  })).toBe(true);
+});
 
 test('All locale dictionaries cover every source key and preserve placeholders', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../../src/EmbyWatchTogether/Web/Configuration/watchtogether.js'), 'utf8');

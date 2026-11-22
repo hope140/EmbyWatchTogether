@@ -2109,7 +2109,7 @@ namespace Emby.Plugins.WatchTogether
                 bool interrupted = hold.ResumeObserved
                     ? primary.IsPaused || !IsContinuousHandoffProgress(hold.LastPrimary, primary, hold.LastPrimaryAtUtc, now)
                     : primary.IsPaused
-                        ? Math.Abs(primary.PositionTicks - hold.PausedPositionTicks) > SyncConstants.SeekToleranceTicks
+                        ? primary.HasPosition && Math.Abs(primary.PositionTicks - hold.PausedPositionTicks) > SyncConstants.SeekToleranceTicks
                         : !IsContinuousHandoffProgress(hold.LastPrimary, primary, hold.LastPrimaryAtUtc, now);
                 if (interrupted)
                 {
@@ -2124,10 +2124,15 @@ namespace Emby.Plugins.WatchTogether
                     hold.ResumeObserved = true;
                     runtime.RecordDiagnosticEvent("handoff_primary_resumed", null, null, "observing", null, null, now);
                 }
-                hold.LastPrimary = primary;
-                hold.LastPrimaryAtUtc = now;
-                return !hold.ResumeObserved;
+                if (primary.HasPosition)
+                {
+                    hold.LastPrimary = primary;
+                    hold.LastPrimaryAtUtc = now;
+                }
+                return primary.HasPosition && !hold.ResumeObserved;
             }
+
+            if (!primary.HasPosition) return false;
             if (primary.IsPaused)
             {
                 // A pause observed before our request is user/player intent,
@@ -2209,6 +2214,11 @@ namespace Emby.Plugins.WatchTogether
             if (previous == null || previous.PlaybackTerminated || current.Stopped || now < observedAt ||
                 (previous.LastActivityDateUtc != default && current.LastActivityDateUtc != default &&
                  current.LastActivityDateUtc < previous.LastActivityDateUtc)) return false;
+
+            // An omitted position is inconclusive. Only a valid sample updates
+            // the continuity baseline; the handoff still uses its original deadline.
+            if (!current.HasPosition) return true;
+
             double delta = (double)current.PositionTicks - previous.PositionTicks;
             double elapsed = (now - observedAt).TotalSeconds * SessionSnapshot.TicksPerSecond;
             // A resumed snapshot may have played for any fraction of the poll.
@@ -2234,9 +2244,12 @@ namespace Emby.Plugins.WatchTogether
                 return;
             }
             if (hold.ParticipantPlayback == null) hold.ParticipantPlayback = participant;
-            hold.LastParticipant = participant;
-            hold.LastParticipantAtUtc = now;
-            if (!participantReady) return;
+            if (participant.HasPosition)
+            {
+                hold.LastParticipant = participant;
+                hold.LastParticipantAtUtc = now;
+            }
+            if (!participantReady || !primary.HasPosition || !participant.HasPosition) return;
             if (Math.Abs((double)primary.PositionTicks - participant.PositionTicks) > SyncConstants.SeekToleranceTicks)
             {
                 FailMediaHandoff(runtime, room, HandoffHoldRequiresResyncError, now);
@@ -2267,6 +2280,7 @@ namespace Emby.Plugins.WatchTogether
             if (hold == null) return true;
             if (participant.RunTimeTicks <= 0) return false;
             if (hold.ParticipantPlayback == null) hold.ParticipantPlayback = participant;
+            if (!participant.HasPosition) return false;
             if (!string.Equals(hold.ParticipantSessionId, participant.SessionId, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(hold.ParticipantMediaSourceId, participant.MediaSourceId, StringComparison.OrdinalIgnoreCase) ||
                 Math.Abs(hold.ParticipantRunTimeTicks - participant.RunTimeTicks) > SyncConstants.MaxRuntimeDifferenceTicks)
@@ -4123,6 +4137,7 @@ namespace Emby.Plugins.WatchTogether
                 AnchorUserId = anchorUser,
                 PrimaryPositionTicks = anchor.PositionTicks,
                 PrimaryPaused = primaryPausedOverride ?? anchor.IsPaused,
+                RefreshPauseIntentBeforeFirstPause = !primaryPausedOverride.HasValue && snapshots.Values.Any(s => !s.HasPosition),
                 ItemId = anchor.ItemId,
                 PauseSent = false,
                 SeekSent = false,
@@ -4192,6 +4207,11 @@ namespace Emby.Plugins.WatchTogether
                     if (!barrier.PauseSent)
                     {
                         if (!positionsAvailable) return;
+
+                        // A missing position may have delayed our first command.
+                        // Capture local intent now if the barrier was waiting for it.
+                        if (barrier.RefreshPauseIntentBeforeFirstPause)
+                            barrier.PrimaryPaused = snapshots[barrier.AnchorUserId].IsPaused;
 
                         bool waitingForCommand = false;
                         bool allIssued = true;

@@ -39,6 +39,39 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(RoomState.Watching, runtime.State);
         }
 
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void InitialAlignmentUsesPauseIntentWhenPositionsBecomeAvailable(bool latestPaused)
+        {
+            using var f = new Fixture();
+            var runtime = f.Rooms.GetRuntime(f.Room.Id);
+            runtime.ResetToWaiting();
+            var primary = f.A.GetPlaySessionInfo("p1").PlayState;
+            var participant = f.B.GetPlaySessionInfo("p2").PlayState;
+            primary.IsPaused = !latestPaused;
+            participant.IsPaused = false;
+            participant.PositionTicks = null;
+
+            f.Poll(f.Now);
+            primary.IsPaused = latestPaused;
+            f.Poll(f.Now.AddSeconds(5));
+            Assert.Empty(f.Issuer.Calls);
+
+            participant.PositionTicks = primary.PositionTicks;
+            f.Poll(f.Now.AddSeconds(6));
+            Assert.Contains(("u2", RemoteCommands.Pause, (long?)null), f.Issuer.Calls);
+            Assert.Equal(!latestPaused, f.Issuer.Calls.Any(call => call.user == "u1" && call.command == RemoteCommands.Pause));
+
+            primary.IsPaused = participant.IsPaused = true;
+            f.Poll(f.Now.AddSeconds(6.25));
+            Assert.Equal(!latestPaused, f.Issuer.Calls.Any(call => call.command == RemoteCommands.Unpause));
+            primary.IsPaused = participant.IsPaused = latestPaused;
+            f.Poll(f.Now.AddSeconds(6.5));
+            Assert.Equal(RoomState.Watching, runtime.State);
+            Assert.DoesNotContain(f.Issuer.Calls, call => call.command == RemoteCommands.Seek);
+        }
+
         [Fact]
         public void MissingFollowerPosition_CannotAcknowledgeSeekToRealZero()
         {
@@ -321,6 +354,56 @@ namespace Emby.Plugins.WatchTogether.Tests
             await replay.F.NoticesIdle;
             Assert.DoesNotContain(replay.F.Messages, message => message.Contains("同步完成"));
             Assert.Contains(replay.F.Messages, message => message.Contains("手动重新同步"));
+        }
+
+        [Theory]
+        [InlineData(true, "aligned")]
+        [InlineData(false, "aligned")]
+        [InlineData(true, "jump")]
+        [InlineData(false, "jump")]
+        [InlineData(true, "expired")]
+        [InlineData(false, "paused")]
+        public async Task TheaterHoldResume_MissingPositionWaitsForEvidenceWithinDeadline(bool primary, string next)
+        {
+            using var replay = new HoldResumeReplay();
+            replay.Begin();
+            var f = replay.F;
+            var session = primary ? f.A : f.B;
+            var playback = session.GetPlaySessionInfo(primary ? "next" : "peer-next");
+            playback.PlayState.PositionTicks = null;
+            f.Poll(f.Now.AddSeconds(2.5));
+            Assert.Equal(RoomState.Handoff, replay.Runtime.State);
+            Assert.Equal(new[] { "b:PlayItem", "a:Pause" }, replay.Commands);
+
+            switch (next)
+            {
+                case "aligned":
+                    replay.SetPair(3.4, 3.3);
+                    Assert.Equal(RoomState.Watching, replay.Runtime.State);
+                    break;
+                case "jump":
+                    replay.Set(primary ? "u1" : "u2", 30, false);
+                    f.Poll(f.Now.AddSeconds(2.6));
+                    Assert.Equal(RoomState.Waiting, replay.Runtime.State);
+                    break;
+                case "expired":
+                    var deadline = replay.Runtime.Handoff.StartedAtUtc.AddSeconds(SyncConstants.MediaHandoffTimeoutSeconds);
+                    f.Poll(deadline.AddMilliseconds(-1));
+                    Assert.Equal(RoomState.Handoff, replay.Runtime.State);
+                    f.Poll(deadline);
+                    Assert.Equal(RoomState.Waiting, replay.Runtime.State);
+                    break;
+                case "paused":
+                    playback.PlayState.IsPaused = true;
+                    f.Poll(f.Now.AddSeconds(2.6));
+                    Assert.Equal(RoomState.Waiting, replay.Runtime.State);
+                    break;
+            }
+
+            Assert.Equal(new[] { "b:PlayItem", "a:Pause" }, replay.Commands);
+            await f.NoticesIdle;
+            Assert.Equal(next == "aligned", f.Messages.Any(message => message == "已跟随切换，同步完成"));
+            Assert.Equal(next != "aligned", f.Messages.Any(message => message.Contains("手动重新同步")));
         }
 
         [Fact]

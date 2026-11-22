@@ -41,6 +41,8 @@ namespace Emby.Plugins.WatchTogether
 
         public bool PrimaryPaused { get; set; }
 
+        internal bool RefreshPauseIntentBeforeFirstPause { get; set; }
+
         public string ItemId { get; set; }
 
         /// <summary>
