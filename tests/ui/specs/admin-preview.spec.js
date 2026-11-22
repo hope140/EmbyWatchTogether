@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const adminUrl = '/?scenario=admin-manage#!configurationpage?name=WatchTogetherAdminV36';
+const adminUrl = '/?scenario=admin-manage#!configurationpage?name=WatchTogetherAdminV37';
 async function ready(page) {
   await expect.poll(() => page.evaluate(() => window.__wtFixture.view.view._wtRoomsLoading)).toBe(false);
 }
@@ -21,7 +21,7 @@ for (const [lang,label,primary] of [['zh-CN','后台管理','主用户'],['zh-TW
     await page.goto('/?scenario=admin-manage&locale='+lang);
     await expect(page.locator('#wtRoomsHeading')).toContainText(lang==='en-US'?'My rooms':lang==='zh-TW'?'我的房間':'我的房间');
     await expect(page.locator('#wtRooms [data-room-id]')).toHaveCount(0);
-    await page.locator('.tabs-viewmenubar a[href*="AdminV36"]').click();
+    await page.locator('.tabs-viewmenubar a[href*="AdminV37"]').click();
     await expect(page.locator('#wtRoomsHeading')).toHaveText(label);
     await multi(page);
     const owners = page.locator('.wt-cardOwner');
@@ -50,7 +50,7 @@ for (const [lang,label,primary] of [['zh-CN','后台管理','主用户'],['zh-TW
   });
 }
 test('普通用户直访后台回退本人房间，无全站请求',async({page})=>{
-  await page.goto('/?scenario=active#!configurationpage?name=WatchTogetherAdminV36');
+  await page.goto('/?scenario=active#!configurationpage?name=WatchTogetherAdminV37');
   await expect(page.locator('.wt-roomCard')).toHaveCount(1);
   await expect(page.locator('.tabs-viewmenubar a[href*="Admin"]')).toHaveCount(0);
   await expect(page.locator('.wt-adminRoom')).toHaveCount(0);
