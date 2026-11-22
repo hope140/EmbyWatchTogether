@@ -4,6 +4,7 @@
 
 | 要查什么 | 入口 |
 | --- | --- |
+| 邀请、房间操作、管理员设置与界面语言 | [使用指南](user-guide.md) |
 | 当前交付、下一步与待确认事项 | [当前排期](development-roadmap.md) |
 | 版本说明与下载 | [发布日志](releases/README.md) |
 | 真实验收范围与未验证项 | [客户端兼容性](client-compatibility.md) |
