@@ -4137,7 +4137,7 @@ namespace Emby.Plugins.WatchTogether
                 AnchorUserId = anchorUser,
                 PrimaryPositionTicks = anchor.PositionTicks,
                 PrimaryPaused = primaryPausedOverride ?? anchor.IsPaused,
-                HasPauseIntentOverride = primaryPausedOverride.HasValue,
+                RefreshPauseIntentBeforeFirstPause = !primaryPausedOverride.HasValue && snapshots.Values.Any(s => !s.HasPosition),
                 ItemId = anchor.ItemId,
                 PauseSent = false,
                 SeekSent = false,
@@ -4208,9 +4208,9 @@ namespace Emby.Plugins.WatchTogether
                     {
                         if (!positionsAvailable) return;
 
-                        // Capture the latest local intent before the first pause.
-                        // A handoff or a confirmed anchor change can supply its own intent.
-                        if (!barrier.HasPauseIntentOverride)
+                        // A missing position may have delayed our first command.
+                        // Capture local intent now if the barrier was waiting for it.
+                        if (barrier.RefreshPauseIntentBeforeFirstPause)
                             barrier.PrimaryPaused = snapshots[barrier.AnchorUserId].IsPaused;
 
                         bool waitingForCommand = false;
