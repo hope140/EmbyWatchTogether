@@ -141,6 +141,11 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("zh", "房间 #")]
         [InlineData("zh-Hant", "房間 #")]
         [InlineData("en", "Room #")]
+        [InlineData("ja", "ルーム #")]
+        [InlineData("ko", "방 #")]
+        [InlineData("ru", "Комната №")]
+        [InlineData("fr", "Salon n° ")]
+        [InlineData("de", "Raum #")]
         [InlineData(null, "房间 #")]
         [InlineData("unsupported", "房间 #")]
         public void RoomCreationUsesRequestLanguageForBothEntryPoints(string language, string prefix)
@@ -168,6 +173,11 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("zh")]
         [InlineData("zh-Hant")]
         [InlineData("en")]
+        [InlineData("ja")]
+        [InlineData("ko")]
+        [InlineData("ru")]
+        [InlineData("fr")]
+        [InlineData("de")]
         public void ExplicitRoomNamesRemainUnchangedForAllLanguages(string language)
         {
             var creator = Guid.NewGuid().ToString("N"); var accepter = Guid.NewGuid().ToString("N");
@@ -635,8 +645,14 @@ namespace Emby.Plugins.WatchTogether.Tests
             sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.IsAny<MessageCommand>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
-        [Fact]
-        public void AdministratorControlUsesRecipientLanguagesButCustomMessageIsVerbatim()
+        [Theory]
+        [InlineData("en", "An administrator paused room playback.")]
+        [InlineData("ja", "管理者がルームの再生を一時停止しました。")]
+        [InlineData("ko", "관리자가 방의 재생을 일시 정지했습니다.")]
+        [InlineData("ru", "Администратор приостановил воспроизведение в комнате.")]
+        [InlineData("fr", "Un administrateur a mis la lecture du salon en pause.")]
+        [InlineData("de", "Die Administration hat die Wiedergabe im Raum pausiert.")]
+        public void AdministratorControlUsesRecipientLanguagesButCustomMessageIsVerbatim(string language, string expectedNotice)
         {
             var u1 = Guid.NewGuid().ToString("N"); var u2 = Guid.NewGuid().ToString("N");
             var manager = new RoomManager();
@@ -652,11 +668,11 @@ namespace Emby.Plugins.WatchTogether.Tests
             try
             {
                 var languages = new NotificationLanguageStore(path, serializer.Object);
-                languages.SetLanguage(u1, "en");
+                languages.SetLanguage(u1, language);
                 SetPluginProperty(plugin, "NotificationLanguages", languages);
                 var service = NewService(u1, true);
                 WithPlugin(plugin, () => service.Post(new ControlRoomRequest { Id = room.Id, Action = "pause" }));
-                sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Text == "An administrator paused room playback."), It.IsAny<CancellationToken>()), Times.Once);
+                sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s1", It.Is<MessageCommand>(m => m.Text == expectedNotice), It.IsAny<CancellationToken>()), Times.Once);
                 sm.Verify(s => s.SendMessageCommand(It.IsAny<string>(), "s2", It.Is<MessageCommand>(m => m.Text == "管理员已暂停房间播放"), It.IsAny<CancellationToken>()), Times.Once);
                 sm.Invocations.Clear();
                 const string custom = "管理员已暂停房间播放";

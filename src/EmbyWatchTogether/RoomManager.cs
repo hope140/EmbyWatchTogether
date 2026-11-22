@@ -215,7 +215,17 @@ namespace Emby.Plugins.WatchTogether
                 _rooms.Values.Select(room => (room.Name ?? string.Empty).Trim()),
                 StringComparer.OrdinalIgnoreCase);
             var available = new List<string>();
-            var prefix = language == "en" ? "Room #" : language == "zh-Hant" ? "房間 #" : "房间 #";
+            var prefix = language switch
+            {
+                "en" => "Room #",
+                "zh-Hant" => "房間 #",
+                "ja" => "ルーム #",
+                "ko" => "방 #",
+                "ru" => "Комната №",
+                "fr" => "Salon n° ",
+                "de" => "Raum #",
+                _ => "房间 #",
+            };
             for (var number = 0; number < 10000; number++)
             {
                 var candidate = prefix + number.ToString("D4", CultureInfo.InvariantCulture);

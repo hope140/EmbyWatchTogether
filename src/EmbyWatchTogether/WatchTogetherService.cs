@@ -140,7 +140,7 @@ namespace Emby.Plugins.WatchTogether
         {
             var userId = CurrentUserId();
             if (string.IsNullOrWhiteSpace(userId)) throw new UnauthorizedAccessException("authenticated user required");
-            if (request == null || (request.Language != "zh" && request.Language != "en" && request.Language != "zh-Hant"))
+            if (!NotificationText.IsLanguage(request?.Language))
                 throw new ArgumentException("unsupported language");
             var plugin = RequireRuntime(requireBridge: false, requireIssuer: false);
             if (plugin.NotificationLanguages == null) throw new ServiceUnavailableException("notification language storage unavailable");

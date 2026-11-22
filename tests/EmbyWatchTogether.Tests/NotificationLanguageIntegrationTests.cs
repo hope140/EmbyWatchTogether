@@ -16,8 +16,13 @@ namespace Emby.Plugins.WatchTogether.Tests
 {
     public class NotificationLanguageIntegrationTests
     {
-        [Fact]
-        public void PreferenceEndpointUsesAuthenticatedIdentityOnlyAndSurvivesReload()
+        [Theory]
+        [InlineData("ja")]
+        [InlineData("ko")]
+        [InlineData("ru")]
+        [InlineData("fr")]
+        [InlineData("de")]
+        public void PreferenceEndpointUsesAuthenticatedIdentityOnlyAndSurvivesReload(string additionalLanguage)
         {
             var root = Path.Combine(Path.GetTempPath(), "wt-pref-" + Guid.NewGuid().ToString("N"));
             try
@@ -29,14 +34,16 @@ namespace Emby.Plugins.WatchTogether.Tests
                 SetProperty(plugin, "Rooms", new RoomManager(new RoomStore(Path.Combine(root, "rooms.json"), serializer)));
                 var path = Path.Combine(root, "language.json");
                 SetProperty(plugin, "NotificationLanguages", new NotificationLanguageStore(path, serializer));
-                var first = Guid.NewGuid(); var second = Guid.NewGuid();
+                var first = Guid.NewGuid(); var second = Guid.NewGuid(); var third = Guid.NewGuid();
                 var a = Service(plugin, first); var b = Service(plugin, second);
                 a.Post(new SetNotificationLanguageRequest { Language = "en" });
                 b.Post(new SetNotificationLanguageRequest { Language = "zh-Hant" });
+                Service(plugin, third).Post(new SetNotificationLanguageRequest { Language = additionalLanguage });
                 var loaded = new NotificationLanguageStore(path, serializer);
                 Assert.Equal("en", loaded.GetLanguage(first.ToString("N")));
                 Assert.Equal("zh-Hant", loaded.GetLanguage(second.ToString("N")));
-                Assert.Throws<ArgumentException>(() => a.Post(new SetNotificationLanguageRequest { Language = "fr" }));
+                Assert.Equal(additionalLanguage, loaded.GetLanguage(third.ToString("N")));
+                Assert.Throws<ArgumentException>(() => a.Post(new SetNotificationLanguageRequest { Language = "es" }));
                 Assert.Throws<UnauthorizedAccessException>(() => Service(plugin, null).Post(new SetNotificationLanguageRequest { Language = "en" }));
                 Assert.Equal("en", loaded.GetLanguage(first.ToString("N")));
             }
@@ -53,6 +60,22 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Contains("雙方開啟", Translate(notice, "c", _ => "zh-Hant"));
             Assert.Equal(notice, Translate(notice, "a", _ => throw new IOException()));
             Assert.Equal("custom text", Translate("custom text", "a", preferences));
+        }
+
+        [Fact]
+        public void LocalizedFixedNoticesCoverEverySystemMessage()
+        {
+            var type = typeof(Plugin).Assembly.GetType("Emby.Plugins.WatchTogether.NotificationText");
+            var english = (IReadOnlyDictionary<string, string>)type.GetField("English", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+            foreach (var language in new[] { "ja", "ko", "ru", "fr", "de" })
+            {
+                foreach (var source in english.Keys)
+                {
+                    var localized = Translate(source, "recipient", _ => language);
+                    Assert.False(string.IsNullOrWhiteSpace(localized));
+                    Assert.NotEqual(source, localized);
+                }
+            }
         }
 
         private static WatchTogetherService Service(Plugin plugin, Guid? id)
