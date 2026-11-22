@@ -51,13 +51,13 @@ namespace Emby.Plugins.WatchTogether
         {
             if (string.IsNullOrWhiteSpace(userId)) return "zh";
             var snapshot = Volatile.Read(ref _languages);
-            return snapshot.TryGetValue(userId, out var language) && IsLanguage(language) ? language : "zh";
+            return snapshot.TryGetValue(userId, out var language) && NotificationText.IsLanguage(language) ? language : "zh";
         }
 
         public void SetLanguage(string userId, string language)
         {
             if (string.IsNullOrWhiteSpace(userId)) throw new ArgumentException("userId is required", nameof(userId));
-            if (!IsLanguage(language)) throw new ArgumentException("language must be zh, zh-Hant or en", nameof(language));
+            if (!NotificationText.IsLanguage(language)) throw new ArgumentException("unsupported language", nameof(language));
             lock (_writeLock)
             {
                 if (_loadFailed) throw new InvalidDataException("Notification language data could not be loaded.");
@@ -90,8 +90,7 @@ namespace Emby.Plugins.WatchTogether
             }
         }
 
-        private static bool IsLanguage(string language) => IsStoredLanguage(language) || language == "zh-Hant";
-        private static bool IsStoredLanguage(string language) => language == "zh" || language == "en";
+        private static bool IsStoredLanguage(string language) => language != "zh-Hant" && NotificationText.IsLanguage(language);
         private static Dictionary<string, string> NewMap() => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
