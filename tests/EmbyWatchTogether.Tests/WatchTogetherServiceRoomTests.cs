@@ -146,6 +146,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("ru", "Комната №")]
         [InlineData("fr", "Salon n° ")]
         [InlineData("de", "Raum #")]
+        [InlineData("es", "Sala #")]
+        [InlineData("pt", "Sala #")]
         [InlineData(null, "房间 #")]
         [InlineData("unsupported", "房间 #")]
         public void RoomCreationUsesRequestLanguageForBothEntryPoints(string language, string prefix)
@@ -178,6 +180,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("ru")]
         [InlineData("fr")]
         [InlineData("de")]
+        [InlineData("es")]
+        [InlineData("pt")]
         public void ExplicitRoomNamesRemainUnchangedForAllLanguages(string language)
         {
             var creator = Guid.NewGuid().ToString("N"); var accepter = Guid.NewGuid().ToString("N");
@@ -652,6 +656,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("ru", "Администратор приостановил воспроизведение в комнате.")]
         [InlineData("fr", "Un administrateur a mis la lecture du salon en pause.")]
         [InlineData("de", "Die Administration hat die Wiedergabe im Raum pausiert.")]
+        [InlineData("es", "Un administrador pausó la reproducción en la sala.")]
+        [InlineData("pt", "Um administrador pausou a reprodução na sala.")]
         public void AdministratorControlUsesRecipientLanguagesButCustomMessageIsVerbatim(string language, string expectedNotice)
         {
             var u1 = Guid.NewGuid().ToString("N"); var u2 = Guid.NewGuid().ToString("N");

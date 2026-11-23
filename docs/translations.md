@@ -1,6 +1,6 @@
 # Contributing translations
 
-The embedded page keeps its translations in `src/EmbyWatchTogether/Web/Configuration/watchtogether.js`. Chinese source strings are the keys. The translated dictionaries are `en`, `zh-Hant`, `ja`, `ko`, `ru`, `fr`, and `de`. Static HTML text and attributes are translated when the page is initialized; dynamic labels, messages, and dialog text use `t()` when created. User-supplied room and media names are not translation keys.
+The embedded page keeps its translations in `src/EmbyWatchTogether/Web/Configuration/watchtogether.js`. Chinese source strings are the keys. The translated dictionaries are `en`, `zh-Hant`, `ja`, `ko`, `ru`, `fr`, `de`, `es`, and `pt` (Brazilian Portuguese). Static HTML text and attributes are translated when the page is initialized; dynamic labels, messages, and dialog text use `t()` when created. User-supplied room and media names are not translation keys.
 
 To add a language:
 

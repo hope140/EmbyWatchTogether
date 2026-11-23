@@ -22,6 +22,8 @@ namespace Emby.Plugins.WatchTogether.Tests
         [InlineData("ru")]
         [InlineData("fr")]
         [InlineData("de")]
+        [InlineData("es")]
+        [InlineData("pt")]
         public void PreferenceEndpointUsesAuthenticatedIdentityOnlyAndSurvivesReload(string additionalLanguage)
         {
             var root = Path.Combine(Path.GetTempPath(), "wt-pref-" + Guid.NewGuid().ToString("N"));
@@ -43,7 +45,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 Assert.Equal("en", loaded.GetLanguage(first.ToString("N")));
                 Assert.Equal("zh-Hant", loaded.GetLanguage(second.ToString("N")));
                 Assert.Equal(additionalLanguage, loaded.GetLanguage(third.ToString("N")));
-                Assert.Throws<ArgumentException>(() => a.Post(new SetNotificationLanguageRequest { Language = "es" }));
+                Assert.Throws<ArgumentException>(() => a.Post(new SetNotificationLanguageRequest { Language = "nl" }));
                 Assert.Throws<UnauthorizedAccessException>(() => Service(plugin, null).Post(new SetNotificationLanguageRequest { Language = "en" }));
                 Assert.Equal("en", loaded.GetLanguage(first.ToString("N")));
             }
@@ -67,7 +69,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             var type = typeof(Plugin).Assembly.GetType("Emby.Plugins.WatchTogether.NotificationText");
             var english = (IReadOnlyDictionary<string, string>)type.GetField("English", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
-            foreach (var language in new[] { "ja", "ko", "ru", "fr", "de" })
+            foreach (var language in new[] { "ja", "ko", "ru", "fr", "de", "es", "pt" })
             {
                 foreach (var source in english.Keys)
                 {

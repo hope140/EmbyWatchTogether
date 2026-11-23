@@ -224,6 +224,8 @@ namespace Emby.Plugins.WatchTogether
                 "ru" => "Комната №",
                 "fr" => "Salon n° ",
                 "de" => "Raum #",
+                "es" => "Sala #",
+                "pt" => "Sala #",
                 _ => "房间 #",
             };
             for (var number = 0; number < 10000; number++)

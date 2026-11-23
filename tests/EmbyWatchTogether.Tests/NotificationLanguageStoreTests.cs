@@ -52,7 +52,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         {
             var store = new NotificationLanguageStore(FilePath, Serializer().Object);
             Assert.Throws<ArgumentException>(() => store.SetLanguage(null, "en"));
-            foreach (var value in new[] { "", "EN", "en-US", "es", null })
+            foreach (var value in new[] { "", "EN", "en-US", "nl", null })
                 Assert.Throws<ArgumentException>(() => store.SetLanguage("one", value));
             Assert.False(File.Exists(FilePath));
         }
@@ -69,7 +69,7 @@ namespace Emby.Plugins.WatchTogether.Tests
         [Theory]
         [InlineData("{bad")]
         [InlineData("null")]
-        [InlineData("[{\"UserId\":\"u\",\"Language\":\"es\"}]")]
+        [InlineData("[{\"UserId\":\"u\",\"Language\":\"nl\"}]")]
         [InlineData("[{\"UserId\":\"u\",\"Language\":\"en\"},{\"UserId\":\"U\",\"Language\":\"zh\"}]")]
         public void CorruptDataFallsBackAndIsNotOverwritten(string contents)
         {
