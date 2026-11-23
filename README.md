@@ -13,7 +13,7 @@
 | 通道 | 当前版本 | 适合谁 |
 | --- | --- | --- |
 | 正式版 | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [说明](docs/releases/v1.8.0.0.md) | 首次安装和日常使用 |
-| 测试版 | [v1.8.0.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.4) · [说明](docs/releases/v1.8.0.4.md) | 试用本轮改进 |
+| 测试版 | [v1.8.0.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.5) · [说明](docs/releases/v1.8.0.5.md) | 试用本轮改进 |
 
 首次安装请选择正式版。支持简体中文、繁体中文和英文界面。查看[全部版本说明](docs/releases/README.md)和[客户端兼容性记录](docs/client-compatibility.md)。
 

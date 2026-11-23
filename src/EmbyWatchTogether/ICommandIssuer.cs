@@ -42,7 +42,8 @@ namespace Emby.Plugins.WatchTogether
             DateTimeOffset now,
             CancellationToken cancellationToken,
             SessionSnapshot[] commandSources,
-            out string error);
+            out string error,
+            PlaybackCommandTiming timing);
     }
 
     /// <summary>
@@ -52,7 +53,23 @@ namespace Emby.Plugins.WatchTogether
     {
         bool TryIssuePlayItem(string roomId, string controllingUserId, string userId,
             SessionSnapshot snapshot, string itemId, DateTimeOffset now,
-            CancellationToken cancellationToken, SessionSnapshot[] commandSources, out string error);
+            CancellationToken cancellationToken, SessionSnapshot[] commandSources, out string error,
+            PlaybackCommandTiming timing);
+    }
+
+    /// <summary>
+    /// Records when an admitted transport begins. Read the timestamp only after
+    /// the issuer has reported success, which observes transport completion.
+    /// </summary>
+    internal sealed class PlaybackCommandTiming
+    {
+        private readonly Func<DateTimeOffset> _clock;
+
+        internal PlaybackCommandTiming(Func<DateTimeOffset> clock) => _clock = clock;
+
+        internal DateTimeOffset? StartedAtUtc { get; private set; }
+
+        internal void MarkStarted() => StartedAtUtc = _clock();
     }
 
     /// <summary>

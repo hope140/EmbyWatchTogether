@@ -48,6 +48,22 @@ namespace Emby.Plugins.WatchTogether
                 false);
         }
 
+        internal static Dictionary<string, SessionSnapshot> SelectWithPrevious(
+            IEnumerable<SessionSnapshot> candidates,
+            IReadOnlyList<string> userIds,
+            DateTimeOffset now,
+            IReadOnlyDictionary<string, SessionSnapshot> previous)
+        {
+            return SelectCore(
+                candidates,
+                userIds,
+                now,
+                TimeSpan.FromSeconds(StaleSessionTimeoutSeconds),
+                null,
+                previous,
+                false);
+        }
+
         internal static SessionSelectionDiagnostics SelectWithDiagnostics(
             IEnumerable<SessionSnapshot> candidates,
             IReadOnlyList<string> userIds,

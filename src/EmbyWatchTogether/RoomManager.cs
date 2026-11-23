@@ -352,6 +352,16 @@ namespace Emby.Plugins.WatchTogether
         /// </summary>
         internal RoomAccess TryEnterRoom(string roomId)
         {
+            return EnterRoom(roomId, waitForRoom: true);
+        }
+
+        internal RoomAccess TryEnterRoomWithoutWaiting(string roomId)
+        {
+            return EnterRoom(roomId, waitForRoom: false);
+        }
+
+        private RoomAccess EnterRoom(string roomId, bool waitForRoom)
+        {
             if (string.IsNullOrEmpty(roomId))
             {
                 return null;
@@ -366,7 +376,11 @@ namespace Emby.Plugins.WatchTogether
                 }
             }
 
-            Monitor.Enter(roomGate);
+            if (waitForRoom)
+                Monitor.Enter(roomGate);
+            else if (!Monitor.TryEnter(roomGate))
+                return null;
+
             lock (_lock)
             {
                 if (!_rooms.TryGetValue(roomId, out var room) ||
@@ -578,7 +592,8 @@ namespace Emby.Plugins.WatchTogether
             ICommandIssuer issuer,
             DateTimeOffset now,
             Func<string> currentServerIdProvider,
-            Func<Room, IReadOnlyDictionary<string, SessionSnapshot>> snapshotProvider)
+            Func<Room, RoomRuntime, IReadOnlyDictionary<string, SessionSnapshot>> snapshotProvider,
+            Func<DateTimeOffset> commandClock = null)
         {
             action = (action ?? string.Empty).ToLowerInvariant();
             if (action != "pause" && action != "resume" && action != "resync")
@@ -665,7 +680,7 @@ namespace Emby.Plugins.WatchTogether
 
                     var currentSnapshots = snapshotProvider == null
                         ? snapshots
-                        : snapshotProvider(room);
+                        : snapshotProvider(room, runtime);
                     if (currentSnapshots == null ||
                         !currentSnapshots.TryGetValue(user, out var snapshot) ||
                         snapshot == null || !snapshot.Online)
@@ -685,8 +700,25 @@ namespace Emby.Plugins.WatchTogether
                         continue;
                     }
 
-                    if (issuer.TryIssue(roomId, room.AdminUserId, user, snapshot, command, positionTicks: null, now, out string error))
+                    var issuedAt = commandClock?.Invoke() ?? now;
+                    PlaybackCommandTiming timing = null;
+                    string error;
+                    bool accepted;
+                    if (commandClock != null && issuer is SessionBridgeCommandIssuer bridgeIssuer)
                     {
+                        timing = new PlaybackCommandTiming(commandClock);
+                        accepted = bridgeIssuer.TryIssue(roomId, room.AdminUserId, user, snapshot, command,
+                            positionTicks: null, issuedAt, out error, timing);
+                    }
+                    else
+                    {
+                        accepted = issuer.TryIssue(roomId, room.AdminUserId, user, snapshot, command,
+                            positionTicks: null, issuedAt, out error);
+                    }
+
+                    if (accepted)
+                    {
+                        issuedAt = timing?.StartedAtUtc ?? issuedAt;
                         lock (_lock)
                         {
                             if (IsCurrentRoom(room) && room.IsJoined(user))
@@ -698,11 +730,11 @@ namespace Emby.Plugins.WatchTogether
                                     ItemId = snapshot.ItemId,
                                     Command = command,
                                     PositionTicks = null,
-                                    IssuedAtUtc = now,
+                                    IssuedAtUtc = issuedAt,
                                     Retries = 0,
                                 };
                                 runtime.RecordDiagnosticEvent(
-                                    "manual_action", user, command, "pending", null, null, now);
+                                    "manual_action", user, command, "pending", null, null, issuedAt);
                             }
                             issued.Add(user);
                         }

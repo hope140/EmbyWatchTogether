@@ -4313,6 +4313,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         page._wtDiagnosticOpen = {};
         page._wtRoomBusy = {};
         page._wtRoomsLoading = false;
+        page._wtRoomsRequest = null;
         page._wtRoomsSignature = null;
         page._wtIsAdmin = undefined;
         page._wtTabsPermissionReady = false;
@@ -5562,10 +5563,10 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
     }
 
     var routePageNames = {
-        rooms: 'WatchTogetherRoomsV38',
-        invite: 'WatchTogetherInviteV38',
-        settings: 'WatchTogetherSettingsV38',
-        admin: 'WatchTogetherAdminV38'
+        rooms: 'WatchTogetherRoomsV39',
+        invite: 'WatchTogetherInviteV39',
+        settings: 'WatchTogetherSettingsV39',
+        admin: 'WatchTogetherAdminV39'
     };
 
     function currentRoute(page) {
@@ -6560,7 +6561,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             }
             // This read is fresher than Rooms, but the endpoint is not an atomic snapshot.
             renderRooms(page, page._wtRooms || []);
-            if (!itemId || page.ownerDocument.hidden || page._wtMetadataFlights[roomId] ||
+            if (!itemId || page.ownerDocument.hidden || page._wtMetadataFlights[roomId] === target ||
                 target.nextMetadataReadAt > Date.now()) return;
             // Preserve the previous metadata request cadence for an unchanged item.
             target.nextMetadataReadAt = Date.now() + 5000;
@@ -6571,7 +6572,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 return;
             }
             var metadataFlights = page._wtMetadataFlights;
-            metadataFlights[roomId] = true;
+            metadataFlights[roomId] = target;
             function currentMedia() {
                 return pageActionAllowed(page) && page._wtMediaTargets[roomId] === target &&
                     page._wtRoomStates[roomId] && idKey(mediaItemId(page._wtRoomStates[roomId].state)) === idKey(itemId) &&
@@ -6596,7 +6597,9 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                 if (!currentMedia()) return;
                 page._wtMedia[roomId] = { unavailable: true };
                 updateRoomPresentation(page, room);
-            }).finally(function () { delete metadataFlights[roomId]; });
+            }).finally(function () {
+                if (metadataFlights[roomId] === target) delete metadataFlights[roomId];
+            });
         }).catch(function () {
             if (!current()) return;
             clearRoomStateExpiry(page, roomId);
@@ -7061,9 +7064,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             if (region) region.setAttribute('aria-busy', 'false');
             return Promise.resolve();
         }
-        if (page._wtRoomsLoading) {
-            return Promise.resolve();
-        }
+        if (page._wtRoomsLoading) return Promise.resolve();
 
         var container = page.querySelector('#wtRooms');
         page._wtRoomsLoading = true;
@@ -7074,7 +7075,7 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
         var scope = page._wtIsAdmin === true && (page._wtVisibleRoute === 'admin' || page._wtVisibleRoute === 'invite') ? 'all' : 'mine';
         var cards = scope === 'all' && page._wtVisibleRoute === 'admin';
         var requestedAt = Date.now();
-        return apiGet(page, 'WatchTogether/Rooms?Scope=' + scope + (cards ? '&IncludePlayback=true' : '')).then(function (rooms) {
+        var request = apiGet(page, 'WatchTogether/Rooms?Scope=' + scope + (cards ? '&IncludePlayback=true' : '')).then(function (rooms) {
             var list = Array.isArray(rooms) ? rooms : [];
             if (cards) list.forEach(function (room) {
                 var value = room.Playback;
@@ -7141,9 +7142,19 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
             return [];
         }).then(function (result) {
             page._wtRoomsLoading = false;
+            page._wtRoomsRequest = null;
             if (container) container.setAttribute('aria-busy', 'false');
             return result;
         });
+        page._wtRoomsRequest = request;
+        return request;
+    }
+
+    function reloadRoomsAfterDeletion(page) {
+        if (!page._wtRoomsRequest) return loadRooms(page);
+        // The active read started before the delete completed. A read started
+        // after it settles can be shared with another refresh.
+        return page._wtRoomsRequest.then(function () { return page._wtRoomsRequest || loadRooms(page); });
     }
 
     function setButtonBusy(button, isBusy, busyLabel) {
@@ -7264,11 +7275,11 @@ define(['baseView', 'dom', 'loading', 'globalize', 'emby-input', 'emby-select', 
                     if (page._wtIsAdmin !== true) throw new Error(t('房间不存在或已删除'));
                     clearRoomFeedback(page, room.RoomId);
                     notifyToast(page, t('房间已结束或已由其他管理员结束'));
-                    return loadRooms(page);
+                    return reloadRoomsAfterDeletion(page);
                 }
                 clearRoomFeedback(page, room.RoomId);
                 notifyToast(page, ending ? t('房间已结束') : t('房间已删除'));
-                return loadRooms(page);
+                return reloadRoomsAfterDeletion(page);
             })
             .catch(function (err) {
                 roomFeedback(page, room.RoomId, (ending ? t('结束失败：') : t('删除失败：')) + errorMessage(err), true, true);

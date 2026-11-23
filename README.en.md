@@ -13,7 +13,7 @@ Watch together with another person on the same Emby Server. Create a room, open 
 | Channel | Current version | For whom |
 | --- | --- | --- |
 | Stable | [v1.8.0.0](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.0) · [notes](docs/releases/v1.8.0.0.md) | First installs and everyday use |
-| Beta | [v1.8.0.4](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.4) · [notes](docs/releases/v1.8.0.4.md) | Try the latest improvements |
+| Beta | [v1.8.0.5](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.5) · [notes](docs/releases/v1.8.0.5.md) | Try the latest improvements |
 
 Choose the stable release for a first install. The interface is available in Simplified Chinese, Traditional Chinese, and English. See all [release notes](docs/releases/README.md) and the [client compatibility record](docs/client-compatibility.md).
 

@@ -381,7 +381,8 @@ namespace Emby.Plugins.WatchTogether
                 plugin.Issuer,
                 DateTimeOffset.UtcNow,
                 plugin.ResolveServerId,
-                currentRoom => actionSnapshots = BuildSnapshots(plugin, currentRoom));
+                (currentRoom, runtime) => actionSnapshots = BuildSnapshots(plugin, currentRoom, runtime),
+                commandClock: () => DateTimeOffset.UtcNow);
             if ((request.Action ?? string.Empty).Equals("pause", StringComparison.OrdinalIgnoreCase) ||
                 (request.Action ?? string.Empty).Equals("resume", StringComparison.OrdinalIgnoreCase))
             {
@@ -413,20 +414,22 @@ namespace Emby.Plugins.WatchTogether
                 throw new KeyNotFoundException("room not found");
             }
 
+            string userId = CurrentUserId();
             bool admin = IsAdmin();
-            bool participant = room.HasParticipant(CurrentUserId());
+            bool participant = room.HasParticipant(userId);
             if (!admin && !participant)
             {
                 throw new UnauthorizedAccessException("not a room participant");
             }
 
-            var runtime = plugin.Rooms.GetRuntime(request.Id);
-            if (runtime == null)
+            using var access = plugin.Rooms.TryEnterRoom(request.Id);
+            if (access == null || !ReferenceEquals(room, access.Room))
             {
                 throw new KeyNotFoundException("room not found");
             }
 
-            var snapshots = BuildSnapshots(plugin, room);
+            var runtime = access.Runtime;
+            var snapshots = BuildSnapshots(plugin, room, runtime);
             return new
             {
                 RoomId = room.Id,
@@ -442,9 +445,9 @@ namespace Emby.Plugins.WatchTogether
                 IsSelfService = room.IsSelfService,
                 CurrentUserIsParticipant = participant,
                 IsAdmin = admin,
-                CanEnd = admin || room.HasParticipant(CurrentUserId()),
+                CanEnd = admin || participant,
                 Participants = BuildParticipantSummaries(room),
-                CurrentUserJoined = room.IsJoined(CurrentUserId()),
+                CurrentUserJoined = room.IsJoined(userId),
                 Sessions = snapshots.Values.Select(s => new
                 {
                     UserId = s.UserId,
@@ -487,7 +490,7 @@ namespace Emby.Plugins.WatchTogether
                         "Watch Together is unavailable on the current server. Please retry shortly.");
                 }
 
-                var snapshots = BuildSnapshots(plugin, room);
+                var snapshots = BuildSnapshots(plugin, room, access.Runtime);
                 var now = DateTimeOffset.UtcNow;
                 access.Runtime.RecordDiagnosticSnapshots(snapshots, now);
                 return SyncDiagnostics.Build(
@@ -547,11 +550,6 @@ namespace Emby.Plugins.WatchTogether
 
             var beforeLeaveSnapshots = BuildSnapshots(plugin, room);
             var transition = plugin.Rooms.LeaveParticipantResult(request.Id, userId);
-            if (transition.Changed)
-            {
-                NotifyMembershipChange(plugin, request.Id, userId,
-                    "对方已退出房间，自动同步已停止");
-            }
             bool activeBeforeLeave = transition.PreviousState == RoomState.Barrier ||
                 transition.PreviousState == RoomState.Watching;
             bool sameServer = !string.IsNullOrWhiteSpace(transition.ServerId) &&
@@ -646,6 +644,20 @@ namespace Emby.Plugins.WatchTogether
                             }
                         }
                     }
+                }
+            }
+
+            if (transition.Changed)
+            {
+                try
+                {
+                    NotifyMembershipChange(plugin, request.Id, userId,
+                        "对方已退出房间，自动同步已停止", participantLeft: true);
+                }
+                catch
+                {
+                    // A notice can fail while selecting a destination, before
+                    // the best-effort transport even runs. Keep the leave result.
                 }
             }
 
@@ -800,16 +812,18 @@ namespace Emby.Plugins.WatchTogether
             return new { Configured = false };
         }
 
-        private static Dictionary<string, SessionSnapshot> BuildSnapshots(Plugin plugin, Room room)
+        private static Dictionary<string, SessionSnapshot> BuildSnapshots(
+            Plugin plugin, Room room, RoomRuntime runtime = null)
         {
             var candidates = plugin.Bridge == null
                 ? new List<SessionSnapshot>()
                 : new SessionBridgeSnapshotProvider(plugin.Bridge).GetSessionSnapshots();
             var now = DateTimeOffset.UtcNow;
-            return SessionSelector.Select(candidates, room.JoinedParticipantUserIds, now);
+            return SessionSelector.SelectWithPrevious(candidates, room.JoinedParticipantUserIds, now, runtime?.Previous);
         }
 
-        private static void NotifyMembershipChange(Plugin plugin, string roomId, string changedUserId, string text)
+        private static void NotifyMembershipChange(
+            Plugin plugin, string roomId, string changedUserId, string text, bool participantLeft = false)
         {
             if (!IsSyncNotificationsEnabled(plugin) || plugin.Bridge == null)
             {
@@ -824,7 +838,8 @@ namespace Emby.Plugins.WatchTogether
                     return;
                 }
                 var room = access.Room;
-                if (!plugin.Rooms.IsCurrentRoom(room) || !IsSameServer(room.ServerId, plugin.ResolveServerId()))
+                if (!plugin.Rooms.IsCurrentRoom(room) || !IsSameServer(room.ServerId, plugin.ResolveServerId()) ||
+                    (participantLeft && room.IsJoined(changedUserId)))
                 {
                     return;
                 }
@@ -858,7 +873,8 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var message in messages)
             {
-                TrySendDisplayMessage(plugin, message, requireSyncNotifications: true);
+                TrySendDisplayMessage(plugin, message, requireSyncNotifications: true,
+                    departedUserId: participantLeft ? changedUserId : null);
             }
         }
 
@@ -876,7 +892,7 @@ namespace Emby.Plugins.WatchTogether
                 foreach (var userId in result.Users)
                 {
                     if (!room.IsJoined(userId)) continue;
-                    var snapshots = BuildSnapshots(plugin, room);
+                    var snapshots = BuildSnapshots(plugin, room, access.Runtime);
                     if (!snapshots.TryGetValue(userId, out var snapshot) || snapshot == null || !snapshot.Online || snapshot.Capabilities?.CanDisplayMessage != true) continue;
                     if (actionSnapshots == null || !actionSnapshots.TryGetValue(userId, out var actionSnapshot) ||
                         !HasSameSessionIdentity(actionSnapshot, snapshot))
@@ -902,12 +918,12 @@ namespace Emby.Plugins.WatchTogether
 
             foreach (var message in messages)
             {
-                TrySendDisplayMessage(plugin, message, requireSyncNotifications: true);
+                TrySendDisplayMessage(plugin, message, requireSyncNotifications: true, useBoundSessions: true);
             }
         }
 
         private static DisplayMessageResult TrySendDisplayMessage(Plugin plugin, DisplayMessageTarget message,
-            bool requireSyncNotifications = false)
+            bool requireSyncNotifications = false, bool useBoundSessions = false, string departedUserId = null)
         {
             try
             {
@@ -919,18 +935,20 @@ namespace Emby.Plugins.WatchTogether
                         !ReferenceEquals(plugin.Rooms, rooms) || plugin.Bridge == null ||
                         (requireSyncNotifications && !IsSyncNotificationsEnabled(plugin)) ||
                         !access.Room.IsJoined(message.UserId) ||
+                        (departedUserId != null && access.Room.IsJoined(departedUserId)) ||
                         !IsSameServer(message.ServerId, plugin.ResolveServerId()))
                     {
                         return DisplayMessageResult.Skipped;
                     }
 
-                    var snapshots = BuildSnapshots(plugin, access.Room);
+                    var snapshots = BuildSnapshots(plugin, access.Room, useBoundSessions ? access.Runtime : null);
                     if (!snapshots.TryGetValue(message.UserId, out snapshot) ||
                         snapshot == null || !snapshot.Online ||
                         snapshot.Capabilities?.CanDisplayMessage != true ||
                         !HasSameSessionIdentity(message.Snapshot, snapshot) ||
                         !ReferenceEquals(plugin.Rooms, rooms) || !rooms.IsCurrentRoom(message.Room) ||
                         !access.Room.IsJoined(message.UserId) ||
+                        (departedUserId != null && access.Room.IsJoined(departedUserId)) ||
                         !IsSameServer(message.ServerId, plugin.ResolveServerId()))
                     {
                         return DisplayMessageResult.Skipped;

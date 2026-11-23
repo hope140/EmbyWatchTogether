@@ -26,10 +26,10 @@ Plugin ──> WatchTogetherEntryPoint ──> RoomManager ──> RoomStore (ro
 ```
 
 - `SessionBridge` 将 Emby 会话和事件适配为快照、命令和立即轮询唤醒；`SendPlayItemAsync` 通过 Emby `SendPlayCommand` 请求当前会话打开指定 Item。内置命令发送器只向调用方返回稳定错误码，完整异常仅写入服务器私有日志。
-- `SessionSelector` 为参与者选择有效会话并绑定 session identity，初始绑定优先选择原始远控标志满足 `RoomEligibility` 的会话；只有已进入 `Watching` 的绑定身份才允许使用短时远控恢复，避免旧会话确认新设备命令。
-- `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息目标和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份，消息网络发送在退出 gate 后通过 5 秒有界 issuer 执行；`RoomStore` 只持久化房间元数据。房间保留 `CreatorUserId` 和 `IsSelfService`，旧 JSON 缺失字段时回退到旧管理员创建语义。
+- `SessionSelector` 为参与者选择有效会话并绑定 session identity，初始绑定优先选择原始远控标志满足 `RoomEligibility` 的会话；只有已进入 `Watching` 的绑定身份才允许使用短时远控恢复，避免旧会话确认新设备命令。房间状态、诊断和管理员播放控制在房间 gate 内读取当前会话，并复用当前绑定解除同分；缺少仍有效的唯一绑定时跳过歧义会话。
+- `RoomManager` 管理房间元数据和每房间 `RoomRuntime`；房间命令、消息目标和离开后的播放副作用在每房间 gate 内重新校验当前房间、成员关系、服务器和会话身份，消息网络发送在退出 gate 后通过 5 秒有界 issuer 执行；`RoomStore` 只持久化房间元数据。房间保留 `CreatorUserId` 和 `IsSelfService`，旧 JSON 缺失字段时回退到旧管理员创建语义。暂离先完成暂停检查和尝试，再发送可选提示；提示读取或传输失败不改写暂停结果，已重新加入时跳过旧提示。
 - `RoomInvitationManager` 保存运行时邀请码的校验值、创建者、名称和有效期，不保存明文邀请码或独立持久化文件。接受操作在其串行边界内调用 `RoomManager` 原子创建完整双人房间，创建成功后清除该创建者的全部待接受邀请；重启会丢弃未接受邀请。
-- `SyncEngine` 按轮询驱动每房间状态机，使用独立 gate 串行处理；状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching`、`Recovering`、`Unavailable`。`Handoff` 让参与者打开主用户当前 Item，通常确认后再转入由 `Barrier` 负责的时间轴对齐；主用户恢复播放后仅观察自然对齐，满足完整条件时无控制地进入 `Watching`；`Recovering` 只等待非 Primary 参与者原 User、原 SessionId 和原 ItemId 的短暂恢复，Primary 缺失继续走停止 debounce 和晚到换集候选。
+- `SyncEngine` 的后台轮询每次读取一批 Emby 会话快照，最多并行推进 4 个房间。同一房间最多运行一个同步任务，并在该房间的 gate 内推进状态机。房间正忙时，调度器在后续轮询使用新快照，不堆积历史任务。快照提供器故障会使之前的观察失效，持续故障会清除每个房间的待确认命令，即使某个房间在故障发生时正忙。命令在开始调用 Emby 传输时计时，观察时间仍用于快照和状态判断。房间状态包括 `Waiting`、`Handoff`、`Barrier`、`Watching`、`Recovering`、`Unavailable`。`Handoff` 让参与者打开主用户当前 Item，通常确认后再转入由 `Barrier` 负责的时间轴对齐；主用户恢复播放后仅观察自然对齐，满足完整条件时无控制地进入 `Watching`；`Recovering` 只等待非 Primary 参与者原 User、原 SessionId 和原 ItemId 的短暂恢复，Primary 缺失继续走停止 debounce 和晚到换集候选。
 - `WatchTogetherService` 提供 REST 管理接口并在服务端检查身份、管理员权限和成员关系；运行时尚未就绪时明确返回可重试的服务不可用状态。房间响应只附带该房间两名参与者的受限显示摘要，普通参与者不能借此读取全站用户目录；管理页按钮不是安全边界。邀请码接口只返回当前用户的邀请元数据和稳定状态，接受成功后当前房间的任一参与者或管理员可按房间权限结束房间。
 - `GET /WatchTogether/Rooms/{Id}/Diagnostics` 在当前房间 gate 内重新校验房间、成员和服务器身份，返回只读、有界、脱敏的同步诊断 DTO。诊断事件环、当前选中快照、Pending、Handoff、Barrier、Recovery 和 drift telemetry 仅驻留 `RoomRuntime` 内存，房间删除或运行时重建时丢弃，不写入 `rooms.json`；导出使用 `userA`/`userB` 别名、短 hash 和稳定错误分类，不包含用户名、GUID、Token、路径或异常文本。
 
@@ -45,7 +45,7 @@ Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用
 
 页面先通过宿主 getCurrentUser({enableCache:false}) 核对当前用户 ID 和明确的 Policy.IsAdministrator，仅管理员读取 WatchTogether/Users；普通用户读取自己的房间与邀请。角色读取失败不授予管理权限，身份或页面代次失效时旧结果无效。服务端独立执行权限与房间过滤；宿主 SDK 离线用户回退保持原样，未证明它导致本次问题。
 
-本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；v1.7.3.3 测试版新增仅管理员可见的[后台管理](maintenance/admin-management-preview.md)，普通用户只有房间与邀请。v1.7.3.4 的页面键为 `WatchTogetherRoomsV35`、`WatchTogetherInviteV35`、`WatchTogetherSettingsV35`、`WatchTogetherAdminV35`，共享 `WatchTogetherNativeV35.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。后台小卡片与普通房间共用外框和媒体区的主题样式。
+本工作区的 S122 界面将共享嵌入式 HTML/AMD 控制器组织为“房间 / 创建与邀请 / 设置”三页；v1.7.3.3 测试版新增仅管理员可见的[后台管理](maintenance/admin-management-preview.md)，普通用户只有房间与邀请。v1.8.0.5 的页面键为 `WatchTogetherRoomsV39`、`WatchTogetherInviteV39`、`WatchTogetherSettingsV39`、`WatchTogetherAdminV39`，共享 `WatchTogetherNativeV39.js`，只有房间入口显示在用户菜单。标签由宿主 `mainTabsManager` 管理，权限判定后注册，只清理当前页仍拥有的标签元素。后台小卡片与普通房间共用外框和媒体区的主题样式。
 
 用户菜单名在 `GetPages()` 注册时读取服务器配置 `UICulture`：中文显示“同映”，其他或不可读取时显示“Watch Together”。插件身份不变，页面和播放通知语言仍按用户语言处理。配置变更后宿主是否重新读取菜单注册尚未实机确认，可能需要重启；单元测试不能代替宿主验证。
 
@@ -53,7 +53,7 @@ Plugin 的普通设置保存与安装后的 PendingUpdateVersion 持久化共用
 
 S124 已随 v1.7.0.1 发布，使用 V16 页面/控制器缓存键，去除 Dashboard 全局依赖并使用宿主相对路由链接；四个单选控件沿用 Madby 普通单选的宿主默认菜单模式。旧 Theater 的直属箭头按控件 grid 行居中，新版 Web 保留其包装层定位；变更证据和真实验收边界见经验记录第 31、32 节。
 
-普通房间页对所有角色只读取本人房间（`/Rooms?Scope=mine`），后台页读取要求服务端管理员权限的 `Scope=all`，每轮读取一次含播放摘要的列表，可见卡片按当前用户权限按需获取媒体。无 scope 的旧调用语义保留。两页在前台每秒检查一次，后台或隐藏时暂停房间轮询，未完成的读取不重叠，列表失败后退避重试。普通房间页读取 `/Rooms` 和各房间的 `/State`，并在严格状态、成员、同 Item 与资格检查后，通过当前登录用户的 Emby `getItem` 接口读取片名。同一媒体详情的读取间隔至少为五秒。状态新鲜度为 10 秒，错误或过期时不显示旧片名；状态与媒体请求独立，迟到响应绑定页面代次、账号、服务器、房间与媒体目标。媒体区在可靠同步状态下显示片名及当前授权 DTO 提供的背景；等待、失效和无图时使用中性占位。背景通过宿主 `getImageUrl` 生成，仅接受绑定服务器同源 HTTP(S) 地址且不得嵌入用户名/密码；图片加载回调绑定页面、房间、目标和 URL，失效时清除 src。片名、图片标识和 URL 不进入诊断导出。`/State` 是非原子读取，其结果只用于展示，不能替代同步核心身份确认。列表 scope 扩展不修改同步核心或播放控制协议。
+普通房间页对所有角色只读取本人房间（`/Rooms?Scope=mine`），后台页读取要求服务端管理员权限的 `Scope=all`，每轮读取一次含播放摘要的列表，可见卡片按当前用户权限按需获取媒体。无 scope 的旧调用语义保留。两页在前台每秒检查一次，后台或隐藏时暂停房间轮询，同一路径的列表与状态读取各自去重，列表失败后退避重试。结束房间成功后等待已开始的列表读取完成，再刷新列表；刷新期间保持该房间操作按钮禁用。普通房间页读取 `/Rooms` 和各房间的 `/State`，并在严格状态、成员、同 Item 与资格检查后，通过当前登录用户的 Emby `getItem` 接口读取片名。同一媒体详情的读取间隔至少为五秒。切换媒体目标时立即发起新详情请求，仅当前目标允许更新片名和背景。状态新鲜度为 10 秒，错误或过期时不显示旧片名；状态与媒体请求独立，迟到响应绑定页面代次、账号、服务器、房间与媒体目标。媒体区在可靠同步状态下显示片名及当前授权 DTO 提供的背景；等待、失效和无图时使用中性占位。背景通过宿主 `getImageUrl` 生成，仅接受绑定服务器同源 HTTP(S) 地址且不得嵌入用户名/密码；图片加载回调绑定页面、房间、目标和 URL，失效时清除 src。片名、图片标识和 URL 不进入诊断导出。`/State` 是非原子读取，其结果只用于展示，不能替代同步核心身份确认。列表 scope 扩展不修改同步核心或播放控制协议。
 
 房间外层使用浅色细边框。参与者头像仅从当前房间两位成员及其受限摘要中取 ID，通过宿主 `getUserImageUrl` 生成同服务器地址，不新增用户资料查询。头像与同步状态独立；缺图或失败保留首字，页面代次内抑制重复失败请求。账号、服务器、房间或页面生命周期变化使旧图片回调失效，清除图片 src；头像信息不进入诊断、日志或持久缓存。
 
