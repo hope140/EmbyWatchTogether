@@ -132,6 +132,42 @@ namespace Emby.Plugins.WatchTogether
             ["参与者已请求重新同步，请稍候"] = "Ein Teilnehmer hat eine erneute Synchronisierung angefordert. Bitte kurz warten."
         };
 
+        private static readonly IReadOnlyDictionary<string, string> Spanish = new Dictionary<string, string>
+        {
+            ["一起观看"] = "Ver juntos",
+            ["对方已停止播放，同步已暂停"] = "El otro participante detuvo la reproducción. La sincronización está en pausa.",
+            ["正在自动重新同步，请稍候"] = "Resincronizando automáticamente. Un momento.",
+            ["双方打开了不同视频，已暂停同步；请打开同一视频"] = "Hay vídeos distintos abiertos. La sincronización está en pausa; abran el mismo vídeo.",
+            ["正在等待另一端载入，准备好后会自动继续"] = "Esperando a que cargue el vídeo del otro participante. La reproducción se reanudará cuando esté listo.",
+            ["本次跟随未完成，请在房间中手动重新同步"] = "No se completó el cambio de vídeo. Resincroniza desde la sala.",
+            ["已跟随切换，同步完成"] = "Se completó el cambio de vídeo y la sincronización.",
+            ["同步已完成，可以继续观看"] = "Sincronización completada. Ya pueden seguir viendo el vídeo.",
+            ["对方已加入房间，请打开同一视频"] = "El otro participante se unió a la sala. Abran el mismo vídeo.",
+            ["对方已退出房间，自动同步已停止"] = "El otro participante salió de la sala. Se detuvo la sincronización automática.",
+            ["管理员已暂停房间播放"] = "Un administrador pausó la reproducción en la sala.",
+            ["管理员已继续房间播放"] = "Un administrador reanudó la reproducción en la sala.",
+            ["管理员已发起重新同步，请稍候"] = "Un administrador solicitó resincronizar. Un momento.",
+            ["参与者已请求重新同步，请稍候"] = "Un participante solicitó resincronizar. Un momento."
+        };
+
+        private static readonly IReadOnlyDictionary<string, string> BrazilianPortuguese = new Dictionary<string, string>
+        {
+            ["一起观看"] = "Assistir juntos",
+            ["对方已停止播放，同步已暂停"] = "O outro participante parou a reprodução. A sincronização está pausada.",
+            ["正在自动重新同步，请稍候"] = "Ressincronizando automaticamente. Aguarde.",
+            ["双方打开了不同视频，已暂停同步；请打开同一视频"] = "Há vídeos diferentes abertos. A sincronização está pausada; abram o mesmo vídeo.",
+            ["正在等待另一端载入，准备好后会自动继续"] = "Aguardando o vídeo carregar para o outro participante. A reprodução será retomada quando estiver pronto.",
+            ["本次跟随未完成，请在房间中手动重新同步"] = "A troca de vídeo não foi concluída. Ressincronize pela sala.",
+            ["已跟随切换，同步完成"] = "A troca de vídeo e a sincronização foram concluídas.",
+            ["同步已完成，可以继续观看"] = "Sincronização concluída. Vocês já podem continuar assistindo.",
+            ["对方已加入房间，请打开同一视频"] = "O outro participante entrou na sala. Abram o mesmo vídeo.",
+            ["对方已退出房间，自动同步已停止"] = "O outro participante saiu da sala. A sincronização automática parou.",
+            ["管理员已暂停房间播放"] = "Um administrador pausou a reprodução na sala.",
+            ["管理员已继续房间播放"] = "Um administrador retomou a reprodução na sala.",
+            ["管理员已发起重新同步，请稍候"] = "Um administrador solicitou a ressincronização. Aguarde.",
+            ["参与者已请求重新同步，请稍候"] = "Um participante solicitou a ressincronização. Aguarde."
+        };
+
         private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Translations =
             new Dictionary<string, IReadOnlyDictionary<string, string>>
             {
@@ -142,6 +178,8 @@ namespace Emby.Plugins.WatchTogether
                 ["ru"] = Russian,
                 ["fr"] = French,
                 ["de"] = German,
+                ["es"] = Spanish,
+                ["pt"] = BrazilianPortuguese,
             };
 
         internal static bool IsLanguage(string language) =>

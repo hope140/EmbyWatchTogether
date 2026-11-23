@@ -8,7 +8,7 @@
 
 ## 当前测试版
 
-- [v1.8.0.3 测试版说明](v1.8.0.3.md) · [GitHub Pre-release 下载页](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.3)。修复等待位置时的暂停、换片恢复时的漏报，以及俄语窄屏按钮溢出。
+- [v1.8.0.4 测试版说明](v1.8.0.4.md) · [GitHub Pre-release 下载页](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.4)。新增西班牙语和巴西葡萄牙语。
 
 
 ## 历史正式版
@@ -30,6 +30,7 @@
 
 ## 历史测试版
 
+- [v1.8.0.3 测试版说明](v1.8.0.3.md) · [GitHub Pre-release 下载页](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.3)。修复等待位置时的暂停、换片恢复时的漏报，以及俄语窄屏按钮溢出。
 - [v1.8.0.2 测试版说明](v1.8.0.2.md) · [GitHub Pre-release 下载页](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.2)。新增日语、韩语、俄语、法语和德语。
 - [v1.8.0.1 测试版说明](v1.8.0.1.md) · [GitHub Pre-release 下载页](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.8.0.1)。更新邀请与房间状态显示，修复缺失位置引起的错误跳转。
 - [v1.7.3.5 测试版说明](v1.7.3.5.md) · [GitHub Pre-release 与下载](https://github.com/hope140/EmbyWatchTogether/releases/tag/v1.7.3.5)，修复同步恢复后仍显示旧错误。

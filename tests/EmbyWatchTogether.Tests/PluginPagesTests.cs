@@ -37,8 +37,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.Equal(expected, pages.Single(p => p.EnableInUserMenu).DisplayName);
             Assert.Equal("Watch Together", plugin.Name);
             Assert.Equal(Plugin.PluginId, plugin.Id);
-            Assert.Equal("Watch Together", pages.Single(p => p.Name == "WatchTogetherInviteV37").DisplayName);
-            Assert.Equal("Watch Together", pages.Single(p => p.Name == "WatchTogetherSettingsV37").DisplayName);
+            Assert.Equal("Watch Together", pages.Single(p => p.Name == "WatchTogetherInviteV38").DisplayName);
+            Assert.Equal("Watch Together", pages.Single(p => p.Name == "WatchTogetherSettingsV38").DisplayName);
         }
 
         [Fact]
@@ -68,9 +68,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 #pragma warning disable SYSLIB0050
             var pages = ((Plugin)FormatterServices.GetUninitializedObject(typeof(Plugin))).GetPages().ToList();
 #pragma warning restore SYSLIB0050
-            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV37");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV37");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV37");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherRoomsV38");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherInviteV38");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherSettingsV38");
             Assert.Equal(5, pages.Count);
             Assert.Single(pages, page => page.EnableInUserMenu);
             Assert.All(pages.Where(page => !page.Name.EndsWith(".js")), page =>
@@ -78,7 +78,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV7");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogether");
-            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV37.js");
+            Assert.Contains(pages, page => page.Name == "WatchTogetherNativeV38.js");
             Assert.DoesNotContain(pages, page => page.Name == "WatchTogetherSettingsV3.js");
         }
 
@@ -105,7 +105,7 @@ namespace Emby.Plugins.WatchTogether.Tests
                 }
             }
 
-            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV37");
+            var page = plugin.GetPages().Single(item => item.Name == "WatchTogetherRoomsV38");
             Assert.Equal("people", page.MenuIcon);
             Assert.False(page.EnableInMainMenu);
             Assert.True(page.EnableInUserMenu);
@@ -122,7 +122,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var script = ReadResource(typeof(Plugin).Assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
             foreach (var route in new[] { "Rooms", "Invite", "Settings", "Admin", "Native" })
             {
-                var name = "WatchTogether" + route + "V37" + (route == "Native" ? ".js" : "");
+                var name = "WatchTogether" + route + "V38" + (route == "Native" ? ".js" : "");
                 Assert.Contains(name, names);
                 var previousKey = "WatchTogether" + route + "V35";
                 Assert.DoesNotContain(previousKey + (route == "Native" ? ".js" : ""), names);
@@ -151,7 +151,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             var javascript = ReadResource(assembly, "Emby.Plugins.WatchTogether.Configuration.WatchTogether.js");
 
             Assert.Contains("data-bindheader=\"true\"", html);
-            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV37.js\"", html);
+            Assert.Contains("data-controller=\"__plugin/WatchTogetherNativeV38.js\"", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", html);
             Assert.DoesNotContain("WatchTogetherSettingsV6", javascript);
             Assert.DoesNotContain("WatchTogetherSettingsV5", html);

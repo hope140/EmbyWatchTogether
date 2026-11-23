@@ -18,7 +18,7 @@ async function open(page, scenario = 'active', theme = 'light', width = 1100, he
 
 async function selectView(page, view) {
   const name = { rooms: 'Rooms', invite: 'Invite', settings: 'Settings', admin: 'Admin' }[view];
-  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V37"]').click();
+  await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V38"]').click();
   const panel = { rooms: '#wtRoomsSection', invite: '#wtInvitationSection', settings: '#wtSettingsSection', admin: '#wtRoomsSection' }[view];
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
@@ -682,7 +682,7 @@ test('locale falls back safely when host locale is missing or throws', async ({ 
   await expect(page.locator('#wtRoomsHeading')).toHaveText('我的房间');
   await page.goto('/?locale=throw&html_lang=en');
   await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
-  await page.goto('/?locale=es-ES&html_lang=zh-CN');
+  await page.goto('/?locale=nl-NL&html_lang=zh-CN');
   await expect(page.locator('#wtRoomsHeading')).toHaveText('My rooms');
 });
 
@@ -764,7 +764,7 @@ test('a language preference request failure does not prevent the room page loadi
 for (const [tag, expected] of [
   ['zh-Hant', 'zh-Hant'], ['zh-TW', 'zh-Hant'], ['zh-HK', 'zh-Hant'],
   ['zh-MO', 'zh-Hant'], ['zh_hant_hk', 'zh-Hant'], ['zh-Hans-TW', 'zh'],
-  ['zh-CN', 'zh'], ['zh-SG', 'zh'], ['en-US', 'en'], ['es-ES', 'en']
+  ['zh-CN', 'zh'], ['zh-SG', 'zh'], ['en-US', 'en'], ['nl-NL', 'en']
 ]) {
   test(`host language ${tag} is normalized to ${expected}`, async ({ page }) => {
     await page.goto('/?scenario=empty&locale=' + tag);
@@ -787,8 +787,9 @@ test('Traditional Chinese covers dynamic status, confirmation, feedback and swit
 });
 
 for (const [tag, expected] of [['zh-CN', 'zh'], ['zh-TW', 'zh-Hant'], ['en-US', 'en'],
-  ['ja', 'ja'], ['ko-KR', 'ko'], ['ru-RU', 'ru'], ['fr-FR', 'fr'], ['de-DE', 'de']]) {
-  test(`both creation paths submit ${expected}`, async ({ page }) => {
+  ['ja', 'ja'], ['ko-KR', 'ko'], ['ru-RU', 'ru'], ['fr-FR', 'fr'], ['de-DE', 'de'],
+  ['es-ES', 'es'], ['es-MX', 'es'], ['pt-BR', 'pt'], ['pt-PT', 'pt']]) {
+  test(`both creation paths submit ${expected} for ${tag}`, async ({ page }) => {
     await page.goto('/?scenario=admin-member&locale=' + tag);
     await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
     await page.evaluate(() => window.__wtFixture.setRooms([]));
@@ -806,7 +807,9 @@ const additionalLocales = [
   ['ko-KR', 'ko', '내 방', '방 종료', '초대 코드 만들기', '초대 코드를 입력하세요.', '두 참가자가 동영상을 열기를 기다리는 중'],
   ['ru-RU', 'ru', 'Мои комнаты', 'Закрыть комнату', 'Создать код приглашения', 'Введите код приглашения.', 'Ожидание, пока оба участника откроют видео'],
   ['fr-CA', 'fr', 'Mes salons', 'Fermer le salon', 'Créer un code d’invitation', 'Saisissez le code d’invitation.', 'En attente de l’ouverture de la vidéo par les deux participants'],
-  ['de_CH', 'de', 'Meine Räume', 'Raum beenden', 'Einladungscode erstellen', 'Geben Sie den Einladungscode ein.', 'Warten, bis beide das Video öffnen']
+  ['de_CH', 'de', 'Meine Räume', 'Raum beenden', 'Einladungscode erstellen', 'Geben Sie den Einladungscode ein.', 'Warten, bis beide das Video öffnen'],
+  ['es-MX', 'es', 'Mis salas', 'Cerrar sala', 'Crear código de invitación', 'Introduce el código de invitación.', 'Esperando que ambos abran el vídeo'],
+  ['pt-BR', 'pt', 'Minhas salas', 'Encerrar sala', 'Criar código de convite', 'Digite o código de convite.', 'Aguardando que os dois abram o vídeo']
 ];
 for (const [tag, language, heading, endRoom, createCode, emptyCode, waitingTitle] of additionalLocales) {
   test(`${tag} localizes rooms, confirmation and invitations at 320px`, async ({ page }) => {
@@ -846,7 +849,7 @@ test('All locale dictionaries cover every source key and preserve placeholders',
   const start = source.indexOf('var translations = { en: {');
   const end = source.indexOf('} };', start);
   const dictionaries = JSON.parse('{"en":' + source.slice(start + 'var translations = { en:'.length, end + 3));
-  expect(Object.keys(dictionaries).sort()).toEqual(['de', 'en', 'fr', 'ja', 'ko', 'ru', 'zh-Hant']);
+  expect(Object.keys(dictionaries).sort()).toEqual(['de', 'en', 'es', 'fr', 'ja', 'ko', 'pt', 'ru', 'zh-Hant']);
   const keys = Object.keys(dictionaries.en).sort();
   for (const [language, entries] of Object.entries(dictionaries)) {
     if (language === 'en') continue;
