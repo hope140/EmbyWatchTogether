@@ -1880,8 +1880,9 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.True(GetBoolean(response, "Changed"));
             Assert.Empty(issuer.Issued);
-            // Before leave, notice preparation (rejoin), then notice send revalidation.
-            Assert.Equal(3, sessionReads);
+            // The second read rejoined the participant before pause validation.
+            // The old leave notice is also stale and needs no further session read.
+            Assert.Equal(2, sessionReads);
         }
 
         [Fact]
@@ -1911,6 +1912,115 @@ namespace Emby.Plugins.WatchTogether.Tests
 
             Assert.True(GetBoolean(response, "Changed"));
             Assert.Empty(issuer.Issued);
+        }
+
+
+        [Fact]
+        public void Leave_NotificationSnapshotFailurePreservesPauseAndItsResult()
+        {
+            var primary = Guid.NewGuid().ToString("N");
+            var leaving = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", primary,
+                new[] { primary, leaving }, primary);
+            manager.GetRuntime(room.Id).State = RoomState.Watching;
+            var issuer = new RecordingIssuer();
+            var sessionManager = new Mock<ISessionManager>();
+            var sessions = new List<SessionInfo>
+            {
+                NewSession(sessionManager, "primary", primary),
+                NewSession(sessionManager, "leaving", leaving),
+            };
+            bool notificationReadFailed = false;
+            sessionManager.Setup(s => s.Sessions).Returns(() =>
+            {
+                if (issuer.Issued.Count == 1 && !notificationReadFailed)
+                {
+                    notificationReadFailed = true;
+                    throw new InvalidOperationException("notification snapshot unavailable");
+                }
+                return sessions;
+            });
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var plugin = NewPlugin(manager, bridge, issuer, "server-1");
+            SetPluginConfiguration(plugin, new PluginConfiguration { NotifyOnSyncActions = true });
+            var service = NewService(leaving);
+            SetRuntimePlugin(service, plugin);
+
+            var result = service.Post(new LeaveRoomRequest { Id = room.Id });
+
+            Assert.True(notificationReadFailed);
+            Assert.False(room.IsJoined(leaving));
+            Assert.True(GetBoolean(result, "Changed"));
+            Assert.Equal(1, GetInt(result, "PauseAttempted"));
+            Assert.Equal(1, GetInt(result, "PauseSucceeded"));
+            Assert.Equal(0, GetInt(result, "PauseFailed"));
+            Assert.Null(GetString(result, "PauseError"));
+            var pause = Assert.Single(issuer.Issued);
+            Assert.Equal(primary, pause.userId);
+            Assert.Equal(RemoteCommands.Pause, pause.command);
+
+            var retry = service.Post(new LeaveRoomRequest { Id = room.Id });
+            Assert.False(GetBoolean(retry, "Changed"));
+            Assert.Single(issuer.Issued);
+        }
+
+        [Theory]
+        [InlineData("bound", "bound")]
+        [InlineData("retired", null)]
+        [InlineData(null, null)]
+        public void StateAndControl_ResolveTiedClientsOnlyWithCurrentPreviousIdentity(
+            string previousSessionId, string expectedSessionId)
+        {
+            var primary = Guid.NewGuid().ToString("N");
+            var peer = Guid.NewGuid().ToString("N");
+            var manager = new RoomManager();
+            var room = manager.CreateRoom("server-1", "", "room", primary,
+                new[] { primary, peer }, primary);
+            var sessionManager = new Mock<ISessionManager>();
+            var bound = NewSession(sessionManager, "bound", primary);
+            var other = NewSession(sessionManager, "other", primary);
+            var peerSession = NewSession(sessionManager, "peer", peer);
+            var controller = new Mock<ISessionController>();
+            controller.SetupGet(c => c.SupportsMediaControl).Returns(true);
+            bound.SessionControllers = other.SessionControllers = peerSession.SessionControllers = new[] { controller.Object };
+            var stamp = DateTime.UtcNow;
+            bound.LastActivityDate = stamp;
+            other.LastActivityDate = stamp;
+            peerSession.LastActivityDate = stamp;
+            sessionManager.Setup(s => s.Sessions).Returns(new List<SessionInfo> { other, peerSession, bound });
+
+            using var bridge = new SessionBridge(sessionManager.Object);
+            var runtime = manager.GetRuntime(room.Id);
+            runtime.State = RoomState.Watching;
+            if (previousSessionId != null)
+            {
+                var previous = previousSessionId == "bound" ? bound : NewSession(sessionManager, previousSessionId, primary);
+                runtime.Previous[primary] = SessionSnapshot.FromSessionInfo(previous);
+            }
+            runtime.Previous[peer] = SessionSnapshot.FromSessionInfo(peerSession);
+            var issuer = new RecordingIssuer();
+            var plugin = NewPlugin(manager, bridge, issuer, "server-1");
+            SetPluginConfiguration(plugin, new PluginConfiguration { NotifyOnSyncActions = false });
+            var service = NewService(primary, administrator: true);
+            SetRuntimePlugin(service, plugin);
+
+            var state = service.Get(new GetRoomStateRequest { Id = room.Id });
+            var displayedSessions = ((System.Collections.IEnumerable)state.GetType().GetProperty("Sessions")
+                .GetValue(state)).Cast<object>();
+            Assert.Equal(expectedSessionId != null, GetBoolean(state, "Eligible"));
+            Assert.Equal(expectedSessionId, displayedSessions
+                .Where(session => GetString(session, "UserId") == primary)
+                .Select(session => GetString(session, "SessionId"))
+                .SingleOrDefault());
+
+            var result = service.Post(new ControlRoomRequest { Id = room.Id, Action = "pause" });
+
+            Assert.Null(GetString(result, "Error"));
+            Assert.Equal(expectedSessionId, runtime.Pending.TryGetValue(primary, out var selected)
+                ? selected.SessionId : null);
+            Assert.Equal("peer", runtime.Pending[peer].SessionId);
+            Assert.Equal(expectedSessionId != null ? 2 : 1, issuer.Issued.Count);
         }
 
         private static IDisposable EnterRoomGate(RoomManager manager, string roomId)

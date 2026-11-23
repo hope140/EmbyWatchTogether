@@ -29,6 +29,23 @@ namespace Emby.Plugins.WatchTogether
     public sealed class RoomRuntime
     {
         // Last selected inputs for dispatch-time Stop revocation, under the room gate.
+        private object _observationOwner;
+        internal long LastObservationSequence { get; set; }
+        internal int LastSnapshotFailureGeneration { get; set; }
+        internal int LastSnapshotProtectionGeneration { get; set; }
+        internal DateTimeOffset? PollClockStartedAtUtc { get; set; }
+        internal bool DifferentVideoNoticeSent { get; set; }
+
+        internal void UseObservationOwner(object owner)
+        {
+            if (ReferenceEquals(_observationOwner, owner)) return;
+            _observationOwner = owner;
+            LastObservationSequence = 0;
+            LastSnapshotFailureGeneration = 0;
+            LastSnapshotProtectionGeneration = 0;
+            DifferentVideoNoticeSent = false;
+        }
+
         internal IReadOnlyDictionary<string, SessionSnapshot> CommandSnapshots { get; set; }
         public RoomState State { get; set; } = RoomState.Waiting;
 

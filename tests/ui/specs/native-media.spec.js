@@ -156,6 +156,44 @@ test('慢媒体响应不阻塞下一次State，Waiting后旧片名不能回显',
   await expect(page.locator('.wt-roomCard')).not.toContainText('迟到片名');
 });
 
+test('刷新竞态：旧媒体请求挂起时直接显示新影片', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('.wt-roomMedia strong')).toHaveText('山海之间');
+  await page.evaluate(() => {
+    const fixture = window.__wtFixture;
+    fixture.setMedia('item-a', { SeriesName: '迟到的旧影片', BackdropImageTags: ['old-backdrop'] });
+    fixture.setMedia('item-b', { SeriesName: '当前的新影片', BackdropImageTags: ['new-backdrop'] });
+    const getItem = ApiClient.getItem;
+    ApiClient.getItem = (userId, itemId) => {
+      const request = getItem(userId, itemId);
+      if (itemId !== 'item-a') return request;
+      return request.then(item => new Promise(resolve => {
+        fixture.releaseOldMedia = () => resolve(item);
+      }));
+    };
+  });
+  await refresh(page, true);
+  await expect.poll(() => page.evaluate(() => !!window.__wtFixture.releaseOldMedia)).toBe(true);
+
+  await page.evaluate(() => window.__wtFixture.setState({ SyncItemId: 'item-b', Sessions: [
+    { UserId: 'user-a', ItemId: 'item-b', Online: true },
+    { UserId: 'user-b', ItemId: 'item-b', Online: true }
+  ] }));
+  await refresh(page);
+  const title = page.locator('.wt-roomMedia strong');
+  const backdrop = page.locator('.wt-roomBackdrop');
+  await expect(title).toHaveText('当前的新影片');
+  await expect(backdrop).toHaveAttribute('src', /new-backdrop/);
+
+  await page.evaluate(async () => {
+    window.__wtFixture.releaseOldMedia();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  await expect(title).toHaveText('当前的新影片');
+  await expect(backdrop).toHaveAttribute('src', /new-backdrop/);
+  expect((await mediaCalls(page)).filter(call => call.path.endsWith('/item-b'))).toHaveLength(1);
+});
+
 test('切换Item与房间移除均拒绝旧媒体', async ({ page }) => {
   await open(page);
   await expect(page.locator('.wt-roomMedia')).toContainText('山海之间');
@@ -226,7 +264,7 @@ test('切换三页保持单导航，状态未变时焦点与busy稳定', async (
   await open(page, 'admin-member');
   for (let i = 0; i < 3; i++) {
     for (const name of ['Invite', 'Settings', 'Rooms']) {
-      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V38"]').click();
+      await page.locator('.tabs-viewmenubar a[href*="WatchTogether' + name + 'V39"]').click();
       await expect(page.locator('.tabs-viewmenubar a')).toHaveCount(4);
     }
   }

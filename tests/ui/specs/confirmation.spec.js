@@ -42,6 +42,53 @@ for (const action of ['leave', 'delete', 'resync']) {
   });
 }
 
+test('刷新竞态：结束成功后等待旧列表并补读新列表', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('#wtRooms')).toHaveAttribute('aria-busy', 'false');
+  await page.evaluate(() => {
+    const fixture = window.__wtFixture;
+    clearInterval(fixture.view.view._wtTimer);
+
+    const get = ApiClient.getJSON;
+    fixture.heldRoomReads = [];
+    ApiClient.getJSON = path => {
+      if (!path.startsWith('WatchTogether/Rooms?')) return get(path);
+      return get(path).then(rooms => new Promise(resolve => {
+        fixture.heldRoomReads.push(() => resolve(rooms));
+      }));
+    };
+
+    const fetch = ApiClient.fetch;
+    ApiClient.fetch = async options => {
+      const result = await fetch(options);
+      if (options.type !== 'DELETE') return result;
+      fixture.setRooms([]);
+      return { Deleted: true };
+    };
+    fixture.refresh();
+  });
+  const readCount = () => page.evaluate(() => window.__wtFixture.heldRoomReads.length);
+  await expect.poll(readCount).toBe(1);
+
+  const endRoom = page.locator('[data-act=delete]');
+  await endRoom.click();
+  await page.locator('[data-confirm=ok]').click();
+  await expect.poll(() => page.evaluate(() => window.__wtFixture.toasts)).toEqual(['房间已结束']);
+  await expect(endRoom).toBeDisabled();
+  expect(await readCount()).toBe(1);
+
+  await page.evaluate(() => window.__wtFixture.heldRoomReads[0]());
+  await expect.poll(readCount).toBe(2);
+  await expect(endRoom).toBeDisabled();
+  await endRoom.evaluate(button => button.click());
+  expect(await mutations(page)).toHaveLength(1);
+
+  await page.evaluate(() => window.__wtFixture.heldRoomReads[1]());
+  await expect(page.locator('.wt-roomCard')).toHaveCount(0);
+  expect(await mutations(page)).toHaveLength(1);
+  expect(await readCount()).toBe(2);
+});
+
 test('加载等待与重复点击只显示一个确认', async ({ page }) => {
   await open(page, 'confirm_mode=slow');
   await page.evaluate(() => {

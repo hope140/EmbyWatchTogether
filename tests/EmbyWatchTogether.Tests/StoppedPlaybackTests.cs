@@ -612,8 +612,8 @@ namespace Emby.Plugins.WatchTogether.Tests
             var method = typeof(SessionBridgeCommandIssuer).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance)
                 .Single(m => m.Name.EndsWith(command == "PlayItem" ? "ISourceBoundPlayItemIssuer.TryIssuePlayItem" : "ICancellableCommandIssuer.TryIssue"));
             object[] arguments = command == "PlayItem"
-                ? new object[] { "room", "u1", "u2", target, "43", f.Now, CancellationToken.None, sources, null }
-                : new object[] { "room", "u1", "u2", target, command, (long?)6000000000, f.Now, CancellationToken.None, sources, null };
+                ? new object[] { "room", "u1", "u2", target, "43", f.Now, CancellationToken.None, sources, null, null }
+                : new object[] { "room", "u1", "u2", target, command, (long?)6000000000, f.Now, CancellationToken.None, sources, null, null };
             var accepted = (bool)method.Invoke(issuer, arguments);
             var expected = afterEntry || (!targetStop && command == "Pause");
             Assert.Equal(expected, accepted);
@@ -622,7 +622,7 @@ namespace Emby.Plugins.WatchTogether.Tests
             f.Start(session, playback);
             var fresh = f.Provider.GetSessionSnapshots().ToArray();
             arguments[3] = fresh.Single(s => s.UserId == "u2");
-            arguments[arguments.Length - 2] = fresh;
+            arguments[arguments.Length - 3] = fresh;
             Assert.True((bool)method.Invoke(issuer, arguments));
             Assert.Equal(expected ? 2 : 1, sends);
         }
